@@ -8,22 +8,19 @@ import GemStone from '../components/pixel/GemStone';
 import ChibiAvatar from '../components/field/ChibiAvatar';
 import PixelTree from '../components/field/PixelTree';
 import { getEmotion } from '../data/emotions';
+import { FIELD_SKY, getFieldTimePhase, type FieldPhase } from '../lib/field-time';
 
-function getTimePhase(): 'dawn' | 'afternoon' | 'dusk' {
-  const h = new Date().getHours();
-  if (h >= 6 && h < 12) return 'dawn';
-  if (h >= 12 && h < 18) return 'afternoon';
-  return 'dusk';
-}
-
-
-const SKY = {
-  dawn:      'linear-gradient(180deg, #FF9870 0%, #FFB888 20%, #FFD4A8 45%, #FFF0D0 70%, #E8F0FF 100%)',
-  afternoon: 'linear-gradient(180deg, #4A90D9 0%, #6AABE8 30%, #87CEEB 60%, #C8E8F8 85%, #E0F4F0 100%)',
-  dusk:      'linear-gradient(180deg, #0D0D2B 0%, #1B1B3A 20%, #2D2558 40%, #3D3468 60%, #4A3F6B 75%, #3A3E5B 100%)',
-};
-
-const PALETTE = {
+const PALETTE: Record<FieldPhase, {
+  mountainFar: string[];
+  mountainNear: string[];
+  treeMid: string;
+  grassTop: string;
+  grassMain: string;
+  dirtMain: string;
+  dirtBot: string;
+  grassBlade: string;
+  fogColor: string;
+}> = {
   dawn: {
     mountainFar:  ['#E8C8D8', '#D8B8CC'],
     mountainNear: ['#C8A8C0', '#B898B0'],
@@ -399,12 +396,12 @@ export default function HomeField() {
   const navigate = useNavigate();
   const { todayDrops, fetchToday }          = useFieldStore();
   const { ticketsRemaining, fetchInventory } = useInventoryStore();
-  const [phase, setPhase]       = useState<'dawn' | 'afternoon' | 'dusk'>(getTimePhase);
+  const [phase, setPhase]       = useState<FieldPhase>(getFieldTimePhase);
   const [bagOpen, setBagOpen]   = useState(false);
 
   useEffect(() => { fetchToday(); fetchInventory(); }, [fetchToday, fetchInventory]);
   useEffect(() => {
-    const timer = window.setInterval(() => setPhase(getTimePhase()), 60_000);
+    const timer = window.setInterval(() => setPhase(getFieldTimePhase()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -435,7 +432,7 @@ export default function HomeField() {
       <style>{STYLE}</style>
       <div style={{
         flex: 1, position: 'relative', overflow: 'hidden',
-        background: SKY[phase],
+        background: FIELD_SKY[phase],
         transition: 'background 2s ease',
       }}>
 

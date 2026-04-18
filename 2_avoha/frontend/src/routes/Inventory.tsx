@@ -4,10 +4,13 @@ import { useInventoryStore } from '../stores/inventory-store';
 import GemStone from '../components/pixel/GemStone';
 import { getEmotion } from '../data/emotions';
 import { TIER_NAMES, type GemTier } from '../types/gem';
+import { FIELD_SKY, fieldPageChrome, useFieldTimePhase } from '../lib/field-time';
 
 type Tab = 'gems' | 'stickers';
 
 export default function Inventory() {
+  const phase = useFieldTimePhase();
+  const chrome = fieldPageChrome(phase);
   const [tab, setTab] = useState<Tab>('gems');
   const [selectedGemId, setSelectedGemId] = useState<string | null>(null);
   const { gems, stickers, fetchInventory } = useInventoryStore();
@@ -18,16 +21,20 @@ export default function Inventory() {
   const selectedGem = activeGems.find(g => g.id === selectedGemId);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative',
+      background: FIELD_SKY[phase],
+      transition: 'background 2s ease',
+    }}>
       {/* 헤더 */}
       <div style={{ padding: '20px 16px 0', textAlign: 'center' }}>
-        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 700, color: 'var(--color-ink)' }}>
+        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 700, color: chrome.title }}>
           인벤토리
         </h1>
       </div>
 
       {/* 탭 */}
-      <div style={{ display: 'flex', margin: '16px 16px 0', borderRadius: 'var(--radius-md)', background: 'var(--color-surface-dim)', padding: 3 }}>
+      <div style={{ display: 'flex', margin: '16px 16px 0', borderRadius: 'var(--radius-md)', background: chrome.tabBg, padding: 3 }}>
         {(['gems', 'stickers'] as Tab[]).map(t => (
           <button
             key={t}
@@ -37,8 +44,8 @@ export default function Inventory() {
               padding: '10px 0',
               border: 'none',
               borderRadius: 'var(--radius-sm)',
-              background: tab === t ? 'white' : 'transparent',
-              color: tab === t ? 'var(--color-coral)' : 'var(--color-ink-muted)',
+              background: tab === t ? chrome.tabActiveBg : 'transparent',
+              color: tab === t ? chrome.tabActive : chrome.tabInactive,
               fontWeight: tab === t ? 700 : 400,
               fontSize: 14,
               cursor: 'pointer',
@@ -55,9 +62,9 @@ export default function Inventory() {
       <div className="no-scrollbar" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
         {tab === 'gems' ? (
           activeGems.length === 0 ? (
-            <div className="animate-fade-slide-up" style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--color-ink-muted)' }}>
+            <div className="animate-fade-slide-up" style={{ textAlign: 'center', padding: '60px 20px', color: chrome.muted }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>🌱</div>
-              <p style={{ fontSize: 16, fontWeight: 600 }}>아직 채집한 광물이 없어요</p>
+              <p style={{ fontSize: 16, fontWeight: 600, color: chrome.title }}>아직 채집한 광물이 없어요</p>
               <p style={{ fontSize: 13, marginTop: 8 }}>카카오톡에서 일상을 보내면<br/>감정 광물이 여기에 쌓여요</p>
             </div>
           ) : (
@@ -77,7 +84,7 @@ export default function Inventory() {
                       gap: 6,
                       padding: 10,
                       borderRadius: 'var(--radius-md)',
-                      background: 'var(--color-parchment)',
+                      background: chrome.card,
                       border: `2px solid ${gem.tier === 1 ? 'var(--color-tier-1)' : emotion?.hexColor || '#ccc'}`,
                       borderStyle: gem.tier === 1 ? 'dashed' : 'solid',
                       boxShadow: gem.tier >= 3 ? `0 0 12px ${emotion?.hexColor}40` : 'var(--elevation-1)',
@@ -86,10 +93,10 @@ export default function Inventory() {
                     }}
                   >
                     <GemStone gem={gem} size={36} />
-                    <span style={{ fontSize: 10, color: 'var(--color-ink-muted)', textAlign: 'center' }}>
+                    <span style={{ fontSize: 10, color: chrome.cardTextMuted, textAlign: 'center' }}>
                       {emotion?.nameKo}
                     </span>
-                    <span style={{ fontSize: 9, color: 'var(--color-ink-muted)' }}>
+                    <span style={{ fontSize: 9, color: chrome.cardTextMuted }}>
                       {TIER_NAMES[gem.tier as GemTier]}
                     </span>
                   </div>
@@ -99,9 +106,9 @@ export default function Inventory() {
           )
         ) : (
           stickers.length === 0 ? (
-            <div className="animate-fade-slide-up" style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--color-ink-muted)' }}>
+            <div className="animate-fade-slide-up" style={{ textAlign: 'center', padding: '60px 20px', color: chrome.muted }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>📸</div>
-              <p style={{ fontSize: 16, fontWeight: 600 }}>아직 스티커가 없어요</p>
+              <p style={{ fontSize: 16, fontWeight: 600, color: chrome.title }}>아직 스티커가 없어요</p>
               <p style={{ fontSize: 13, marginTop: 8 }}>카카오톡에서 사진을 보내면<br/>누끼 스티커가 만들어져요</p>
             </div>
           ) : (
@@ -112,7 +119,7 @@ export default function Inventory() {
                   className="animate-scale-pop"
                   style={{
                     animationDelay: `${i * 80}ms`,
-                    background: 'white',
+                    background: chrome.card,
                     borderRadius: 'var(--radius-md)',
                     padding: 10,
                     boxShadow: 'var(--elevation-2)',
@@ -134,7 +141,7 @@ export default function Inventory() {
                   >
                     📸
                   </div>
-                  <p style={{ fontSize: 11, color: 'var(--color-ink-muted)', marginTop: 8 }}>
+                  <p style={{ fontSize: 11, color: chrome.cardTextMuted, marginTop: 8 }}>
                     {sticker.caption || '일상 스티커'}
                   </p>
                 </div>
@@ -153,7 +160,7 @@ export default function Inventory() {
             bottom: 64,
             left: 0,
             right: 0,
-            background: 'white',
+            background: chrome.sheet,
             borderRadius: 'var(--radius-lg) var(--radius-lg) 0 0',
             boxShadow: 'var(--elevation-3)',
             padding: '20px 16px',

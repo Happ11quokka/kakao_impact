@@ -5,6 +5,7 @@ import { EMOTIONS } from '../data/emotions';
 import { RECIPES } from '../data/recipes';
 import { TIER_NAMES, type GemTier } from '../types/gem';
 import GemStone from '../components/pixel/GemStone';
+import { FIELD_SKY, fieldPageChrome, useFieldTimePhase } from '../lib/field-time';
 
 const TIERS: GemTier[] = [1, 2, 3, 4];
 
@@ -16,6 +17,9 @@ const SILHOUETTE_STYLE: Record<string, React.CSSProperties> = {
 };
 
 export default function CollectionBook() {
+  const phase = useFieldTimePhase();
+  const chrome = fieldPageChrome(phase);
+  const isDusk = phase === 'dusk';
   const { gems, fetchInventory } = useInventoryStore();
   useEffect(() => { fetchInventory(); }, [fetchInventory]);
 
@@ -28,19 +32,27 @@ export default function CollectionBook() {
   const progress = Math.round((ownedCount / totalSlots) * 100);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      background: FIELD_SKY[phase],
+      transition: 'background 2s ease',
+    }}>
       {/* 헤더 */}
       <div style={{ padding: '20px 16px 0', textAlign: 'center' }}>
-        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 700 }}>도감</h1>
+        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 700, color: chrome.title }}>도감</h1>
       </div>
 
       {/* 수집률 바 */}
       <div style={{ padding: '16px 16px 0' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--color-ink-muted)', marginBottom: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: chrome.muted, marginBottom: 6 }}>
           <span>수집률</span>
           <span style={{ fontWeight: 700, color: 'var(--color-coral)' }}>{progress}%</span>
         </div>
-        <div style={{ height: 8, borderRadius: 4, background: 'var(--color-surface-dim)', overflow: 'hidden' }}>
+        <div style={{
+          height: 8, borderRadius: 4,
+          background: isDusk ? 'rgba(255,250,244,0.2)' : 'var(--color-surface-dim)',
+          overflow: 'hidden',
+        }}>
           <div
             className="animate-progress"
             style={{
@@ -55,7 +67,7 @@ export default function CollectionBook() {
 
       <div className="no-scrollbar" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
         {/* 감정 광물 그리드 */}
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: 'var(--color-ink)' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: chrome.title }}>
           💎 감정 광물
         </h2>
 
@@ -63,7 +75,7 @@ export default function CollectionBook() {
         <div style={{ display: 'grid', gridTemplateColumns: '80px repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
           <div />
           {TIERS.map(t => (
-            <div key={t} style={{ textAlign: 'center', fontSize: 9, color: 'var(--color-ink-muted)', fontWeight: 600 }}>
+            <div key={t} style={{ textAlign: 'center', fontSize: 9, color: chrome.muted, fontWeight: 600 }}>
               {TIER_NAMES[t]}
             </div>
           ))}
@@ -85,7 +97,7 @@ export default function CollectionBook() {
             {/* 감정 라벨 */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: 4, fontSize: 11,
-              color: 'var(--color-ink)', fontWeight: 500,
+              color: chrome.title, fontWeight: 500,
             }}>
               <div style={{
                 width: 8, height: 8,
@@ -110,7 +122,9 @@ export default function CollectionBook() {
                     alignItems: 'center',
                     justifyContent: 'center',
                     borderRadius: 'var(--radius-sm)',
-                    background: isOwned ? 'var(--color-parchment)' : 'var(--color-surface-dim)',
+                    background: isOwned
+                      ? chrome.card
+                      : (isDusk ? 'rgba(255,250,244,0.16)' : 'var(--color-surface-dim)'),
                     border: isOwned ? `1px solid ${emotion.hexColor}40` : '1px solid transparent',
                   }}
                 >
@@ -132,7 +146,7 @@ export default function CollectionBook() {
         ))}
 
         {/* 특수 레시피 카드 */}
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginTop: 24, marginBottom: 12, color: 'var(--color-ink)' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginTop: 24, marginBottom: 12, color: chrome.title }}>
           🃏 특수 레시피
         </h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
@@ -144,7 +158,9 @@ export default function CollectionBook() {
                 animationDelay: `${i * 60}ms`,
                 padding: 12,
                 borderRadius: 'var(--radius-md)',
-                background: recipe.unlocked ? 'var(--color-parchment)' : 'var(--color-surface-dim)',
+                background: recipe.unlocked
+                  ? chrome.card
+                  : (isDusk ? 'rgba(255,250,244,0.14)' : 'var(--color-surface-dim)'),
                 border: recipe.unlocked ? '1px solid var(--color-amber)' : '1px solid transparent',
                 textAlign: 'center',
                 opacity: recipe.unlocked ? 1 : 0.5,

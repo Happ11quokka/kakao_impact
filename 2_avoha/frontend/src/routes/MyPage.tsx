@@ -2,6 +2,7 @@
 import { useEffect, useMemo } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
 import { MOCK_DAILY_INDICES, MOCK_USER } from '../data/mock-data';
+import { FIELD_SKY, fieldPageChrome, useFieldTimePhase } from '../lib/field-time';
 
 /** 아보하 지수 계산 (PRD 8.3) */
 function calcAvohaIndex(dailyIndices: number[]): number {
@@ -12,6 +13,8 @@ function calcAvohaIndex(dailyIndices: number[]): number {
 }
 
 export default function MyPage() {
+  const phase = useFieldTimePhase();
+  const chrome = fieldPageChrome(phase);
   const { gems, fetchInventory } = useInventoryStore();
   useEffect(() => { fetchInventory(); }, [fetchInventory]);
 
@@ -31,11 +34,15 @@ export default function MyPage() {
   const areaD = `${pathD} L ${graphWidth} ${graphHeight} L 0 ${graphHeight} Z`;
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      background: FIELD_SKY[phase],
+      transition: 'background 2s ease',
+    }}>
       <div className="no-scrollbar" style={{ flex: 1, overflow: 'auto' }}>
         {/* 헤더 */}
         <div style={{ padding: '20px 16px', textAlign: 'center' }}>
-          <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 700 }}>마이페이지</h1>
+          <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 700, color: chrome.title }}>마이페이지</h1>
         </div>
 
         {/* 프로필 */}
@@ -52,7 +59,7 @@ export default function MyPage() {
             🧑‍🌾
           </div>
           <div>
-            <p style={{ fontWeight: 700, fontSize: 18 }}>{MOCK_USER.nickname}</p>
+            <p style={{ fontWeight: 700, fontSize: 18, color: chrome.title }}>{MOCK_USER.nickname}</p>
             <div style={{
               marginTop: 4, fontSize: 12, color: 'var(--color-mint)',
               display: 'flex', alignItems: 'center', gap: 4,
@@ -67,11 +74,11 @@ export default function MyPage() {
         <div style={{
           margin: '0 16px', padding: 20,
           borderRadius: 'var(--radius-lg)',
-          background: 'var(--color-parchment)',
+          background: chrome.card,
           boxShadow: 'var(--elevation-1)',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 700 }}>📊 아보하 지수</h2>
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-ink)' }}>📊 아보하 지수</h2>
             <span style={{
               fontSize: 28, fontWeight: 700,
               color: avohaIndex >= 70 ? 'var(--color-mint)' : avohaIndex >= 40 ? 'var(--color-amber)' : 'var(--color-coral)',
@@ -118,7 +125,7 @@ export default function MyPage() {
               style={{
                 animationDelay: `${i * 80}ms`,
                 padding: 16, borderRadius: 'var(--radius-md)',
-                background: 'var(--color-parchment)',
+                background: chrome.card,
                 textAlign: 'center',
                 boxShadow: 'var(--elevation-1)',
               }}
@@ -132,7 +139,7 @@ export default function MyPage() {
 
         {/* 설정 */}
         <div style={{ padding: '0 16px 40px' }}>
-          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>설정</h2>
+          <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: chrome.title }}>설정</h2>
           {[
             { label: '📦 데이터 내려받기', color: 'var(--color-ink)', danger: false },
             { label: '🔓 로그아웃', color: 'var(--color-ink)', danger: false },
@@ -145,7 +152,7 @@ export default function MyPage() {
                 padding: '14px 16px', marginBottom: 8,
                 borderRadius: 'var(--radius-md)',
                 border: item.danger ? '1px solid var(--color-coral)' : '1px solid var(--color-surface-dim)',
-                background: item.danger ? 'var(--color-coral-light)' : 'var(--color-parchment)',
+                background: item.danger ? 'var(--color-coral-light)' : chrome.card,
                 color: item.color,
                 fontSize: 14, fontWeight: 500,
                 textAlign: 'left', cursor: 'pointer',
