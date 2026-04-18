@@ -68,9 +68,9 @@ LOG_LEVEL=info
 - 동시 처리 2건 (BullMQ 쪽에서 concurrency 제어)
 
 ## 작업 리스트
-- [ ] **RB-1** Dockerfile + requirements.txt (u2net_lite 모델 선로드)
-- [ ] **RB-2** `POST /remove-bg` 엔드포인트 + Pydantic 스키마
-- [ ] **RB-3** 폴백 판정 (confidence threshold)
-- [ ] **RB-4** Volume 마운트 + signed URL 발급
-- [ ] **RB-5** 헬스체크 + 메모리 리크 모니터
+- [x] **RB-1** Dockerfile + requirements.txt (u2net_lite 모델 선로드)
+- [x] **RB-2** `POST /remove-bg` 엔드포인트 + Pydantic 스키마
+- [x] **RB-3** 폴백 판정 (confidence threshold)
+- [x] **RB-4** Volume 마운트 + signed URL 발급
+- [x] **RB-5** 헬스체크 + 메모리 리크 모니터
 - [ ] **RB-6** 샘플 10장 fixture 테스트
