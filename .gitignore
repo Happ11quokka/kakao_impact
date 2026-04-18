@@ -5,3 +5,5 @@ dist/
 .env.*
 !.env.example
 tsconfig.tsbuildinfo
+.DS_Store
+**/.DS_Store

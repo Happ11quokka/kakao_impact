@@ -12,15 +12,16 @@ const tabs = [
 export default function BottomNav() {
   return (
     <nav
-      className="safe-area-bottom"
+      className="safe-area-bottom pixel-panel"
       style={{
         display: 'flex',
         justifyContent: 'space-around',
         alignItems: 'center',
         height: 64,
-        borderTop: '1px solid var(--color-surface-dim)',
-        background: 'var(--color-parchment)',
+        borderTop: '2px solid var(--color-brown)',
+        background: 'var(--color-peach)',
         flexShrink: 0,
+        boxShadow: '0 -2px 0 var(--color-beige)',
       }}
     >
       {tabs.map(tab => (
@@ -34,14 +35,19 @@ export default function BottomNav() {
             alignItems: 'center',
             gap: 2,
             textDecoration: 'none',
-            fontSize: 10,
+            fontSize: 11,
             fontWeight: isActive ? 700 : 400,
-            color: isActive ? 'var(--color-coral)' : 'var(--color-ink-muted)',
+            color: isActive ? 'var(--color-sunshine)' : 'var(--color-brown)',
             transition: 'color var(--duration-fast) var(--easing-out)',
+            fontFamily: 'var(--font-pixel)',
           })}
         >
-          <span style={{ fontSize: 22 }}>{tab.icon}</span>
-          <span>{tab.label}</span>
+          {({ isActive }) => (
+            <>
+              <span style={{ fontSize: 20, filter: isActive ? 'drop-shadow(0 0 2px rgba(255,255,255,0.4))' : 'none' }}>{tab.icon}</span>
+              <span>{tab.label}</span>
+            </>
+          )}
         </NavLink>
       ))}
     </nav>

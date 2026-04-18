@@ -11,7 +11,7 @@ import LoginCallback from './routes/LoginCallback';
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="phone-frame-wrapper">
+      <div className="phone-frame-wrapper pixel-ui">
         <div className="phone-frame-bezel">
           <div className="phone-frame">
             <Routes>
@@ -32,7 +32,7 @@ export default function App() {
 /** 공통 레이아웃: 콘텐츠 + 하단 네비 */
 function PageLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+    <div className="pixel-ui" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
       {children}
       <BottomNav />
     </div>

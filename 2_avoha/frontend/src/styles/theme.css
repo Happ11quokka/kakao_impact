@@ -1,11 +1,26 @@
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&family=Noto+Serif+KR:wght@400;600;700&display=swap');
 @import "tailwindcss";
 
+@font-face {
+  font-family: "DungGeunMo";
+  src: url("https://fastly.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.woff")
+    format("woff");
+  font-weight: normal;
+  font-style: normal;
+}
+
 @theme {
-  /* === Primary: Coral === */
-  --color-coral: #E8614D;
-  --color-coral-dim: #D45440;
-  --color-coral-light: #FFF0ED;
+  /* === Brand Palette === */
+  --color-cream: #FFFAF4;   /* 배경 */
+  --color-sunshine: #F4A836; /* 포인트 */
+  --color-peach: #FDE8C8;   /* 서피스 */
+  --color-brown: #5A3E28;   /* 텍스트 */
+  --color-beige: #F0E0C8;   /* 테두리 */
+
+  /* === Semantic (brand-aligned) === */
+  --color-coral: #F4A836;
+  --color-coral-dim: #DD952E;
+  --color-coral-light: #FFF3DF;
 
   /* === Secondary: Mint === */
   --color-mint: #3AAFA9;
@@ -23,11 +38,11 @@
   --color-pixel-dusk: #3A3E5B;
 
   /* === Text & Card === */
-  --color-ink: #1B1C26;
-  --color-ink-muted: #6B6D7A;
-  --color-parchment: #FBF7EE;
-  --color-surface: #FAF7F4;
-  --color-surface-dim: #F0EBE6;
+  --color-ink: #5A3E28;
+  --color-ink-muted: #8A6A4D;
+  --color-parchment: #FFFAF4;
+  --color-surface: #FDE8C8;
+  --color-surface-dim: #F0E0C8;
 
   /* === 감정별 보석 색상 (10종) === */
   --color-gem-untroubled: #E8EAF0;
@@ -87,13 +102,17 @@ html, body, #root {
 }
 
 body {
-  background-color: #E5DDD6;
+  background-color: var(--color-cream);
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   overscroll-behavior: none;
+  background-image:
+    linear-gradient(0deg, rgba(90, 62, 40, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90, 62, 40, 0.04) 1px, transparent 1px);
+  background-size: 8px 8px;
 }
 
 @media (max-width: 480px) {
@@ -154,6 +173,53 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+.pixel-ui {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.pixel-ui .phone-frame {
+  background:
+    linear-gradient(180deg, var(--color-cream) 0%, var(--color-peach) 100%);
+  box-shadow: inset 0 0 0 3px var(--color-brown), inset 0 0 0 6px var(--color-beige);
+}
+
+.pixel-title {
+  font-family: var(--font-pixel);
+  letter-spacing: 0.4px;
+}
+
+.pixel-ui h1,
+.pixel-ui h2,
+.pixel-ui h3 {
+  font-family: var(--font-pixel);
+  letter-spacing: 0.3px;
+}
+
+.pixel-panel {
+  border: 2px solid var(--color-brown);
+  border-radius: 0;
+  box-shadow:
+    0 0 0 2px var(--color-beige),
+    0 4px 0 #3b2a1f;
+  background-color: var(--color-peach);
+}
+
+.pixel-button {
+  border-radius: 0;
+  border: 2px solid var(--color-brown);
+  box-shadow: 0 3px 0 #3b2a1f;
+  font-family: var(--font-pixel);
+  letter-spacing: 0.2px;
+  background: var(--color-sunshine);
+  color: var(--color-brown);
+}
+
+.pixel-button:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #3b2a1f;
 }
 
 /* === Scrollbar === */

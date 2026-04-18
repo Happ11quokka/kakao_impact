@@ -5,13 +5,13 @@ import type { Sticker } from '../types/sticker';
 
 export const MOCK_GEMS: Gem[] = [
   { id: 'g1', emotionCode: 'joy',          tier: 1, sourceText: '버스 타이밍이 딱 맞았어',       createdAt: '2026-04-17T14:32:00Z', consumedAt: null },
-  { id: 'g2', emotionCode: 'satisfaction',  tier: 1, sourceText: '점심에 먹은 라면이 맛있었다',   createdAt: '2026-04-17T12:15:00Z', consumedAt: null },
-  { id: 'g3', emotionCode: 'serenity',      tier: 1, sourceText: '조용한 카페에서 혼자 커피',     createdAt: '2026-04-17T16:00:00Z', consumedAt: null },
-  { id: 'g4', emotionCode: 'flutter',       tier: 1, sourceText: '주말에 친구 만나기로 했다',     createdAt: '2026-04-17T18:20:00Z', consumedAt: null },
-  { id: 'g5', emotionCode: 'pride',         tier: 2, sourceText: '미루던 정리를 끝냈다',         createdAt: '2026-04-17T10:00:00Z', consumedAt: null, craftedFrom: ['ga', 'gb'] },
-  { id: 'g6', emotionCode: 'untroubled',    tier: 1, sourceText: '오늘도 무탈하게 지나갔다',     createdAt: '2026-04-18T09:00:00Z', consumedAt: null },
-  { id: 'g7', emotionCode: 'solace',        tier: 1, sourceText: '친구가 따뜻한 말을 해줬다',    createdAt: '2026-04-18T11:30:00Z', consumedAt: null },
-  { id: 'g8', emotionCode: 'sadness',       tier: 1, sourceText: '비 오는 날 우산을 안 가져왔다', createdAt: '2026-04-18T13:00:00Z', consumedAt: null },
+  { id: 'g2', emotionCode: 'satisfaction',  tier: 2, sourceText: '점심에 먹은 라면이 맛있었다',   createdAt: '2026-04-17T12:15:00Z', consumedAt: null, craftedFrom: ['m1', 'm2'] },
+  { id: 'g3', emotionCode: 'serenity',      tier: 3, sourceText: '조용한 카페에서 혼자 커피',     createdAt: '2026-04-17T16:00:00Z', consumedAt: null, craftedFrom: ['m3', 'm4'] },
+  { id: 'g4', emotionCode: 'flutter',       tier: 4, sourceText: '주말에 친구 만나기로 했다',     createdAt: '2026-04-17T18:20:00Z', consumedAt: null, craftedFrom: ['m5', 'm6'] },
+  { id: 'g5', emotionCode: 'pride',         tier: 1, sourceText: '미루던 정리를 끝냈다',         createdAt: '2026-04-17T10:00:00Z', consumedAt: null },
+  { id: 'g6', emotionCode: 'untroubled',    tier: 2, sourceText: '오늘도 무탈하게 지나갔다',     createdAt: '2026-04-18T09:00:00Z', consumedAt: null, craftedFrom: ['m7', 'm8'] },
+  { id: 'g7', emotionCode: 'solace',        tier: 3, sourceText: '친구가 따뜻한 말을 해줬다',    createdAt: '2026-04-18T11:30:00Z', consumedAt: null, craftedFrom: ['m9', 'm10'] },
+  { id: 'g8', emotionCode: 'sadness',       tier: 4, sourceText: '비 오는 날 우산을 안 가져왔다', createdAt: '2026-04-18T13:00:00Z', consumedAt: null, craftedFrom: ['m11', 'm12'] },
 ];
 
 export const MOCK_STICKERS: Sticker[] = [
