@@ -31,16 +31,19 @@ agent/
 │   ├── llm/
 │   │   ├── openai.ts
 │   │   ├── gemini.ts
-│   │   └── fallback-chain.ts    # 주→폴백 체인
-│   ├── schemas/                 # Zod
+│   │   └── fallback-chain.ts    # 주→폴백 체인 (Zod 2회 재시도 포함)
+│   ├── schemas/
+│   │   └── index.ts             # Zod 스키마 4종
 │   └── budget/
-│       └── daily-cap.ts         # 일 예산 가드
+│       └── daily-cap.ts         # 일 예산 가드 + Discord 알림
 ├── prompts/
-│   ├── emotion-classifier.md
+│   ├── emotion-classifier.md    # few-shot 10셋 포함
 │   ├── reaction-drafter.md
 │   ├── edge-guard.md
 │   └── sticker-tagger.md
 ├── tests/
+│   └── edge-guard.test.ts       # 룰 기반 테스트 30건
+├── .env.example
 ├── package.json
 └── tsconfig.json
 ```

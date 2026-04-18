@@ -29,13 +29,13 @@ AI는 **자동 응답이 아닌 운영자 보조**. 선-제안 생성 → 운영
 - **Design**: AI 생성 결과물의 시각 표현(카드·배지)은 디자인 가이드 준수
 
 ## 작업 리스트 (통합)
-- [ ] **AI-1** 프롬프트 v0 (감정 분류·리액션·edge) — `agent/prompts/`
-- [ ] **AI-2** OpenAI·Gemini key 환경 분리 + 비용 알람
-- [ ] **AI-3** Few-shot 10셋 (감정 × 스타일)
-- [ ] **AI-4** 에이전트 워커 구조 (BullMQ) — `agent/`
-- [ ] **AI-5** Zod 검증 + 재시도 체인
-- [ ] **AI-6** rembg 컨테이너 빌드·배포 — `rembg/`
-- [ ] **AI-7** 이미지 태거 (Gemini Vision) — `agent/workers/sticker-tagger.ts`
-- [ ] **AI-8** Edge-guard 테스트 케이스 30건
-- [ ] **AI-9** 학습 데이터 export 스크립트 (→ `ops/scripts/export-training-data.ts`)
-- [ ] **AI-10** 프롬프트 정답지 회고 문서 자동 생성
+- [x] **AI-1** 프롬프트 v0 (감정 분류·리액션·edge) — `agent/prompts/`
+- [x] **AI-2** OpenAI·Gemini key 환경 분리 + 비용 알람
+- [x] **AI-3** Few-shot 10셋 (감정 × 스타일)
+- [x] **AI-4** 에이전트 워커 구조 (BullMQ) — `agent/`
+- [x] **AI-5** Zod 검증 + 재시도 체인
+- [x] **AI-6** rembg 컨테이너 빌드·배포 — `rembg/`
+- [x] **AI-7** 이미지 태거 (Gemini Vision) — `agent/workers/sticker-tagger.ts`
+- [x] **AI-8** Edge-guard 테스트 케이스 30건
+- [x] **AI-9** 학습 데이터 export 스크립트 (→ `ops/scripts/export-training-data.ts`)
+- [x] **AI-10** 프롬프트 정답지 회고 문서 자동 생성
