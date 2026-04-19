@@ -11,13 +11,13 @@ design/
 │   ├── typography.md
 │   └── voice-tone.md
 ├── sprites/
-│   ├── avatar/                 # 32×32, 4프레임 idle
-│   ├── gems/                   # 10종 × 4등급 = 40개
-│   ├── particles/              # 세공 8프레임
-│   └── ui-icons/               # Kenney 재가공
+│   ├── avatar/                 # 32×32, 4프레임 idle (.gitkeep)
+│   ├── gems/                   # 10종 × 4등급 = 40개 (+ 참고 PNG)
+│   ├── particles/              # 세공 8프레임 (.gitkeep)
+│   └── ui-icons/               # Kenney 재가공 (.gitkeep)
 ├── wireframes/
-│   ├── W-01-kakao-channel.png
-│   ├── W-02-home-field.png
+│   ├── W-01-kakao-channel.png  # (미작성 시 생략)
+│   ├── W-02-home-field-*.png   # 홈 필드 시간대별 캡처 3종
 │   ├── W-03-inventory.png
 │   ├── W-04-workshop.png
 │   ├── W-05-collection-book.png
@@ -31,6 +31,19 @@ design/
 ├── CREDITS.md                  # Kenney·폰트 저작권 표기
 └── figma-link.md               # Figma 공유 URL
 ```
+
+### 현재 레포에 반영된 파일 (정리 기준일 기준)
+
+| 경로 | 설명 |
+| --- | --- |
+| `wireframes/W-02-home-field-dawn.png` | 홈 필드 · 새벽/아침 톤 (실행 화면 캡처) |
+| `wireframes/W-02-home-field-afternoon.png` | 홈 필드 · 낮 톤 |
+| `wireframes/W-02-home-field-dusk.png` | 홈 필드 · 저녁 톤 |
+| `sprites/gems/감정 원석_4단계.png` | 감정 원석 4단계 참고 이미지 |
+| `brand/tokens.css` · `typography.md` · `voice-tone.md` | README **DE-1** 대응 초안 |
+| `CREDITS.md` · `figma-link.md` | 표기·링크용 스텁 (내용 보강 필요) |
+
+코드 작업은 주로 `2_avoha/frontend/src/routes/HomeField.tsx` 쪽이며, 위 PNG는 디자인 산출물로 `wireframes/`에 두었습니다.
 
 ## 컬러 토큰 (소확행 계승 + 픽셀 확장)
 | 토큰 | HEX | 용도 |
@@ -93,7 +106,7 @@ design/
 `CREDITS.md` 에 팩 버전·다운로드 날짜 기재 필수.
 
 ## 작업 리스트
-- [ ] **DE-1** 컬러·타이포 토큰 CSS 시트 (`brand/tokens.css`)
+- [x] **DE-1** 컬러·타이포 토큰 초안 (`brand/tokens.css`, `typography.md`, `voice-tone.md`) — 프론트 `theme.css`와 맞춰가며 보강
 - [ ] **DE-2** Kenney 팩 다운로드·저작권 표기 (`CREDITS.md`)
 - [ ] **DE-3** 아바타 idle 4프레임 스프라이트시트
 - [ ] **DE-4** 10종 감정 원석 × 4등급(돌멩이/원석/보석/크리스탈) = 40 스프라이트

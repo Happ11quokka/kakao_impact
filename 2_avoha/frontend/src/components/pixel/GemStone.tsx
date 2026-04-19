@@ -1,4 +1,5 @@
-// === GemStone — gem_generator_v2 기반 픽셀 스프라이트 렌더러 ===
+// === GemStone — gem_generator_v2 스타일 4단계 맵 + design/README Hex 기반 팔레트 ===
+// 감정 코드·보석명·Hex 단일 소스: src/data/emotions.ts (README v1.1과 동기화)
 import { getEmotion } from '../../data/emotions';
 import type { Gem } from '../../types/gem';
 
@@ -121,17 +122,6 @@ const MAP_CRYSTAL = [
 
 const MAPS = [MAP_STONE, MAP_ROUGH, MAP_GEM, MAP_CRYSTAL] as const;
 
-const PALETTE_OVERRIDES: Record<string, GemPalette> = {
-  joy: { o: [0x8b, 0x00, 0x00], k: [0xc4, 0x20, 0x20], b: [0xe8, 0x50, 0x50], h1: [0xf8, 0x90, 0x90], h2: [0xff, 0xc0, 0xc0], glow: [0xff, 0x60, 0x60] },
-  satisfaction: { o: [0x7a, 0x48, 0x00], k: [0xc0, 0x70, 0x20], b: [0xe8, 0xa0, 0x30], h1: [0xf8, 0xcc, 0x70], h2: [0xff, 0xe8, 0xa0], glow: [0xff, 0xb0, 0x30] },
-  serenity: { o: [0x00, 0x55, 0x80], k: [0x20, 0x90, 0xc0], b: [0x50, 0xb8, 0xe8], h1: [0x90, 0xd8, 0xf8], h2: [0xc0, 0xee, 0xff], glow: [0x40, 0xc0, 0xff] },
-  flutter: { o: [0x88, 0x00, 0x40], k: [0xc0, 0x40, 0x80], b: [0xf0, 0x80, 0xb0], h1: [0xf8, 0xb0, 0xd0], h2: [0xff, 0xd8, 0xe8], glow: [0xff, 0x80, 0xc0] },
-  pride: { o: [0x80, 0x60, 0x00], k: [0xc0, 0xa0, 0x00], b: [0xf0, 0xd0, 0x20], h1: [0xf8, 0xe8, 0x70], h2: [0xff, 0xf5, 0xb0], glow: [0xff, 0xd8, 0x00] },
-  untroubled: { o: [0x70, 0x70, 0x85], k: [0xa8, 0xa8, 0xbc], b: [0xd0, 0xd0, 0xe4], h1: [0xe8, 0xe8, 0xf8], h2: [0xf8, 0xf8, 0xff], glow: [0xc0, 0xc8, 0xff] },
-  solace: { o: [0x7a, 0x40, 0x30], k: [0xc0, 0x80, 0x60], b: [0xe8, 0xb0, 0x90], h1: [0xf8, 0xd0, 0xb0], h2: [0xff, 0xee, 0xdd], glow: [0xff, 0xc0, 0x90] },
-  sadness: { o: [0x1a, 0x1a, 0x50], k: [0x30, 0x30, 0x80], b: [0x50, 0x60, 0xa0], h1: [0x80, 0x90, 0xd0], h2: [0xb0, 0xc0, 0xf0], glow: [0x60, 0x80, 0xff] },
-};
-
 interface GemStoneProps {
   gem: Gem;
   size?: number;
@@ -139,13 +129,31 @@ interface GemStoneProps {
   className?: string;
 }
 
-function mixHex(hex: string, amount: number): [number, number, number] {
+function parseHexRgb(hex: string): [number, number, number] | null {
   const normalized = hex.replace('#', '');
-  if (normalized.length !== 6) return [200, 200, 200];
-
+  if (normalized.length !== 6) return null;
   const r = parseInt(normalized.slice(0, 2), 16);
   const g = parseInt(normalized.slice(2, 4), 16);
   const b = parseInt(normalized.slice(4, 6), 16);
+  if ([r, g, b].some(n => Number.isNaN(n))) return null;
+  return [r, g, b];
+}
+
+function relativeLuminance([r, g, b]: [number, number, number]): number {
+  const lin = (v: number) => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  const R = lin(r);
+  const G = lin(g);
+  const B = lin(b);
+  return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+}
+
+function mixHex(hex: string, amount: number): [number, number, number] {
+  const parsed = parseHexRgb(hex);
+  if (!parsed) return [200, 200, 200];
+  const [r, g, b] = parsed;
 
   const target = amount >= 0 ? 255 : 0;
   const ratio = Math.abs(amount);
@@ -161,18 +169,33 @@ function rgba(c: [number, number, number], alpha = 1): string {
   return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
 }
 
-function buildPalette(emotionCode: string, hexColor: string): GemPalette {
-  const preset = PALETTE_OVERRIDES[emotionCode];
-  if (preset) return preset;
+function buildPalette(hexColor: string): GemPalette {
+  const base = parseHexRgb(hexColor);
+  if (!base) {
+    return {
+      o: [100, 100, 100],
+      k: [140, 140, 140],
+      b: [200, 200, 200],
+      h1: [230, 230, 230],
+      h2: [255, 255, 255],
+      glow: [220, 220, 220],
+    };
+  }
 
-  // 참고 코드의 O/K/B/H1/H2 관계를 유지하기 위한 자동 팔레트 생성
+  const lum = relativeLuminance(base);
+  const outlineMix = lum > 0.88 ? -0.64 : lum > 0.72 ? -0.58 : lum > 0.45 ? -0.52 : -0.48;
+  const shadowMix = lum > 0.88 ? -0.34 : lum > 0.72 ? -0.28 : -0.22;
+  const h1Mix = lum > 0.9 ? 0.18 : 0.28;
+  const h2Mix = lum > 0.9 ? 0.38 : 0.52;
+  const glowMix = lum > 0.88 ? 0.14 : 0.22;
+
   return {
-    o: mixHex(hexColor, -0.55),
-    k: mixHex(hexColor, -0.2),
-    b: mixHex(hexColor, 0),
-    h1: mixHex(hexColor, 0.3),
-    h2: mixHex(hexColor, 0.55),
-    glow: mixHex(hexColor, 0.2),
+    o: mixHex(hexColor, outlineMix),
+    k: mixHex(hexColor, shadowMix),
+    b: base,
+    h1: mixHex(hexColor, h1Mix),
+    h2: mixHex(hexColor, h2Mix),
+    glow: mixHex(hexColor, glowMix),
   };
 }
 
@@ -181,7 +204,7 @@ export default function GemStone({ gem, size = 40, onClick, className = '' }: Ge
   if (!emotion) return null;
 
   const pmap = MAPS[gem.tier - 1];
-  const palette = buildPalette(emotion.code, emotion.hexColor);
+  const palette = buildPalette(emotion.hexColor);
 
   const colorOf: Record<string, string | null> = {
     '.': null,
