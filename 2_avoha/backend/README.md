@@ -3,11 +3,12 @@
 Kakao 웹훅 수신, 인벤토리·세공·이벤트 API, AI 큐 오케스트레이션. Railway 배포.
 
 ## 스택
-- **런타임**: Node.js 22 + TypeScript 5.7
-- **웹**: Fastify 5 + Zod 스키마
-- **DB**: PostgreSQL (Railway managed) + Drizzle ORM
-- **큐**: Redis + BullMQ
-- **로깅**: Pino → stdout → Railway logs
+- **런타임**: Python 3.12
+- **웹**: FastAPI + uvicorn, pydantic v2 스키마
+- **DB**: PostgreSQL (Railway managed) + SQLAlchemy 2.x (async) + Alembic
+- **큐**: Redis (arq 도입 예정 · 현재는 미도입)
+- **로깅**: structlog (JSON 프로덕션 / 콘솔 개발) → stdout → Railway logs
+- **세션**: Starlette `SessionMiddleware` (itsdangerous 서명 쿠키, `avoha_sid`)
 - **Kakao**: 상담톡 API + 알림톡 (사업자 + 채널 개설 완료)
 
 ## 서비스 구성 (Railway)
@@ -62,25 +63,27 @@ Kakao 웹훅 수신, 인벤토리·세공·이벤트 API, AI 큐 오케스트레
 ```bash
 cd 2_avoha/backend
 cp .env.example .env
-npm install
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
 docker compose up -d postgres redis     # 로컬 dev 전용
-npm run db:migrate
-npm run db:seed                         # emotions, recipes 카탈로그
-npm run dev                             # http://localhost:3000
+python migrate.py                       # alembic upgrade head (또는 drizzle DB 면 stamp)
+python -m app.seed                      # emotions 10종 idempotent upsert
+uvicorn app.main:app --reload --port 8000
 ```
 
 ## 환경변수
 ```
-DATABASE_URL=postgres://avoha:pw@localhost:5432/avoha
+ENV=development
+DATABASE_URL=postgresql+asyncpg://avoha:avoha_dev@localhost:5432/avoha
 REDIS_URL=redis://localhost:6379
 KAKAO_REST_API_KEY=
-KAKAO_CHANNEL_ID=
-KAKAO_ADMIN_KEY=
-JWT_SECRET=
-OPS_ALLOWED_EMAILS=
-REMBG_URL=http://localhost:8000
-DISCORD_OPS_WEBHOOK=
-NODE_ENV=development
+KAKAO_CLIENT_SECRET=
+KAKAO_REDIRECT_URI=http://localhost:8000/auth/kakao/callback
+SESSION_SECRET=<openssl rand -hex 32>
+FRONTEND_URL=http://localhost:5173
+# KAKAO_WEBHOOK_SECRET=
+OPS_ALLOWED_KAKAO_IDS=
+# DISCORD_OPS_WEBHOOK=
 ```
 
 ## 작업 리스트 (PRD 4.6)
