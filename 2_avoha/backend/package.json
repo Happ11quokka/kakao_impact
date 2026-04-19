@@ -12,6 +12,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
+    "db:migrate": "node dist/db/migrate.js",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx --env-file=.env src/db/seed.ts",
     "db:reset": "tsx --env-file=.env src/db/reset.ts"
