@@ -16,6 +16,7 @@ from app.services.kakao import (
     exchange_kakao_token,
     fetch_kakao_user_info,
 )
+from app.services.tokens import issue_token
 from app.services.users import upsert_kakao_user
 
 router = APIRouter()
@@ -66,9 +67,13 @@ async def kakao_callback(
     request.session["userId"] = str(user.id)
     request.session["kakaoId"] = user.kakao_id
 
+    # Cross-domain 쿠키 차단(`up.railway.app` PSL) 대응: 서명된 bearer 토큰을
+    # URL fragment 로 전달 → 프론트가 localStorage 에 저장 후 Authorization 헤더로 사용.
+    token = issue_token(str(user.id), user.kakao_id)
+
     logger.info("oauth login success", kakao_id=user.kakao_id, user_id=str(user.id))
     return RedirectResponse(
-        f"{settings.FRONTEND_URL.rstrip('/')}/login/callback",
+        f"{settings.FRONTEND_URL.rstrip('/')}/login/callback#token={token}",
         status_code=302,
     )
 

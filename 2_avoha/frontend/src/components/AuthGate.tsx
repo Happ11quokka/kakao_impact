@@ -1,6 +1,7 @@
 // === AuthGate — 세션 확인 후 자식 렌더, 미인증이면 /login 으로 ===
 import { useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
+import { api } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
 
 interface Props {
@@ -13,6 +14,11 @@ export default function AuthGate({ children }: Props) {
 
   useEffect(() => {
     if (status === 'idle') {
+      // 토큰 없이 /me 쿼리해봤자 401 → 바로 /login 으로.
+      if (!api.getToken()) {
+        useAuthStore.setState({ status: 'unauthenticated' });
+        return;
+      }
       void fetchMe();
     }
   }, [status, fetchMe]);

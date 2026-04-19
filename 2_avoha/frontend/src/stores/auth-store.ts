@@ -49,6 +49,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch {
       /* 서버 호출 실패해도 로컬 상태는 비움 */
     }
+    api.setToken(null);
     set({ user: null, tickets: null, status: 'unauthenticated' });
   },
 
