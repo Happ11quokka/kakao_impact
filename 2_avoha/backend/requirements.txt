@@ -11,3 +11,4 @@ sse-starlette==2.2.1
 itsdangerous==2.2.0
 structlog==25.1.0
 python-multipart==0.0.20
+sentry-sdk[fastapi]==2.20.0

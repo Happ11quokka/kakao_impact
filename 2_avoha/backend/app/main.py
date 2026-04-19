@@ -13,6 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import settings
 from app.db.base import engine
 from app.logging import configure_logging, logger
+from app.observability import init_sentry
 from app.routes import (
     auth,
     crafting,
@@ -28,11 +29,12 @@ from app.routes import (
 from app.services.redis import close_redis
 
 configure_logging()
+init_sentry()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    logger.info("startup", env=settings.ENV, port=settings.PORT)
+    logger.info("startup", env=settings.ENV, port=settings.PORT, sentry=bool(settings.SENTRY_DSN))
     try:
         yield
     finally:

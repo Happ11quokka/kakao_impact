@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     KAKAO_WEBHOOK_SECRET: str | None = None
     OPS_ALLOWED_KAKAO_IDS: str = ""
     DISCORD_OPS_WEBHOOK: str | None = None
+    SENTRY_DSN: str | None = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
 
     @field_validator("SESSION_SECRET")
     @classmethod
