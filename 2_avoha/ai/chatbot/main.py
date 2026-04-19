@@ -414,11 +414,22 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         ))
     VALID_GEMS = set(EMOTION_TO_GEM.values())
     valid_gems = [g for g in (result or []) if g in VALID_GEMS]
+
+    # 사진+텍스트 여부 확인
+    photo_data = pending_photo.get(user_id)
+    has_photo = bool(photo_data and datetime.now() - photo_data["time"] <= PHOTO_TIMEOUT)
+    image_url = photo_data["url"] if has_photo else None
+
     if not valid_gems:
+        if user_id in pending_photo:
+            del pending_photo[user_id]
+        # 원본 텍스트 보존 — 감정 버튼 선택 시 record_text로 사용
+        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url}
         fail_count = classify_fail_count.get(user_id, 0) + 1
         classify_fail_count[user_id] = fail_count
         if fail_count >= 2:
             classify_fail_count[user_id] = 0
+            del pending_gem[user_id]
             background_tasks.add_task(
                 send_alert_email,
                 "[닥토공방] 감정 분류 2회 실패 - 운영자 개입 필요",
@@ -435,10 +446,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             show_emotion_buttons=True
         ))
 
-    # 사진+텍스트 여부 확인
-    photo_data = pending_photo.get(user_id)
-    has_photo = bool(photo_data and datetime.now() - photo_data["time"] <= PHOTO_TIMEOUT)
-    image_url = photo_data["url"] if has_photo else None
     if has_photo:
         del pending_photo[user_id]
     elif user_id in pending_photo:

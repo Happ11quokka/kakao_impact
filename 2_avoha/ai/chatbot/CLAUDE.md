@@ -28,7 +28,7 @@ venv\Scripts\pip install -r requirements.txt
 **인메모리 상태 (서버 재시작 시 초기화):**
 - `user_count` — 유저별 하루 5회 채집권 카운트
 - `pending_photo` — 사진 전송 후 텍스트 대기 상태 `{"time": datetime, "url": str}` (10분 타임아웃)
-- `pending_gem` — AI 분류 후 저장 대기 상태 `{"gem": str, "text": str, "has_photo": bool, "image_url": str|None}`
+- `pending_gem` — 저장 대기 상태 `{"gem": str|None, "text": str, "has_photo": bool, "image_url": str|None}` (분류 실패 시 gem=None으로 원본 텍스트 보존)
 - `pending_emotion_selection` — 복수 감정 감지 후 선택 대기 상태 `{"emotions": [emotion_word], "text": str, "has_photo": bool, "image_url": str|None}`
 - `classify_fail_count` — 유저별 감정 분류 연속 실패 횟수 (2회 시 운영자 알림)
 
@@ -38,22 +38,22 @@ venv\Scripts\pip install -r requirements.txt
 3. "저장하기" → pending_gem 꺼내 채집권 차감 후 Supabase 저장
 4. 감정 퀵버튼 선택 (`EMOTION_TO_GEM` 매칭):
    - `pending_emotion_selection` 중이면 → 선택 감정으로 pending_gem 등록
-   - `pending_gem` 있으면 → 원석 교체
-   - 그 외 → 즉시 저장 (분류 실패 직접 선택)
+   - `pending_gem` 있으면 → 원석 교체 (gem=None이면 분류 실패 후 첫 선택)
+   - 그 외(감정 단어 직접 입력) → 즉시 저장
 5. 도감 조회 ("도감")
 6. 원석 조회 ("내 원석", "원석 보기", "가방", "인벤토리")
 7. 이미지 URL 감지 → `pending_photo` 등록 + 텍스트 유도 (버튼 숨김)
 8. AI 감정 분류 (`classify_emotion`) — timeout=4s (카카오 스킬 5초 제한)
    - `NOT_RECORD` 반환 시 → 더 자세히 적도록 안내
    - `TIMEOUT` 반환 시 → 타임아웃 안내
-   - 분류 실패 시 → 퀵버튼 노출, 2회 연속 실패 시 운영자 이메일 알림
+   - 분류 실패 시 → pending_gem에 원본 텍스트 보존(gem=None) + 퀵버튼 노출, 2회 연속 실패 시 운영자 이메일 알림
 9. 복수 감정 감지 시 → `pending_emotion_selection` 등록 + 감지된 감정만 퀵버튼 노출
 10. 단일 감정 → `pending_gem` 등록 + "저장하기/다른 감정 선택" 버튼 노출
 11. 저장 완료 → `kakao_save_complete()` (basicCard + 웹링크 버튼)
 
 **채집권 차감 시점:**
-- "저장하기" 클릭 시 (AI 분류 시점이 아님)
-- 분류 실패 후 퀵버튼 직접 선택 시
+- "저장하기" 클릭 시 (AI 분류 시점이 아님, 분류 실패 후 감정 선택 포함)
+- 감정 단어 직접 입력 시 (pending_gem 없는 경우)
 
 **카카오 응답 포맷:**
 - 텍스트: `simpleText`
