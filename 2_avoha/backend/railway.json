@@ -5,7 +5,7 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "node dist/db/migrate.js && node dist/server.js",
+    "startCommand": "node dist/db/migrate.js && node dist/db/seed.js && node dist/server.js",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
