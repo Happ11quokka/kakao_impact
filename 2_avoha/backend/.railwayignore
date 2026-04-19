@@ -1,7 +1,9 @@
-dist/
-node_modules/
-개발로그/
-docker-compose.yml
+__pycache__/
+*.pyc
+.venv/
+venv/
 .env
 .env.local
+개발로그/
+docker-compose.yml
 *.log
