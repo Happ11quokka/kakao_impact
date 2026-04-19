@@ -15,7 +15,7 @@ export default function LoginCallback() {
       if (user) {
         navigate('/', { replace: true });
       } else {
-        navigate('/?login=failed', { replace: true });
+        navigate('/login?error=failed', { replace: true });
       }
     })();
     return () => {

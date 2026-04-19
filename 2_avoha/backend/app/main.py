@@ -50,7 +50,9 @@ app.add_middleware(
     secret_key=settings.SESSION_SECRET,
     session_cookie="avoha_sid",
     max_age=60 * 60 * 24 * 7,
-    same_site="lax",
+    # 프로덕션은 프론트와 백엔드 도메인이 달라서 cross-site fetch(credentials:include)
+    # 에 쿠키가 실리려면 SameSite=None + Secure 필요. 로컬은 lax + 평문.
+    same_site="none" if settings.is_prod else "lax",
     https_only=settings.is_prod,
 )
 
