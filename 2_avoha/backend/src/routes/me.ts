@@ -3,16 +3,13 @@ import type { FastifyInstance } from "fastify";
 
 import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
+import { requireSession } from "../lib/auth-guard.js";
 import { getTodayTickets } from "../lib/tickets.js";
 
 export async function meRoutes(app: FastifyInstance) {
   app.get("/me", async (req, reply) => {
-    const userId = req.session.get("userId");
-    if (!userId) {
-      return reply.status(401).send({
-        error: { message: "UNAUTHENTICATED", code: "UNAUTHENTICATED" },
-      });
-    }
+    const userId = await requireSession(req, reply);
+    if (!userId) return;
 
     const [user] = await db
       .select({

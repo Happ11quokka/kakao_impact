@@ -1,12 +1,23 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import fastifyCookie from "@fastify/cookie";
+import fastifyCors from "@fastify/cors";
 import fastifySecureSession from "@fastify/secure-session";
 
 import { env, isProd } from "./env.js";
+import { pgClient } from "./db/client.js";
+import { closeQueue } from "./lib/queue.js";
+import { closeRedis } from "./lib/redis.js";
 import { loggerOptions } from "./logger.js";
 import { healthRoutes } from "./routes/health.js";
 import { authRoutes } from "./routes/auth.js";
+import { craftingRoutes } from "./routes/crafting.js";
+import { eventsRoutes } from "./routes/events.js";
+import { fieldRoutes } from "./routes/field.js";
+import { inventoryRoutes } from "./routes/inventory.js";
 import { meRoutes } from "./routes/me.js";
+import { opsRoutes } from "./routes/ops.js";
+import { sseRoutes } from "./routes/sse.js";
+import { webhookRoutes } from "./routes/webhook.js";
 
 import "./types/session.js";
 
@@ -16,6 +27,10 @@ export async function buildServer(): Promise<FastifyInstance> {
     trustProxy: isProd,
   });
 
+  await app.register(fastifyCors, {
+    origin: env.FRONTEND_URL,
+    credentials: true,
+  });
   await app.register(fastifyCookie);
   await app.register(fastifySecureSession, {
     key: Buffer.from(env.SESSION_SECRET, "hex"),
@@ -43,6 +58,19 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(meRoutes);
+  await app.register(webhookRoutes);
+  await app.register(inventoryRoutes);
+  await app.register(craftingRoutes);
+  await app.register(opsRoutes);
+  await app.register(sseRoutes);
+  await app.register(eventsRoutes);
+  await app.register(fieldRoutes);
+
+  app.addHook("onClose", async () => {
+    await closeQueue();
+    await closeRedis();
+    await pgClient.end({ timeout: 5 });
+  });
 
   return app;
 }

@@ -37,18 +37,29 @@ export const collectionTickets = pgTable(
 
 // content_type: 'text' | 'image' | 'mixed' (v1.1)
 // status: 'pending' | 'proposed' | 'confirmed' | 'rejected'
-export const kakaoMessages = pgTable("kakao_messages", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").references(() => users.id),
-  receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
-  contentType: text("content_type").notNull(),
-  body: text("body"),
-  mediaUrl: text("media_url"),
-  status: text("status").notNull().default("pending"),
-  aiSuggestion: jsonb("ai_suggestion"),
-  operatorId: uuid("operator_id"),
-  finalizedAt: timestamp("finalized_at", { withTimezone: true }),
-});
+// provider_*: Kakao Biz 채널 식별자 (OAuth kakao_id 와는 별개; 매핑은 운영 콘솔에서 보정)
+export const kakaoMessages = pgTable(
+  "kakao_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id),
+    receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+    contentType: text("content_type").notNull(),
+    body: text("body"),
+    mediaUrl: text("media_url"),
+    status: text("status").notNull().default("pending"),
+    aiSuggestion: jsonb("ai_suggestion"),
+    operatorId: uuid("operator_id"),
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    providerMessageId: text("provider_message_id").unique(),
+    providerUserKey: text("provider_user_key"),
+    raw: jsonb("raw"),
+  },
+  (t) => [
+    index("kakao_messages_status_received_at_idx").on(t.status, t.receivedAt),
+    index("kakao_messages_provider_user_key_idx").on(t.providerUserKey),
+  ],
+);
 
 // category: 'calm' | 'happy' | 'negative' (v1.1)
 export const emotions = pgTable("emotions", {

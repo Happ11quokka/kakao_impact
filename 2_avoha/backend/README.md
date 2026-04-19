@@ -40,15 +40,16 @@ Kakao 웹훅 수신, 인벤토리·세공·이벤트 API, AI 큐 오케스트레
 ## API 엔드포인트
 | 유저용 | 운영자용 |
 |---|---|
-| `GET /auth/kakao/callback` | `POST /webhook/kakao` |
-| `GET /me` | `GET /ops/queue` |
-| `GET /inventory/gems` | `POST /ops/messages/:id/confirm` |
+| `GET /auth/kakao/login` · `/callback` | `POST /webhook/kakao` |
+| `GET /me` | `GET /ops/queue?status=pending` |
+| `GET /inventory/gems?emotion=&tier=` | `POST /ops/messages/:id/confirm` |
 | `GET /inventory/stickers` | `POST /ops/messages/:id/reject` |
 | `POST /crafting/combine` | `GET /ops/dashboard-metrics` |
 | `GET /crafting/recipes` | |
 | `GET /field/today` | |
 | `GET /sse/inventory` | |
 | `POST /events` | |
+| `GET /health` · `/health/ready` | |
 
 ## 인접 파트 인터페이스
 - **Frontend**: REST + SSE (위 표)
@@ -84,17 +85,17 @@ NODE_ENV=development
 
 ## 작업 리스트 (PRD 4.6)
 - [ ] **BE-1** Railway 프로젝트 + 서비스 6개 프로비저닝 + 도메인
-- [ ] **BE-2** Postgres 스키마 마이그레이션 + seed
-- [ ] **BE-3** Fastify 스캐폴드 + Kakao OAuth
-- [ ] **BE-4** Kakao webhook + Redis 큐 publish
+- [x] **BE-2** Postgres 스키마 마이그레이션 + seed
+- [x] **BE-3** Fastify 스캐폴드 + Kakao OAuth
+- [x] **BE-4** Kakao webhook + Redis 큐 publish *(BullMQ `emotion-queue`)*
 - [ ] **BE-5** (→ ai/agent) 워커 연동 확인
-- [ ] **BE-6** 운영 콘솔 API (`/ops/*`) + SSE
-- [ ] **BE-7** 인벤토리·세공 API + 트랜잭션 안전
-- [ ] **BE-8** 이벤트 로깅·Metabase 연결
+- [x] **BE-6** 운영 콘솔 API (`/ops/*`) + SSE *(인메모리 버스, 분산 대비 Redis Pub/Sub 교체 여지)*
+- [x] **BE-7** 인벤토리·세공 API + 트랜잭션 안전 *(FOR UPDATE 재료 락)*
+- [x] **BE-8** 이벤트 로깅 (`POST /events`, `GET /field/today`) · Metabase는 별도
 - [ ] **BE-9** rembg 연결 + 폴라로이드 폴백
 - [ ] **BE-10** 알림톡 템플릿 승인·발송 (08/18시)
 - [ ] **BE-11** 관리자 재지급·데이터 삭제 스크립트
-- [ ] **BE-12** 헬스체크·Discord 알림
+- [x] **BE-12** 헬스체크 (`/health/ready` = DB+Redis ping) · Discord notify 헬퍼
 
 ## 트랜잭션 주의 포인트
 - **세공**: 재료 gem의 `consumed_at` 업데이트 + 신규 gem insert + `crafting_events` insert 를 **한 트랜잭션** 내. 재료가 이미 소모됐는지 `FOR UPDATE` 로 체크
