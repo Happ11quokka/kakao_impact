@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx --env-file=.env --watch src/server.ts",
     "build": "tsc",
-    "start": "node --env-file-if-exists=.env dist/server.js",
+    "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
