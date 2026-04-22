@@ -6,6 +6,7 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
+import psycopg2
 
 load_dotenv()
 
@@ -16,6 +17,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ALERT_EMAIL = os.getenv("ALERT_EMAIL")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+RAILWAY_DATABASE_URL = os.getenv("RAILWAY_DATABASE_URL")
 
 app = FastAPI()
 
@@ -100,6 +102,7 @@ def classify_emotion(text: str) -> list[str] | str | None:
 
 
 def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_url: str = None, ai_gems: str = None):
+    # Supabase 저장
     try:
         data = {
             "user_id": user_id,
@@ -122,7 +125,25 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
             timeout=5,
         )
     except Exception as e:
-        print(f"[save_gem error] {e}")
+        print(f"[save_gem supabase error] {e}")
+
+    # Railway DB 저장
+    if RAILWAY_DATABASE_URL:
+        try:
+            conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO gems (user_id, gem, record_text, has_photo, image_url, ai_gems)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (user_id, gem, record_text, has_photo, image_url, ai_gems),
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"[save_gem railway error] {e}")
 
 
 def get_gems(user_id: str) -> list:
@@ -239,9 +260,10 @@ def kakao_response(text: str, show_emotion_buttons: bool = False, hide_buttons: 
     return result
 
 
-def kakao_save_complete(gem: str) -> dict:
+def kakao_save_complete(gem: str, user_id: str = "") -> dict:
     emotion = GEM_TO_EMOTION.get(gem, "")
     gem_label = f"{gem}({emotion})" if emotion else gem
+    link_url = f"{WEB_URL}?chatbot_id={user_id}" if user_id else WEB_URL
     card = {
         "title": f"✨ {gem_label} 원석 채집 완료!",
         "description": "일상 속 순간을 원석으로 저장했어요.\n오늘 주운 원석은 가방에서 확인해볼 수 있어요!",
@@ -249,7 +271,7 @@ def kakao_save_complete(gem: str) -> dict:
             {
                 "action": "webLink",
                 "label": "닥토 공방 열기 🌐",
-                "webLinkUrl": WEB_URL,
+                "webLinkUrl": link_url,
             }
         ],
     }
@@ -350,7 +372,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             ))
         background_tasks.add_task(save_gem, user_id, data["gem"], data["text"], data["has_photo"], data.get("image_url"), data.get("ai_gems"))
         del pending_gem[user_id]
-        return JSONResponse(kakao_save_complete(data["gem"]))
+        return JSONResponse(kakao_save_complete(data["gem"], user_id))
 
     # 퀵 버튼으로 감정 선택 (복수 감정 확인 중 / 다른 감정 선택 중 / 분류 실패 시 직접 선택)
     if utterance in EMOTION_TO_GEM:
