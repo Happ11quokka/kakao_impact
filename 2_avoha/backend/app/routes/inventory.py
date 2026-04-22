@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
@@ -8,6 +9,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChatbotRecord, Gem, Sticker, User
 from app.deps import get_db, require_user
+
+
+def _iso_utc(dt: datetime | None) -> str | None:
+    """timestamp without timezone(Postgres 기본) 컬럼은 naive datetime 으로 오기 때문에
+    그대로 isoformat() 하면 'Z' 가 안 붙어 브라우저가 LOCAL 로 파싱한다(KST 기준 9시간
+    어긋남). UTC 로 명시해서 'Z' 붙여 반환."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
 
 router = APIRouter()
 
@@ -90,7 +104,7 @@ async def list_chatbot_records(
                 "hasPhoto": r.has_photo,
                 "imageUrl": r.image_url,
                 "aiGems": r.ai_gems,
-                "createdAt": r.created_at.isoformat() if r.created_at else None,
+                "createdAt": _iso_utc(r.created_at),
             }
             for r in rows
         ]
