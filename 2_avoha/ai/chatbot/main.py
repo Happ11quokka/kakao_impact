@@ -263,7 +263,7 @@ def kakao_response(text: str, show_emotion_buttons: bool = False, hide_buttons: 
 def kakao_save_complete(gem: str, user_id: str = "") -> dict:
     emotion = GEM_TO_EMOTION.get(gem, "")
     gem_label = f"{gem}({emotion})" if emotion else gem
-    link_url = f"{WEB_URL}?chatbot_id={user_id}" if user_id else WEB_URL
+    link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
     card = {
         "title": f"✨ {gem_label} 원석 채집 완료!",
         "description": "일상 속 순간을 원석으로 저장했어요.\n오늘 주운 원석은 가방에서 확인해볼 수 있어요!",
