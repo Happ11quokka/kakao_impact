@@ -134,7 +134,7 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
             cur = conn.cursor()
             cur.execute(
                 """
-                INSERT INTO gems (user_id, gem, record_text, has_photo, image_url, ai_gems)
+                INSERT INTO chatbot (user_id, gem, record_text, has_photo, image_url, ai_gems)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (user_id, gem, record_text, has_photo, image_url, ai_gems),
