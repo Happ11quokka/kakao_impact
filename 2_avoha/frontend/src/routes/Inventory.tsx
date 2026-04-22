@@ -1,12 +1,27 @@
-// === Inventory 화면 — 광물/스티커 보관함 ===
+// === Inventory 화면 — 광물/스티커/챗봇 기록 보관함 ===
 import { useEffect, useState } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
 import GemStone from '../components/pixel/GemStone';
 import { getEmotion } from '../data/emotions';
 import { TIER_NAMES, type GemTier } from '../types/gem';
 import { FIELD_SKY, fieldPageChrome, useFieldTimePhase } from '../lib/field-time';
+import { api, ApiError, type ChatbotRecordDto } from '../lib/api';
 
-type Tab = 'gems' | 'stickers';
+type Tab = 'gems' | 'stickers' | 'chatbot';
+
+// 챗봇(Openbuilder) 원석명 → 내부 emotion code 매핑 (frontend/src/data/emotions.ts 기준).
+const GEM_NAME_TO_EMOTION_CODE: Record<string, string> = {
+  월장석: 'untroubled',
+  아쿠아마린: 'serenity',
+  황수정: 'pride',
+  루비: 'joy',
+  앰버: 'satisfaction',
+  로즈쿼츠: 'flutter',
+  사파이어: 'sadness',
+  가넷: 'annoyance',
+  연수정: 'regret',
+  오팔: 'solace',
+};
 
 export default function Inventory() {
   const phase = useFieldTimePhase();
@@ -15,7 +30,25 @@ export default function Inventory() {
   const [selectedGemId, setSelectedGemId] = useState<string | null>(null);
   const { gems, stickers, fetchInventory } = useInventoryStore();
 
-  useEffect(() => { fetchInventory(); }, [fetchInventory]);
+  const [chatbotRecords, setChatbotRecords] = useState<ChatbotRecordDto[]>([]);
+  const [chatbotError, setChatbotError] = useState<string | null>(null);
+  const [chatbotLoaded, setChatbotLoaded] = useState(false);
+
+  useEffect(() => {
+    fetchInventory();
+    api
+      .chatbotRecords()
+      .then((res) => {
+        setChatbotRecords(res.records);
+        setChatbotError(null);
+      })
+      .catch((err) => {
+        setChatbotError(
+          err instanceof ApiError ? `${err.status} ${err.code}` : '챗봇 기록을 불러오지 못했어요',
+        );
+      })
+      .finally(() => setChatbotLoaded(true));
+  }, [fetchInventory]);
 
   const activeGems = gems.filter(g => !g.consumedAt);
   const selectedGem = activeGems.find(g => g.id === selectedGemId);
@@ -35,32 +68,151 @@ export default function Inventory() {
 
       {/* 탭 */}
       <div style={{ display: 'flex', margin: '16px 16px 0', borderRadius: 'var(--radius-md)', background: chrome.tabBg, padding: 3 }}>
-        {(['gems', 'stickers'] as Tab[]).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              flex: 1,
-              padding: '10px 0',
-              border: 'none',
-              borderRadius: 'var(--radius-sm)',
-              background: tab === t ? chrome.tabActiveBg : 'transparent',
-              color: tab === t ? chrome.tabActive : chrome.tabInactive,
-              fontWeight: tab === t ? 700 : 400,
-              fontSize: 14,
-              cursor: 'pointer',
-              transition: 'all var(--duration-fast) var(--easing-out)',
-              boxShadow: tab === t ? 'var(--elevation-1)' : 'none',
-            }}
-          >
-            {t === 'gems' ? `🪨 광물 (${activeGems.length})` : `🖼️ 스티커 (${stickers.length})`}
-          </button>
-        ))}
+        {(['gems', 'stickers', 'chatbot'] as Tab[]).map(t => {
+          const label =
+            t === 'gems'
+              ? `🪨 광물 (${activeGems.length})`
+              : t === 'stickers'
+              ? `🖼️ 스티커 (${stickers.length})`
+              : `💬 챗봇 (${chatbotRecords.length})`;
+          return (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                flex: 1,
+                padding: '10px 0',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                background: tab === t ? chrome.tabActiveBg : 'transparent',
+                color: tab === t ? chrome.tabActive : chrome.tabInactive,
+                fontWeight: tab === t ? 700 : 400,
+                fontSize: 13,
+                cursor: 'pointer',
+                transition: 'all var(--duration-fast) var(--easing-out)',
+                boxShadow: tab === t ? 'var(--elevation-1)' : 'none',
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {/* 콘텐츠 */}
       <div className="no-scrollbar" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        {tab === 'gems' ? (
+        {tab === 'chatbot' ? (
+          !chatbotLoaded ? (
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: chrome.muted }}>
+              <div className="animate-float" style={{ fontSize: 48, marginBottom: 12 }}>💬</div>
+              <p style={{ fontSize: 14 }}>챗봇 기록 불러오는 중...</p>
+            </div>
+          ) : chatbotError ? (
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: chrome.muted }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div>
+              <p style={{ fontSize: 14, color: chrome.title }}>챗봇 기록 불러오기 실패</p>
+              <p style={{ fontSize: 12, marginTop: 6 }}>{chatbotError}</p>
+            </div>
+          ) : chatbotRecords.length === 0 ? (
+            <div className="animate-fade-slide-up" style={{ textAlign: 'center', padding: '60px 20px', color: chrome.muted }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>🤖</div>
+              <p style={{ fontSize: 16, fontWeight: 600, color: chrome.title }}>아직 챗봇 기록이 없어요</p>
+              <p style={{ fontSize: 13, marginTop: 8 }}>
+                카카오톡 닥토공방에서 일상을 보내면
+                <br />
+                여기에 차곡차곡 쌓여요 💎
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {chatbotRecords.map((rec, i) => {
+                const emoCode = GEM_NAME_TO_EMOTION_CODE[rec.gem];
+                const emotion = emoCode ? getEmotion(emoCode) : null;
+                const dt = new Date(rec.createdAt);
+                const dtStr = dt.toLocaleString('ko-KR', {
+                  month: 'numeric',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+                return (
+                  <div
+                    key={rec.id}
+                    className="animate-fade-slide-up"
+                    style={{
+                      animationDelay: `${i * 40}ms`,
+                      display: 'flex',
+                      gap: 12,
+                      padding: 12,
+                      borderRadius: 'var(--radius-md)',
+                      background: chrome.card,
+                      border: `2px solid ${emotion?.hexColor ?? '#E0D8CC'}`,
+                      boxShadow: 'var(--elevation-1)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        flexShrink: 0,
+                        borderRadius: 'var(--radius-sm)',
+                        background: emotion?.hexColor ? `${emotion.hexColor}22` : '#F8F0E8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 22,
+                        border: `1px solid ${emotion?.hexColor ?? '#D8CCBA'}40`,
+                      }}
+                    >
+                      {rec.hasPhoto && rec.imageUrl ? (
+                        <img
+                          src={rec.imageUrl}
+                          alt="사진"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--radius-sm)' }}
+                        />
+                      ) : (
+                        '💎'
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: chrome.title }}>
+                          {rec.gem}
+                        </span>
+                        {emotion?.nameKo && (
+                          <span style={{ fontSize: 11, color: chrome.cardTextMuted }}>
+                            ({emotion.nameKo})
+                          </span>
+                        )}
+                        <span style={{ fontSize: 10, color: chrome.cardTextMuted, marginLeft: 'auto' }}>
+                          {dtStr}
+                        </span>
+                      </div>
+                      {rec.recordText && (
+                        <p
+                          style={{
+                            fontSize: 12,
+                            color: chrome.cardTextMuted,
+                            marginTop: 4,
+                            lineHeight: 1.5,
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {rec.recordText}
+                        </p>
+                      )}
+                      {rec.aiGems && rec.aiGems !== rec.gem && (
+                        <p style={{ fontSize: 10, color: chrome.cardTextMuted, marginTop: 4, opacity: 0.7 }}>
+                          AI 초기 판단: {rec.aiGems}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : tab === 'gems' ? (
           activeGems.length === 0 ? (
             <div className="animate-fade-slide-up" style={{ textAlign: 'center', padding: '60px 20px', color: chrome.muted }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>🌱</div>

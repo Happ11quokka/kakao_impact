@@ -1,6 +1,7 @@
-// === Login — 카카오 로그인 진입 화면 ===
-import { useSearchParams } from 'react-router-dom';
-import { api } from '../lib/api';
+// === Login — 카카오 로그인 진입 화면 + 챗봇 해시(kakao_hash) 캡처 ===
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { api, ApiError } from '../lib/api';
 
 const ERROR_MESSAGES: Record<string, string> = {
   token_exchange: '카카오 인증 중 문제가 발생했어요. 잠시 후 다시 시도해주세요.',
@@ -12,8 +13,63 @@ const ERROR_MESSAGES: Record<string, string> = {
 
 export default function Login() {
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const error = params.get('error');
   const errorMsg = error ? (ERROR_MESSAGES[error] ?? '로그인에 실패했어요.') : null;
+
+  // 마운트 시점에 URL 에서 한 번만 캡처 → 이후 URL 이 바뀌어도 href 에는 유지됨.
+  // useState 이니셜라이저로 SSR 안전한 window 접근.
+  const [capturedHash] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('kakao_hash');
+  });
+  const [attaching, setAttaching] = useState(false);
+
+  // ?kakao_hash= 도착 처리:
+  //  - URL 에서 즉시 제거 (히스토리/북마크 노출 방지)
+  //  - 토큰 있으면 /me/provider-user-key 에 붙이고 홈으로
+  //  - 토큰 없으면 로그인 버튼 클릭을 기다림 (href 에 이미 실림)
+  useEffect(() => {
+    if (!capturedHash) return;
+
+    // URL 정리
+    const url = new URL(window.location.href);
+    url.searchParams.delete('kakao_hash');
+    window.history.replaceState(null, '', url.toString());
+
+    const token = api.getToken();
+    if (!token) return; // OAuth 플로우에서 처리됨 (loginUrl 에 실림)
+
+    setAttaching(true);
+    api
+      .setProviderUserKey(capturedHash)
+      .then(() => navigate('/', { replace: true }))
+      .catch((err) => {
+        // 토큰 만료/무효 → 로그아웃 상태로 전환, OAuth 플로우로 자연 폴백
+        if (err instanceof ApiError && err.status === 401) {
+          api.setToken(null);
+        }
+        setAttaching(false);
+      });
+  }, [capturedHash, navigate]);
+
+  if (attaching) {
+    return (
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'column',
+          gap: 16,
+        }}
+      >
+        <div className="animate-float" style={{ fontSize: 48 }}>💎</div>
+        <p style={{ color: 'var(--color-ink-muted)', fontSize: 14 }}>챗봇과 연결 중...</p>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -58,7 +114,7 @@ export default function Login() {
       )}
 
       <a
-        href={api.loginUrl()}
+        href={api.loginUrl(capturedHash)}
         style={{
           display: 'flex',
           alignItems: 'center',

@@ -98,17 +98,39 @@ export interface FieldDropDto extends GemDto {
   position: { x: number; y: number };
 }
 
+export interface ChatbotRecordDto {
+  id: number;
+  gem: string;
+  recordText: string | null;
+  hasPhoto: boolean;
+  imageUrl: string | null;
+  aiGems: string | null;
+  createdAt: string;
+}
+
 export const api = {
   base: API_URL,
 
   setToken,
   getToken,
 
-  loginUrl(): string {
-    return `${API_URL}/auth/kakao/login`;
+  loginUrl(kakaoHash?: string | null): string {
+    const base = `${API_URL}/auth/kakao/login`;
+    return kakaoHash ? `${base}?kakao_hash=${encodeURIComponent(kakaoHash)}` : base;
   },
 
   me: () => request<MeResponse>('/me'),
+
+  setProviderUserKey: (key: string) =>
+    request<{ ok: boolean; prev_user_id: string | null; backfilled_messages: number }>(
+      '/me/provider-user-key',
+      { method: 'POST', json: { providerUserKey: key } },
+    ),
+
+  chatbotRecords: (limit = 50) =>
+    request<{ records: ChatbotRecordDto[] }>(
+      `/inventory/chatbot-records?limit=${limit}`,
+    ),
 
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 

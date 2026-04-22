@@ -9,6 +9,7 @@ import ChibiAvatar from '../components/field/ChibiAvatar';
 import PixelTree from '../components/field/PixelTree';
 import { getEmotion } from '../data/emotions';
 import { FIELD_SKY, getFieldTimePhase, type FieldPhase } from '../lib/field-time';
+import { api } from '../lib/api';
 
 const PALETTE: Record<FieldPhase, {
   mountainFar: string[];
@@ -398,8 +399,27 @@ export default function HomeField() {
   const { ticketsRemaining, fetchInventory } = useInventoryStore();
   const [phase, setPhase]       = useState<FieldPhase>(getFieldTimePhase);
   const [bagOpen, setBagOpen]   = useState(false);
+  const [chatbotTodayCount, setChatbotTodayCount] = useState(0);
 
   useEffect(() => { fetchToday(); fetchInventory(); }, [fetchToday, fetchInventory]);
+
+  // 오늘 챗봇에서 저장한 원석 개수 — 빈 상태 안내문에 사용 (실패해도 UI 깨지지 않게 silent)
+  useEffect(() => {
+    api
+      .chatbotRecords()
+      .then((res) => {
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = today.getMonth();
+        const d = today.getDate();
+        const n = res.records.filter((r) => {
+          const dt = new Date(r.createdAt);
+          return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+        }).length;
+        setChatbotTodayCount(n);
+      })
+      .catch(() => setChatbotTodayCount(0));
+  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setPhase(getFieldTimePhase()), 60_000);
     return () => window.clearInterval(timer);
@@ -577,19 +597,34 @@ export default function HomeField() {
 
         {/* ── 빈 상태 (원석 없을 때) ── */}
         {todayDrops.length === 0 && (
-          <div style={{
-            position: 'absolute', bottom: '42%', left: '50%',
-            transform: 'translateX(-50%)',
-            textAlign: 'center', zIndex: 20, whiteSpace: 'nowrap',
-            color: isDusk ? 'rgba(255,255,255,0.75)' : 'rgba(60,40,20,0.75)',
-            background: isDusk ? 'rgba(10,8,20,0.55)' : 'rgba(255,255,255,0.75)',
-            padding: '10px 20px', borderRadius: 12,
-            backdropFilter: 'blur(6px)',
-            border: isDusk ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.06)',
-            fontSize: 13,
-          }}>
-            <p>오늘 채집한 보석이 없어요</p>
-            <p style={{ fontSize: 11, marginTop: 4, opacity: 0.65 }}>카카오톡에서 일상을 보내보세요 💎</p>
+          <div
+            onClick={() => chatbotTodayCount > 0 && navigate('/inventory')}
+            style={{
+              position: 'absolute', bottom: '42%', left: '50%',
+              transform: 'translateX(-50%)',
+              textAlign: 'center', zIndex: 20, whiteSpace: 'nowrap',
+              color: isDusk ? 'rgba(255,255,255,0.75)' : 'rgba(60,40,20,0.75)',
+              background: isDusk ? 'rgba(10,8,20,0.55)' : 'rgba(255,255,255,0.75)',
+              padding: '10px 20px', borderRadius: 12,
+              backdropFilter: 'blur(6px)',
+              border: isDusk ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.06)',
+              fontSize: 13,
+              cursor: chatbotTodayCount > 0 ? 'pointer' : 'default',
+            }}
+          >
+            {chatbotTodayCount > 0 ? (
+              <>
+                <p>오늘 필드엔 아직 원석이 놓여있지 않지만...</p>
+                <p style={{ fontSize: 11, marginTop: 4, opacity: 0.85, fontWeight: 600 }}>
+                  💬 챗봇에서 {chatbotTodayCount}개 채집한 원석이 있어요 · 탭해서 보기
+                </p>
+              </>
+            ) : (
+              <>
+                <p>오늘 채집한 보석이 없어요</p>
+                <p style={{ fontSize: 11, marginTop: 4, opacity: 0.65 }}>카카오톡에서 일상을 보내보세요 💎</p>
+              </>
+            )}
           </div>
         )}
 
