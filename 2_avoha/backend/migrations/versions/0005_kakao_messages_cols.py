@@ -8,7 +8,9 @@ Drizzle 이 원래 만든 `kakao_messages` 에는 `provider_user_key` 등이 없
 이 마이그레이션은 0002 의 ALTER/INDEX 구문을 IF NOT EXISTS 로 다시 실행 —
 이미 컬럼이 있으면 no-op, 없으면 추가. 안전하게 멱등.
 
-Revision ID: 0005_ensure_kakao_messages_columns
+Note: revision id 는 alembic_version.version_num VARCHAR(32) 제약 때문에 짧게.
+
+Revision ID: 0005_kakao_messages_cols
 Revises: 0004_chatbot_table
 Create Date: 2026-04-23
 """
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 from alembic import op
 
-revision = "0005_ensure_kakao_messages_columns"
+revision = "0005_kakao_messages_cols"
 down_revision = "0004_chatbot_table"
 branch_labels = None
 depends_on = None
