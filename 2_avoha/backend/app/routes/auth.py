@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
+from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -17,9 +18,17 @@ from app.services.kakao import (
     fetch_kakao_user_info,
 )
 from app.services.tokens import issue_token
-from app.services.users import upsert_kakao_user
+from app.services.users import (
+    normalize_provider_user_key,
+    set_provider_user_key,
+    upsert_kakao_user,
+)
 
 router = APIRouter()
+
+# 챗봇 해시를 OAuth state 에 서명해서 실어 보낸다. 세션 쿠키는 PSL/ITP 문제로
+# 콜백까지 살아남지 못할 수 있어 state 왕복이 더 신뢰할 수 있음.
+_state_signer = URLSafeSerializer(settings.SESSION_SECRET, salt="avoha-oauth-state")
 
 
 def _redirect_login_error(code: str, reason: str | None = None) -> RedirectResponse:
@@ -31,9 +40,17 @@ def _redirect_login_error(code: str, reason: str | None = None) -> RedirectRespo
 
 
 @router.get("/auth/kakao/login")
-async def kakao_login(request: Request) -> RedirectResponse:
-    state = secrets.token_hex(16)
-    request.session["oauthState"] = state
+async def kakao_login(
+    request: Request,
+    kakao_hash: str | None = None,
+) -> RedirectResponse:
+    nonce = secrets.token_hex(16)
+    request.session["oauthState"] = nonce
+    payload: dict[str, str] = {"n": nonce}
+    normalized = normalize_provider_user_key(kakao_hash)
+    if normalized:
+        payload["h"] = normalized
+    state = _state_signer.dumps(payload)
     return RedirectResponse(build_kakao_authorize_url(state), status_code=302)
 
 
@@ -50,11 +67,23 @@ async def kakao_callback(
         return _redirect_login_error(error, error_description)
     if not code:
         return _redirect_login_error("missing_code")
-
-    saved_state = request.session.get("oauthState")
-    if not saved_state or saved_state != state:
+    if not state:
         return _redirect_login_error("state_mismatch")
-    request.session.pop("oauthState", None)
+
+    try:
+        payload = _state_signer.loads(state)
+    except BadSignature:
+        return _redirect_login_error("state_mismatch")
+    if not isinstance(payload, dict):
+        return _redirect_login_error("state_mismatch")
+
+    nonce = payload.get("n")
+    saved_nonce = request.session.pop("oauthState", None)
+    if not saved_nonce or saved_nonce != nonce:
+        return _redirect_login_error("state_mismatch")
+
+    raw_hash = payload.get("h")
+    pending_hash = raw_hash if isinstance(raw_hash, str) else None
 
     try:
         tok = await exchange_kakao_token(code)
@@ -63,6 +92,24 @@ async def kakao_callback(
     except KakaoOAuthError as exc:
         logger.warning("kakao oauth error", kakao_code=exc.kakao_code)
         return _redirect_login_error("token_exchange", exc.kakao_code)
+
+    if pending_hash:
+        try:
+            result = await set_provider_user_key(
+                session, user.id, pending_hash, source="oauth_callback"
+            )
+            logger.info(
+                "provider_user_key linked",
+                user_id=str(user.id),
+                backfilled=result["backfilled_messages"],
+                prev_user_id=result["prev_user_id"],
+            )
+        except Exception as exc:  # partial-unique 충돌/DB 이슈 시 로그인은 계속
+            logger.warning(
+                "provider_user_key link failed",
+                user_id=str(user.id),
+                error=str(exc),
+            )
 
     request.session["userId"] = str(user.id)
     request.session["kakaoId"] = user.kakao_id

@@ -47,6 +47,7 @@ class User(Base):
     )
     consent_version: Mapped[str] = mapped_column(Text, nullable=False)
     deleted_at: Mapped[datetime | None]
+    provider_user_key: Mapped[str | None] = mapped_column(Text)
 
 
 class CollectionTicket(Base):
@@ -180,6 +181,28 @@ class CraftingEvent(Base):
         ForeignKey("gems.id"),
     )
     recipe_slug: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class ChatbotRecord(Base):
+    """챗봇(`2_avoha/ai/chatbot`) 이 직접 INSERT 하는 테이블. user_id 는 오픈빌더 해시
+    (= users.provider_user_key) 이며 앱의 users/gems 와는 JOIN 으로 이어진다."""
+
+    __tablename__ = "chatbot"
+    __table_args__ = (Index("chatbot_user_id_idx", "user_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    gem: Mapped[str] = mapped_column(Text, nullable=False)
+    record_text: Mapped[str | None] = mapped_column(Text)
+    has_photo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    image_url: Mapped[str | None] = mapped_column(Text)
+    ai_gems: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(),
         nullable=False,

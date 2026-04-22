@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Gem, Sticker
+from app.db.models import ChatbotRecord, Gem, Sticker, User
 from app.deps import get_db, require_user
 
 router = APIRouter()
@@ -48,6 +48,48 @@ async def list_gems(
                 "source": r.source,
                 "sourceMessageId": str(r.source_message_id) if r.source_message_id else None,
                 "craftedFrom": [str(x) for x in (r.crafted_from or [])],
+                "createdAt": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/inventory/chatbot-records")
+async def list_chatbot_records(
+    user_id: uuid.UUID = Depends(require_user),
+    limit: int = Query(default=50, ge=1, le=200),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, list[dict[str, object]]]:
+    """챗봇(`ai/chatbot`) 이 직접 INSERT 한 일상 기록을 현재 유저 기준으로 조회.
+    users.provider_user_key == chatbot.user_id (= kakao 오픈빌더 해시) 로 JOIN.
+    provider_user_key 가 없으면(챗봇 미연결 유저) 빈 배열 반환."""
+    stmt = (
+        select(
+            ChatbotRecord.id,
+            ChatbotRecord.gem,
+            ChatbotRecord.record_text,
+            ChatbotRecord.has_photo,
+            ChatbotRecord.image_url,
+            ChatbotRecord.ai_gems,
+            ChatbotRecord.created_at,
+        )
+        .join(User, User.provider_user_key == ChatbotRecord.user_id)
+        .where(User.id == user_id)
+        .where(User.provider_user_key.is_not(None))
+        .order_by(desc(ChatbotRecord.created_at))
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).all()
+    return {
+        "records": [
+            {
+                "id": r.id,
+                "gem": r.gem,
+                "recordText": r.record_text,
+                "hasPhoto": r.has_photo,
+                "imageUrl": r.image_url,
+                "aiGems": r.ai_gems,
                 "createdAt": r.created_at.isoformat() if r.created_at else None,
             }
             for r in rows

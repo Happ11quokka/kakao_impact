@@ -3,12 +3,14 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User
 from app.deps import get_db, require_user
 from app.services.tickets import get_today_tickets
+from app.services.users import normalize_provider_user_key, set_provider_user_key
 
 router = APIRouter()
 
@@ -47,3 +49,30 @@ async def me(
         },
         "tickets": tickets,
     }
+
+
+class ProviderUserKeyBody(BaseModel):
+    providerUserKey: str = Field(min_length=32, max_length=128)
+
+
+@router.post("/me/provider-user-key")
+async def attach_provider_user_key(
+    body: ProviderUserKeyBody,
+    user_id: uuid.UUID = Depends(require_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    normalized = normalize_provider_user_key(body.providerUserKey)
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": {
+                    "message": "INVALID_PROVIDER_USER_KEY",
+                    "code": "INVALID_PROVIDER_USER_KEY",
+                }
+            },
+        )
+    result = await set_provider_user_key(
+        session, user_id, normalized, source="post_login_api"
+    )
+    return {"ok": True, **result}
