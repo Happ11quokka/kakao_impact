@@ -6,9 +6,11 @@ from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Event, KakaoMessage, User
+from app.logging import logger
 
 
 async def upsert_kakao_user(session: AsyncSession, kakao_user: dict[str, Any]) -> User:
@@ -59,8 +61,13 @@ async def set_provider_user_key(
     source: str,
 ) -> dict[str, object]:
     """유저 ↔ 챗봇 해시 1:1 매핑. 다른 유저에 물려있으면 기존을 NULL 로 내리고 덮어씀.
-    같은 해시의 미매칭 kakao_messages 를 이 user_id 로 백필. Event 하나 기록.
-    한 트랜잭션(begin_nested 로 SAVEPOINT) 이므로 race 안전."""
+    (핵심) users.provider_user_key 업데이트는 반드시 성공해야 함.
+    (보조) kakao_messages 백필 + Event 기록은 실패해도 swallow → OAuth/로그인 못 막게.
+
+    핵심과 보조를 별도 트랜잭션으로 분리해서 보조 작업 실패가 핵심에 전파되지 않게
+    한다(예: Railway DB 가 Drizzle 로 만들어져 kakao_messages.provider_user_key 가
+    없는 상황)."""
+    # ── 핵심: users 업데이트 (실패 시 예외 전파) ──
     async with session.begin_nested():
         prev = (
             await session.execute(
@@ -77,7 +84,12 @@ async def set_provider_user_key(
         await session.execute(
             update(User).where(User.id == user_id).values(provider_user_key=key)
         )
-        backfill_res = await session.execute(
+    await session.commit()
+
+    # ── 보조: kakao_messages 백필 (실패해도 진행) ──
+    backfilled = 0
+    try:
+        res = await session.execute(
             update(KakaoMessage)
             .where(
                 KakaoMessage.provider_user_key == key,
@@ -85,7 +97,19 @@ async def set_provider_user_key(
             )
             .values(user_id=user_id)
         )
-        backfilled = backfill_res.rowcount or 0
+        await session.commit()
+        backfilled = res.rowcount or 0
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        logger.warning(
+            "kakao_messages backfill skipped",
+            user_id=str(user_id),
+            key=key,
+            reason=str(exc).splitlines()[0][:200],
+        )
+
+    # ── 보조: Event 기록 (실패해도 진행) ──
+    try:
         session.add(
             Event(
                 user_id=user_id,
@@ -97,7 +121,15 @@ async def set_provider_user_key(
                 },
             )
         )
-    await session.commit()
+        await session.commit()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        logger.warning(
+            "provider_user_key_linked event skipped",
+            user_id=str(user_id),
+            reason=str(exc).splitlines()[0][:200],
+        )
+
     return {
         "prev_user_id": str(prev) if prev else None,
         "backfilled_messages": backfilled,
