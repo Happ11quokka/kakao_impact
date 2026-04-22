@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ALERT_EMAIL = os.getenv("ALERT_EMAIL")
@@ -58,36 +60,37 @@ def is_image_url(text: str) -> bool:
 
 
 def classify_emotion(text: str) -> list[str] | str | None:
+    prompt = (
+        "다음 입력이 일상 기록인지 판단해줘.\n"
+        "인사말만 있거나(예: 하이, 안녕, ㅎㅎ, 테스트 등), 감정이나 일상 내용이 전혀 없는 경우에만 '기록아님'이라고만 답해.\n"
+        "인사말과 함께 감정이나 일상 내용이 포함되어 있으면 감정을 분류해줘.\n"
+        "일상 기록이라면 담긴 감정을 분석해서 아래 매핑에 맞는 원석 이름으로 답해줘.\n"
+        "감정-원석 매핑:\n"
+        "무탈→월장석, 평온→아쿠아마린, 뿌듯→황수정, 기쁨→루비, 만족→앰버, "
+        "설렘→로즈쿼츠, 슬픔→사파이어, 짜증→가넷, 후회→연수정, 위로→오팔\n"
+        "여러 감정이 담겨있으면 원석 이름들을 쉼표로만 구분해서 답해줘. "
+        "감정이 하나라면 원석 이름 하나만 답해줘. 다른 말은 절대 하지 마.\n\n"
+        f"입력: {text}"
+    )
     try:
         response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
             json={
-                "model": "google/gemma-3-4b-it:free",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            "다음 입력이 일상 기록인지 판단해줘.\n"
-                            "인사말, 단순 질문, 의미 없는 말(예: 하이, 안녕, ㅎㅎ, 테스트 등)이면 '기록아님'이라고만 답해.\n"
-                            "일상 기록이라면 담긴 감정을 분석해서 아래 매핑에 맞는 원석 이름으로 답해줘.\n"
-                            "감정-원석 매핑:\n"
-                            "무탈→월장석, 평온→아쿠아마린, 뿌듯→황수정, 기쁨→루비, 만족→앰버, "
-                            "설렘→로즈쿼츠, 슬픔→사파이어, 짜증→가넷, 후회→연수정, 위로→오팔\n"
-                            "여러 감정이 담겨있으면 원석 이름들을 쉼표로만 구분해서 답해줘. "
-                            "감정이 하나라면 원석 이름 하나만 답해줘. 다른 말은 절대 하지 마.\n\n"
-                            f"입력: {text}"
-                        ),
-                    },
-                ],
+                "model": "llama-3.1-8b-instant",
+                "messages": [{"role": "user", "content": prompt}],
             },
             timeout=4,
         )
         raw = response.json()["choices"][0]["message"]["content"].strip()
-        if raw == "기록아님":
+        print(f"[classify_emotion raw] {raw}")
+        if "기록아님" in raw:
             return "NOT_RECORD"
-        gems = [g.strip() for g in raw.split(",") if g.strip()]
-        return gems if gems else None
+        valid_gem_names = set(EMOTION_TO_GEM.values())
+        found = [g for g in valid_gem_names if g in raw]
+        if not found:
+            found = [EMOTION_TO_GEM[e] for e in EMOTION_TO_GEM if e in raw]
+        return found if found else None
     except requests.Timeout:
         return "TIMEOUT"
     except Exception as e:
@@ -96,7 +99,7 @@ def classify_emotion(text: str) -> list[str] | str | None:
         return None
 
 
-def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_url: str = None):
+def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_url: str = None, ai_gems: str = None):
     try:
         data = {
             "user_id": user_id,
@@ -106,6 +109,8 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
         }
         if image_url:
             data["image_url"] = image_url
+        if ai_gems:
+            data["ai_gems"] = ai_gems
         requests.post(
             f"{SUPABASE_URL}/rest/v1/gems",
             headers={
@@ -183,6 +188,20 @@ GEM_TO_EMOTION = {v: k for k, v in EMOTION_TO_GEM.items()}
 
 WEB_URL = "https://frontend-production-09f81.up.railway.app/login"
 
+SUPABASE_IMG = "https://tetatvafhnqbtwgfebic.supabase.co/storage/v1/object/public/gem-images"
+GEM_IMAGE_URL = {
+    "월장석": f"{SUPABASE_IMG}/moonstone.png",
+    "아쿠아마린": f"{SUPABASE_IMG}/aquamarine.png",
+    "황수정": f"{SUPABASE_IMG}/citrine.png",
+    "루비": f"{SUPABASE_IMG}/ruby.png",
+    "앰버": f"{SUPABASE_IMG}/amber.png",
+    "로즈쿼츠": f"{SUPABASE_IMG}/rose_quartz.png",
+    "사파이어": f"{SUPABASE_IMG}/sapphire.png",
+    "가넷": f"{SUPABASE_IMG}/garnet.png",
+    "연수정": f"{SUPABASE_IMG}/smoky_quartz.png",
+    "오팔": f"{SUPABASE_IMG}/opal.png",
+}
+
 BASE_QUICK_REPLIES = [
     {"label": "인벤토리 👜", "action": "message", "messageText": "내 원석"},
     {"label": "도감 📖", "action": "message", "messageText": "도감"},
@@ -223,22 +242,26 @@ def kakao_response(text: str, show_emotion_buttons: bool = False, hide_buttons: 
 def kakao_save_complete(gem: str) -> dict:
     emotion = GEM_TO_EMOTION.get(gem, "")
     gem_label = f"{gem}({emotion})" if emotion else gem
+    card = {
+        "title": f"✨ {gem_label} 원석 채집 완료!",
+        "description": "일상 속 순간을 원석으로 저장했어요.\n오늘 주운 원석은 가방에서 확인해볼 수 있어요!",
+        "buttons": [
+            {
+                "action": "webLink",
+                "label": "닥토 공방 열기 🌐",
+                "webLinkUrl": WEB_URL,
+            }
+        ],
+    }
+    img_url = GEM_IMAGE_URL.get(gem)
+    if img_url:
+        card["thumbnail"] = {"imageUrl": img_url}
     return {
         "version": "2.0",
         "template": {
             "outputs": [
                 {
-                    "basicCard": {
-                        "title": f"✨ {gem_label} 원석 채집 완료!",
-                        "description": "일상 속 순간을 원석으로 저장했어요.\n오늘 주운 원석은 가방에서 확인해볼 수 있어요!",
-                        "buttons": [
-                            {
-                                "action": "webLink",
-                                "label": "닥토 공방 열기 🌐",
-                                "webLinkUrl": WEB_URL,
-                            }
-                        ],
-                    }
+                    "basicCard": card
                 }
             ],
             "quickReplies": BASE_QUICK_REPLIES,
@@ -325,7 +348,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 "5개를 모두 줍다니 엄청난 하루를 보내셨군요!\n\n"
                 "아이템은 모두 주웠지만, 일상 속 소중한 순간은 계속 모을 수 있어요."
             ))
-        background_tasks.add_task(save_gem, user_id, data["gem"], data["text"], data["has_photo"], data.get("image_url"))
+        background_tasks.add_task(save_gem, user_id, data["gem"], data["text"], data["has_photo"], data.get("image_url"), data.get("ai_gems"))
         del pending_gem[user_id]
         return JSONResponse(kakao_save_complete(data["gem"]))
 
@@ -333,30 +356,34 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if utterance in EMOTION_TO_GEM:
         gem = EMOTION_TO_GEM[utterance]
         sel = pending_emotion_selection.get(user_id)
+        print(f"[emotion click] utterance={utterance}, sel={sel}, pending_gem={pending_gem.get(user_id)}")
         if sel and utterance in sel["emotions"]:
             # 복수 감정 중 메인 감정 선택 → 저장 대기 (인벤/도감 숨김)
             del pending_emotion_selection[user_id]
             pending_gem[user_id] = {
                 "gem": gem, "text": sel["text"],
                 "has_photo": sel["has_photo"], "image_url": sel.get("image_url"),
+                "ai_gems": sel.get("ai_gems"),
             }
+            gem_label = f"{gem}({utterance})"
             return JSONResponse(kakao_response(
-                f"{gem} 원석을 선택하셨어요! ✨\n저장할까요?",
+                f"{gem_label} 원석을 선택하셨어요! ✨\n저장할까요?",
                 custom_replies=SAVE_ONLY_QUICK_REPLIES
             ))
         existing = pending_gem.get(user_id)
         if existing:
             # 다른 감정으로 교체 → 저장 대기 유지
             existing["gem"] = gem
+            gem_label = f"{gem}({utterance})"
             return JSONResponse(kakao_response(
-                f"{gem} 원석으로 바꿨어요! ✨\n저장할까요?",
+                f"{gem_label} 원석으로 바꿨어요! ✨\n저장할까요?",
                 show_save_button=True
             ))
-        # 분류 실패 시 직접 선택 → 즉시 저장
-        if not check_and_increment(user_id):
-            return JSONResponse(kakao_response("오늘 채집권을 모두 사용했어요! 내일 또 만나요 🌙"))
-        background_tasks.add_task(save_gem, user_id, gem, utterance, False)
-        return JSONResponse(kakao_save_complete(gem))
+        # pending_gem 없는 상태에서 감정 단어 입력 → 일상 기록 먼저 요청
+        return JSONResponse(kakao_response(
+            "먼저 오늘의 일상을 적어주세요 🪨\n"
+            "어떤 일이 있었는지 보내주시면 원석으로 저장해드릴게요!"
+        ))
 
     # 도감 조회
     if utterance == "도감":
@@ -424,7 +451,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if user_id in pending_photo:
             del pending_photo[user_id]
         # 원본 텍스트 보존 — 감정 버튼 선택 시 record_text로 사용
-        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url}
+        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": None}
         fail_count = classify_fail_count.get(user_id, 0) + 1
         classify_fail_count[user_id] = fail_count
         if fail_count >= 2:
@@ -457,6 +484,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         pending_emotion_selection[user_id] = {
             "emotions": emotion_words, "text": utterance,
             "has_photo": has_photo, "image_url": image_url,
+            "ai_gems": ",".join(valid_gems),
         }
         emotion_buttons = [
             {"label": e, "action": "message", "messageText": e} for e in emotion_words
@@ -469,13 +497,15 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 단일 감정 → 저장 대기
     gem = valid_gems[0]
-    pending_gem[user_id] = {"gem": gem, "text": utterance, "has_photo": has_photo, "image_url": image_url}
+    emotion = GEM_TO_EMOTION.get(gem, "")
+    gem_label = f"{gem}({emotion})" if emotion else gem
+    pending_gem[user_id] = {"gem": gem, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": gem}
     if has_photo:
         return JSONResponse(kakao_response(
-            f"사진과 함께 발견한 {gem} 원석이에요! ✨\n저장할까요?",
+            f"사진과 함께 발견한 {gem_label} 원석이에요! ✨\n저장할까요?",
             show_save_button=True
         ))
     return JSONResponse(kakao_response(
-        f"일상 속 순간에서 {gem} 원석을 발견했어요! ✨\n저장할까요?",
+        f"일상 속 순간에서 {gem_label} 원석을 발견했어요! ✨\n저장할까요?",
         show_save_button=True
     ))

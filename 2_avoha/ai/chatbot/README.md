@@ -5,7 +5,7 @@
 ## 서비스 흐름
 
 ```
-사용자 → 카카오톡 → 오픈빌더 → FastAPI 서버 → OpenRouter AI
+사용자 → 카카오톡 → 오픈빌더 → FastAPI 서버 → Groq AI
                                       ↓                ↓
                               Supabase DB ←────── 원석 결정
                                       ↓
@@ -25,7 +25,8 @@
 | 하루 5회 제한 | 저장하기 클릭 시 채집권 차감, 소진 후에도 기록 허용 |
 | 원석 조회 | "내 원석" / "원석 보기" / "가방" / "인벤토리" 입력 시 캐러셀 카드로 표시 |
 | 도감 | "도감" 입력 시 10가지 원석 목록 안내 |
-| 채집 완료 카드 | basicCard로 원석(감정) 표시 + 웹사이트 링크 버튼 |
+| 채집 완료 카드 | basicCard로 원석 이미지 + 원석(감정) 표시 + 웹사이트 링크 버튼 |
+| AI 판단 기록 | gem(최종) + ai_gems(AI 초기 판단) 별도 저장으로 분류 추적 가능 |
 | 위험 기록 감지 | 자살/자해 키워드 → 자살예방 문구 + 운영자 이메일 알림 |
 | 유해 기록 감지 | 유해 키워드 → 채집 거부 + 운영자 이메일 알림 |
 | 분류 2회 실패 | 운영자 이메일 알림 + 운영자 연결 안내 |
@@ -51,7 +52,7 @@
 | 항목 | 선택 |
 |---|---|
 | 백엔드 | FastAPI + uvicorn |
-| AI | OpenRouter (google/gemma-3-4b-it:free) |
+| AI | Groq (llama-3.1-8b-instant) |
 | DB | Supabase (PostgreSQL) |
 | 배포 | Railway |
 | 챗봇 플랫폼 | 카카오 i 오픈빌더 |
@@ -60,7 +61,7 @@
 ## 환경 변수 (.env)
 
 ```
-OPENROUTER_API_KEY=
+GROQ_API_KEY=
 SUPABASE_URL=
 SUPABASE_KEY=
 ALERT_EMAIL=
@@ -76,7 +77,7 @@ uvicorn main:app --reload
 
 ## 배포
 
-- **운영**: Railway (`https://sentiment-chatbot.up.railway.app/webhook`)
+- **운영**: Railway (`https://sentiment-chatbot-production.up.railway.app/webhook`)
 - **개발**: ngrok → 오픈빌더 스킬 URL 임시 교체
 
 ## Supabase 스키마
@@ -89,6 +90,7 @@ create table gems (
   record_text text,
   has_photo boolean default false,
   image_url text,
+  ai_gems text,
   created_at timestamptz default now()
 );
 ```
