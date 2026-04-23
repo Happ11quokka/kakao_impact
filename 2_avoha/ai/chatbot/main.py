@@ -7,17 +7,21 @@ import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 import psycopg2
+import anthropic
 
 load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ALERT_EMAIL = os.getenv("ALERT_EMAIL")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 RAILWAY_DATABASE_URL = os.getenv("RAILWAY_DATABASE_URL")
+
+anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 app = FastAPI()
 
@@ -75,16 +79,13 @@ def classify_emotion(text: str) -> list[str] | str | None:
         f"입력: {text}"
     )
     try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={
-                "model": "llama-3.1-8b-instant",
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=4,
+        response = anthropic_client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=50,
+            messages=[{"role": "user", "content": prompt}],
+            timeout=4.0,
         )
-        raw = response.json()["choices"][0]["message"]["content"].strip()
+        raw = response.content[0].text.strip()
         print(f"[classify_emotion raw] {raw}")
         if "기록아님" in raw:
             return "NOT_RECORD"
@@ -93,11 +94,10 @@ def classify_emotion(text: str) -> list[str] | str | None:
         if not found:
             found = [EMOTION_TO_GEM[e] for e in EMOTION_TO_GEM if e in raw]
         return found if found else None
-    except requests.Timeout:
+    except anthropic.APITimeoutError:
         return "TIMEOUT"
     except Exception as e:
         print(f"[classify_emotion error] {e}")
-        print(f"[response] {response.text if 'response' in dir() else 'no response'}")
         return None
 
 
