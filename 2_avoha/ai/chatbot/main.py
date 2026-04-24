@@ -179,7 +179,8 @@ def get_gems(user_id: str) -> list:
             },
             timeout=5,
         )
-        return response.json()
+        data = response.json()
+        return data if isinstance(data, list) else []
     except Exception as e:
         print(f"[get_gems error] {e}")
         return []
@@ -272,7 +273,7 @@ def kakao_response(text: str, show_emotion_buttons: bool = False, hide_buttons: 
         elif show_save_button:
             result["template"]["quickReplies"] = SAVE_QUICK_REPLIES
         elif show_emotion_buttons:
-            result["template"]["quickReplies"] = EMOTION_QUICK_REPLIES + BASE_QUICK_REPLIES
+            result["template"]["quickReplies"] = EMOTION_QUICK_REPLIES
         else:
             result["template"]["quickReplies"] = BASE_QUICK_REPLIES
     return result
