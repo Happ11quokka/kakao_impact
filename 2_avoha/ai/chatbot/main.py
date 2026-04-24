@@ -165,6 +165,21 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
 
 
 def get_gems(user_id: str) -> list:
+    if RAILWAY_DATABASE_URL:
+        try:
+            conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT gem, record_text, created_at FROM chatbot WHERE user_id = %s ORDER BY created_at DESC LIMIT 10",
+                (user_id,),
+            )
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            return [{"gem": r[0], "record_text": r[1], "created_at": r[2].isoformat()} for r in rows]
+        except Exception as e:
+            print(f"[get_gems railway error] {e}")
+            return []
     try:
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/gems",
