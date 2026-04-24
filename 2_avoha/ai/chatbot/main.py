@@ -25,6 +25,24 @@ anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 app = FastAPI()
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"[unhandled error] {exc}")
+    from fastapi.responses import JSONResponse as _JSONResponse
+    return _JSONResponse(
+        status_code=200,
+        content={
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": "잠시 오류가 발생했어요. 다시 시도해주세요!"}}],
+                "quickReplies": [
+                    {"label": "인벤토리 👜", "action": "message", "messageText": "인벤토리"},
+                    {"label": "도감 📖", "action": "message", "messageText": "도감"},
+                ],
+            },
+        },
+    )
+
 user_count: dict = {}  # { "유저ID": {"date": date, "count": int} }
 pending_photo: dict = {}  # { "유저ID": {"time": datetime, "url": str} }
 pending_gem: dict = {}  # { "유저ID": {"gem": str, "text": str, "has_photo": bool, "image_url": str|None} }
@@ -326,7 +344,11 @@ def kakao_carousel(gems: list) -> dict:
 
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception as e:
+        print(f"[webhook json error] {e}")
+        return JSONResponse(kakao_response("잠시 오류가 발생했어요. 다시 시도해주세요!"))
 
     user_id = body.get("userRequest", {}).get("user", {}).get("id", "unknown")
     utterance = body.get("userRequest", {}).get("utterance", "").strip()
