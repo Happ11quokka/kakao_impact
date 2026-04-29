@@ -2,8 +2,6 @@ from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from datetime import date, datetime, timedelta
 import requests
-import asyncio
-import threading
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -50,7 +48,6 @@ pending_photo: dict = {}  # { "유저ID": {"time": datetime, "url": str} }
 pending_gem: dict = {}  # { "유저ID": {"gem": str, "text": str, "has_photo": bool, "image_url": str|None} }
 pending_emotion_selection: dict = {}  # { "유저ID": {"emotions": [emotion_word], "text": str, "has_photo": bool, "image_url": str|None} }
 classify_fail_count: dict = {}  # { "유저ID": int } 감정 분류 실패 횟수
-pending_ai_result: dict = {}  # { "유저ID": dict } 콜백 테스트용 AI 결과 임시 저장
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
 
@@ -437,11 +434,6 @@ def _callback_task(user_id: str, utterance: str, callback_url: str, photo_time, 
         print(f"[callback post error] {e}")
 
 
-def _classify_and_store(user_id: str, utterance: str, has_photo: bool, image_url: str | None):
-    # 테스트용: 첫 요청에서 AI 결과를 미리 계산해 저장
-    result = classify_emotion(utterance)
-    pending_ai_result[user_id] = _build_ai_response(user_id, utterance, has_photo, image_url, result)
-
 
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
@@ -453,8 +445,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     user_id = body.get("userRequest", {}).get("user", {}).get("id", "unknown")
     utterance = body.get("userRequest", {}).get("utterance", "").strip()
-    print(f"[full_body] {body}")
-    print(f"[callback_url] {body.get('callbackUrl')}")
 
     # 위험 기록 감지
     if any(kw in utterance for kw in DANGER_KEYWORDS):
