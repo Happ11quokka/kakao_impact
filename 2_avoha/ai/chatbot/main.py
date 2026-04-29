@@ -441,6 +441,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     user_id = body.get("userRequest", {}).get("user", {}).get("id", "unknown")
     utterance = body.get("userRequest", {}).get("utterance", "").strip()
+    print(f"[full_body] {body}")
     print(f"[callback_url] {body.get('callbackUrl')}")
 
     # 위험 기록 감지
