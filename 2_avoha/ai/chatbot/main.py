@@ -2,6 +2,8 @@ from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from datetime import date, datetime, timedelta
 import requests
+import asyncio
+import threading
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -48,6 +50,7 @@ pending_photo: dict = {}  # { "유저ID": {"time": datetime, "url": str} }
 pending_gem: dict = {}  # { "유저ID": {"gem": str, "text": str, "has_photo": bool, "image_url": str|None} }
 pending_emotion_selection: dict = {}  # { "유저ID": {"emotions": [emotion_word], "text": str, "has_photo": bool, "image_url": str|None} }
 classify_fail_count: dict = {}  # { "유저ID": int } 감정 분류 실패 횟수
+pending_ai_result: dict = {}  # { "유저ID": dict } 콜백 테스트용 AI 결과 임시 저장
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
 
@@ -431,6 +434,12 @@ def _callback_task(user_id: str, utterance: str, callback_url: str, photo_time, 
         print(f"[callback post error] {e}")
 
 
+def _classify_and_store(user_id: str, utterance: str, has_photo: bool, image_url: str | None):
+    # 테스트용: 첫 요청에서 AI 결과를 미리 계산해 저장
+    result = classify_emotion(utterance)
+    pending_ai_result[user_id] = _build_ai_response(user_id, utterance, has_photo, image_url, result)
+
+
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -568,11 +577,18 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     callback_url = body.get("callbackUrl")
     if callback_url:
-        background_tasks.add_task(
-            _callback_task, user_id, utterance, callback_url,
-            photo_data["time"] if photo_data else None,
-            photo_data["url"] if photo_data else None,
-        )
+        # 두 번째 요청: 저장된 AI 결과를 callbackUrl로 POST
+        print(f"[callback_url received] {callback_url}")
+        stored = pending_ai_result.pop(user_id, None)
+        if stored:
+            background_tasks.add_task(requests.post, callback_url, json=stored, timeout=5)
+        else:
+            background_tasks.add_task(_callback_task, user_id, utterance, callback_url,
+                                      photo_data["time"] if photo_data else None,
+                                      photo_data["url"] if photo_data else None)
         return JSONResponse({"version": "2.0", "useCallback": True})
 
+    # 첫 요청: AI 분류 즉시 시작(thread) + 6초 지연으로 카카오 타임아웃 유발 (테스트용)
+    threading.Thread(target=_classify_and_store, args=(user_id, utterance, has_photo, image_url), daemon=True).start()
+    await asyncio.sleep(6)
     return JSONResponse({"version": "2.0", "useCallback": True})
