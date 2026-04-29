@@ -568,7 +568,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     has_photo = bool(photo_data and datetime.now() - photo_data["time"] <= PHOTO_TIMEOUT)
     image_url = photo_data["url"] if has_photo else None
 
-    callback_url = body.get("callbackUrl")
+    callback_url = body.get("userRequest", {}).get("callbackUrl")
     if callback_url:
         background_tasks.add_task(
             _callback_task, user_id, utterance, callback_url,
