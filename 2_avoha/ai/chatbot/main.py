@@ -274,6 +274,12 @@ SAVE_ONLY_QUICK_REPLIES = [
     {"label": "다른 감정 선택 🔄", "action": "message", "messageText": "다른 감정 선택"},
 ]
 
+RETRY_QUICK_REPLIES = [
+    {"label": "다시 시도 🔄", "action": "message", "messageText": "다시 시도"},
+    {"label": "인벤토리 👜", "action": "message", "messageText": "내 원석"},
+    {"label": "도감 📖", "action": "message", "messageText": "도감"},
+]
+
 
 def kakao_response(text: str, show_emotion_buttons: bool = False, hide_buttons: bool = False, show_save_button: bool = False, custom_replies: list = None) -> dict:
     result = {
@@ -360,21 +366,19 @@ def kakao_carousel(gems: list) -> dict:
 
 def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url: str | None, result) -> dict:
     if result == "NOT_RECORD":
+        pending_gem.pop(user_id, None)
+        pending_emotion_selection.pop(user_id, None)
         return kakao_response(
             "순간을 조금 더 담아주세요 🪨\n"
             "어떤 일이 있었는지, 어떤 기분이었는지 적어주시면\n"
             "딱 맞는 원석을 찾아드릴게요!"
         )
     if result == "TIMEOUT":
-        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": None}
+        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": None, "retry": True}
         return kakao_response(
             "현재 세공소에 광물이 몰려 분류에 시간이 조금 걸리고 있어요!\n"
             "잠시 후 다시 시도해볼까요? 🛠️",
-            custom_replies=[
-                {"label": "다시 시도 🔄", "action": "message", "messageText": "다시 시도"},
-                {"label": "인벤토리 👜", "action": "message", "messageText": "내 원석"},
-                {"label": "도감 📖", "action": "message", "messageText": "도감"},
-            ]
+            custom_replies=RETRY_QUICK_REPLIES
         )
 
     VALID_GEMS = set(EMOTION_TO_GEM.values())
@@ -425,8 +429,8 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
     gem_label = f"{gem}({emotion})" if emotion else gem
     pending_gem[user_id] = {"gem": gem, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": gem}
     if has_photo:
-        return kakao_response(f"사진과 함께 발견한 {gem_label} 원석이에요! ✨\n저장할까요?", show_save_button=True)
-    return kakao_response(f"일상 속 순간에서 {gem_label} 원석을 발견했어요! ✨\n저장할까요?", show_save_button=True)
+        return kakao_response(f"사진과 함께 발견한 {gem_label} 원석이에요! ✨\n저장할까요?", custom_replies=SAVE_ONLY_QUICK_REPLIES)
+    return kakao_response(f"일상 속 순간에서 {gem_label} 원석을 발견했어요! ✨\n저장할까요?", custom_replies=SAVE_ONLY_QUICK_REPLIES)
 
 
 def _callback_task(user_id: str, utterance: str, callback_url: str, photo_time, photo_url: str | None):
@@ -511,6 +515,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         data = pending_gem.get(user_id)
         if not data:
             return JSONResponse(kakao_response("저장할 원석이 없어요. 일상을 먼저 보내주세요!"))
+        if not data.get("gem"):
+            return JSONResponse(kakao_response(
+                "감정을 먼저 선택해주세요!",
+                show_emotion_buttons=True
+            ))
         if not check_and_increment(user_id):
             del pending_gem[user_id]
             return JSONResponse(kakao_response(
@@ -557,7 +566,13 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 도감 조회
     if utterance == "도감":
-        has_pending = user_id in pending_gem
+        pdata = pending_gem.get(user_id)
+        if pdata and pdata.get("gem"):
+            pending_replies = SAVE_QUICK_REPLIES
+        elif pdata and pdata.get("retry"):
+            pending_replies = RETRY_QUICK_REPLIES
+        else:
+            pending_replies = None
         return JSONResponse(kakao_response(
             "📖 닥토 공방 원석 도감\n\n"
             "✨ 채집 가능한 원석 10가지\n\n"
@@ -573,20 +588,26 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             "🫧 오팔 — 힘들고 위로받고 싶은 순간\n\n"
             "하루 최대 5개까지 채집할 수 있어요.\n"
             "오늘은 어떤 원석을 주워볼까요? 🧳",
-            show_save_button=has_pending
+            custom_replies=pending_replies
         ))
 
     # 원석 가방 조회
     if utterance in ("내 원석", "원석 보기", "가방", "인벤토리"):
+        pdata = pending_gem.get(user_id)
+        if pdata and pdata.get("gem"):
+            inv_replies = SAVE_QUICK_REPLIES
+        elif pdata and pdata.get("retry"):
+            inv_replies = RETRY_QUICK_REPLIES
+        else:
+            inv_replies = BASE_QUICK_REPLIES
         gems = get_gems(user_id)
         if not gems:
             return JSONResponse(kakao_response(
                 "아직 채집한 원석이 없어요!\n일상을 보내주시면 원석으로 저장해드릴게요. 🪨",
-                show_save_button=(user_id in pending_gem)
+                custom_replies=inv_replies
             ))
         response = kakao_carousel(gems)
-        if user_id in pending_gem:
-            response["template"]["quickReplies"] = SAVE_QUICK_REPLIES
+        response["template"]["quickReplies"] = inv_replies
         return JSONResponse(response)
 
     # 사진 전송
