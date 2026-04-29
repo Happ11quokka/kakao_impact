@@ -580,17 +580,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     callback_url = body.get("callbackUrl")
     if callback_url:
-        print(f"[callback_url received] {callback_url}")
-        stored = pending_ai_result.pop(user_id, None)
-        if stored:
-            background_tasks.add_task(requests.post, callback_url, json=stored, timeout=5)
-        else:
-            background_tasks.add_task(_callback_task, user_id, utterance, callback_url,
-                                      photo_data["time"] if photo_data else None,
-                                      photo_data["url"] if photo_data else None)
+        background_tasks.add_task(
+            _callback_task, user_id, utterance, callback_url,
+            photo_data["time"] if photo_data else None,
+            photo_data["url"] if photo_data else None,
+        )
         return JSONResponse({"version": "2.0", "useCallback": True})
 
-    # 테스트용: AI 분류 즉시 시작 + 6초 지연으로 카카오 타임아웃 유발
-    threading.Thread(target=_classify_and_store, args=(user_id, utterance, has_photo, image_url), daemon=True).start()
-    await asyncio.sleep(6)
-    return JSONResponse({"version": "2.0", "useCallback": True})
+    result = classify_emotion(utterance)
+    return JSONResponse(_build_ai_response(user_id, utterance, has_photo, image_url, result))
