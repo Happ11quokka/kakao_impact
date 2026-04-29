@@ -377,6 +377,9 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
     VALID_GEMS = set(EMOTION_TO_GEM.values())
     valid_gems = [g for g in (result or []) if g in VALID_GEMS]
 
+    # 새 메시지 처리 시 이전 대기 상태 초기화
+    pending_gem.pop(user_id, None)
+    pending_emotion_selection.pop(user_id, None)
     pending_photo.pop(user_id, None)
 
     if not valid_gems:
