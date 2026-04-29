@@ -575,5 +575,4 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         )
         return JSONResponse({"version": "2.0", "useCallback": True})
 
-    result = classify_emotion(utterance)
-    return JSONResponse(_build_ai_response(user_id, utterance, has_photo, image_url, result))
+    return JSONResponse({"version": "2.0", "useCallback": True})
