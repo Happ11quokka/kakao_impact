@@ -3,5 +3,5 @@ uvicorn==0.44.0
 requests==2.33.1
 python-dotenv==1.2.2
 tzdata==2026.1
-psycopg2-binary==2.9.10
+psycopg2-binary
 anthropic

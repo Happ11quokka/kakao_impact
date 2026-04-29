@@ -366,9 +366,15 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
             "딱 맞는 원석을 찾아드릴게요!"
         )
     if result == "TIMEOUT":
+        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": None}
         return kakao_response(
             "현재 세공소에 광물이 몰려 분류에 시간이 조금 걸리고 있어요!\n"
-            "조금만 기다리면 세공소 주인장을 불러올게요 🛠️"
+            "잠시 후 다시 시도해볼까요? 🛠️",
+            custom_replies=[
+                {"label": "다시 시도 🔄", "action": "message", "messageText": "다시 시도"},
+                {"label": "인벤토리 👜", "action": "message", "messageText": "내 원석"},
+                {"label": "도감 📖", "action": "message", "messageText": "도감"},
+            ]
         )
 
     VALID_GEMS = set(EMOTION_TO_GEM.values())
@@ -434,6 +440,15 @@ def _callback_task(user_id: str, utterance: str, callback_url: str, photo_time, 
         print(f"[callback post error] {e}")
 
 
+def _callback_task_retry(user_id: str, utterance: str, callback_url: str, has_photo: bool, image_url: str | None):
+    result = classify_emotion(utterance)
+    response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
+    try:
+        requests.post(callback_url, json=response, timeout=5)
+    except Exception as e:
+        print(f"[callback post error] {e}")
+
+
 
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
@@ -463,6 +478,24 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             f"유저 ID: {user_id}\n내용: {utterance}"
         )
         return JSONResponse(kakao_response(HARMFUL_MESSAGE))
+
+    # 다시 시도 (타임아웃 후 재시도)
+    if utterance == "다시 시도":
+        data = pending_gem.get(user_id)
+        if not data:
+            return JSONResponse(kakao_response("다시 시도할 기록이 없어요. 일상을 다시 보내주세요!"))
+        saved_utterance = data["text"]
+        saved_has_photo = data["has_photo"]
+        saved_image_url = data.get("image_url")
+        del pending_gem[user_id]
+        callback_url = body.get("userRequest", {}).get("callbackUrl")
+        if callback_url:
+            background_tasks.add_task(
+                _callback_task_retry, user_id, saved_utterance, callback_url, saved_has_photo, saved_image_url
+            )
+            return JSONResponse({"version": "2.0", "useCallback": True})
+        result = classify_emotion(saved_utterance)
+        return JSONResponse(_build_ai_response(user_id, saved_utterance, saved_has_photo, saved_image_url, result))
 
     # 다른 감정 선택
     if utterance == "다른 감정 선택":

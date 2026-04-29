@@ -5,11 +5,14 @@
 ## 서비스 흐름
 
 ```
-사용자 → 카카오톡 → 오픈빌더 → FastAPI 서버 → Groq AI
+사용자 → 카카오톡 → 오픈빌더 → FastAPI 서버
+                                      ↓ (즉시 useCallback:true 반환)
+                               BackgroundTask → Claude Haiku AI
                                       ↓                ↓
                               Supabase DB ←────── 원석 결정
+                              Railway DB ←────── (동시 저장)
                                       ↓
-                              카카오톡 응답
+                              callbackUrl → 카카오톡 응답
 ```
 
 ## 주요 기능
@@ -30,6 +33,8 @@
 | 위험 기록 감지 | 자살/자해 키워드 → 자살예방 문구 + 운영자 이메일 알림 |
 | 유해 기록 감지 | 유해 키워드 → 채집 거부 + 운영자 이메일 알림 |
 | 분류 2회 실패 | 운영자 이메일 알림 + 운영자 연결 안내 |
+| 콜백 비동기 처리 | 오픈빌더 콜백 토큰으로 5초 제한 회피 → AI 분류 후 callbackUrl로 응답 전달 |
+| 타임아웃 재시도 | AI 분류 타임아웃 시 "다시 시도 🔄" 버튼으로 원본 텍스트 재분류 |
 | 웰컴 메시지 | 오픈빌더 웰컴 블록에서 설정 |
 
 ## 감정-원석 매핑
@@ -52,8 +57,8 @@
 | 항목 | 선택 |
 |---|---|
 | 백엔드 | FastAPI + uvicorn |
-| AI | Groq (llama-3.1-8b-instant) |
-| DB | Supabase (PostgreSQL) |
+| AI | Claude Haiku (claude-haiku-4-5) |
+| DB | Supabase (PostgreSQL) + Railway PostgreSQL |
 | 배포 | Railway |
 | 챗봇 플랫폼 | 카카오 i 오픈빌더 |
 | 알림 | Gmail SMTP |
@@ -61,11 +66,12 @@
 ## 환경 변수 (.env)
 
 ```
-GROQ_API_KEY=
+ANTHROPIC_API_KEY=
 SUPABASE_URL=
 SUPABASE_KEY=
 ALERT_EMAIL=
 GMAIL_APP_PASSWORD=
+RAILWAY_DATABASE_URL=
 ```
 
 ## 실행 방법
@@ -84,6 +90,21 @@ uvicorn main:app --reload
 
 ```sql
 create table gems (
+  id bigint generated always as identity primary key,
+  user_id text not null,
+  gem text not null,
+  record_text text,
+  has_photo boolean default false,
+  image_url text,
+  ai_gems text,
+  created_at timestamptz default now()
+);
+```
+
+## Railway DB 스키마
+
+```sql
+create table chatbot (
   id bigint generated always as identity primary key,
   user_id text not null,
   gem text not null,
