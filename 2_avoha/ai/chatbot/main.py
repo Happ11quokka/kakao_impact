@@ -343,10 +343,14 @@ def kakao_carousel(gems: list) -> dict:
         dt = (datetime.fromisoformat(g["created_at"].replace("Z", "+00:00"))
               .astimezone(__import__("zoneinfo").ZoneInfo("Asia/Seoul"))
               .strftime("%m/%d %H:%M"))
-        cards.append({
+        card = {
             "title": f"{emoji} {g['gem']}",
             "description": f"{dt}\n{g['record_text'] or ''}",
-        })
+        }
+        img_url = GEM_IMAGE_URL.get(g["gem"])
+        if img_url:
+            card["thumbnail"] = {"imageUrl": img_url}
+        cards.append(card)
     return {
         "version": "2.0",
         "template": {
