@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+from collections import defaultdict
 import requests
 import os
 import smtplib
@@ -22,28 +24,52 @@ app = FastAPI()
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     print(f"[unhandled error] {exc}")
-    from fastapi.responses import JSONResponse as _JSONResponse
-    return _JSONResponse(
+    return JSONResponse(
         status_code=200,
         content={
             "version": "2.0",
             "template": {
                 "outputs": [{"simpleText": {"text": "잠시 오류가 발생했어요. 다시 시도해주세요!"}}],
                 "quickReplies": [
-                    {"label": "인벤토리 👜", "action": "message", "messageText": "인벤토리"},
-                    {"label": "도감 📖", "action": "message", "messageText": "도감"},
+                    {"label": "원석 도감", "action": "message", "messageText": "도감"},
+                    {"label": "내 원석 보기", "action": "message", "messageText": "내 원석"},
+                    {"label": "채집 안내", "action": "message", "messageText": "채집 안내"},
                 ],
             },
         },
     )
 
-user_count: dict = {}  # { "유저ID": {"date": date, "count": int} }
-pending_photo: dict = {}  # { "유저ID": {"time": datetime, "url": str} }
-pending_gem: dict = {}  # { "유저ID": {"gem": str, "text": str, "has_photo": bool, "image_url": str|None} }
-pending_emotion_selection: dict = {}  # { "유저ID": {"emotions": [emotion_word], "text": str, "has_photo": bool, "image_url": str|None} }
-classify_fail_count: dict = {}  # { "유저ID": int } 감정 분류 실패 횟수
+user_count: dict = {}
+pending_photo: dict = {}
+pending_gem: dict = {}
+pending_emotion_selection: dict = {}
+classify_fail_count: dict = {}
+user_last_active: dict = {}  # {user_id: date(KST)}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
+
+
+def _today_kst() -> date:
+    return datetime.now(tz=ZoneInfo("Asia/Seoul")).date()
+
+
+def _josa_eul(word: str) -> str:
+    """받침 있으면 '을', 없으면 '를'"""
+    if not word:
+        return "을"
+    code = ord(word[-1]) - 0xAC00
+    if code < 0 or code >= 11172:
+        return "를"
+    return "을" if code % 28 != 0 else "를"
+
+def _josa_i(word: str) -> str:
+    """받침 있으면 '이', 없으면 '가'"""
+    if not word:
+        return "이"
+    code = ord(word[-1]) - 0xAC00
+    if code < 0 or code >= 11172:
+        return "가"
+    return "이" if code % 28 != 0 else "가"
 
 
 def send_alert_email(subject: str, body: str):
@@ -59,16 +85,37 @@ def send_alert_email(subject: str, body: str):
         print(f"[email error] {e}")
 
 
-def check_and_increment(user_id: str) -> bool:
-    today = date.today()
+def get_remaining_count(user_id: str) -> int:
+    today = _today_kst()
+    record = user_count.get(user_id)
+    if record is None or record["date"] != today:
+        return 5
+    return max(0, 5 - record["count"])
+
+
+def check_and_increment(user_id: str) -> int | None:
+    """채집권 1개 차감. 잔여 수 반환, 이미 소진 시 None."""
+    today = _today_kst()
     record = user_count.get(user_id)
     if record is None or record["date"] != today:
         user_count[user_id] = {"date": today, "count": 1}
-        return True
+        return 4
     if record["count"] >= 5:
-        return False
+        return None
     record["count"] += 1
-    return True
+    return 5 - record["count"]
+
+
+def check_and_increment_n(user_id: str, n: int) -> tuple[int, int]:
+    """채집권 n개 차감. (실제 차감 수, 잔여 수) 반환."""
+    today = _today_kst()
+    record = user_count.get(user_id)
+    current = 0 if (record is None or record["date"] != today) else record["count"]
+    can = max(0, 5 - current)
+    actual = min(n, can)
+    if actual > 0:
+        user_count[user_id] = {"date": today, "count": current + actual}
+    return actual, max(0, 5 - current - actual)
 
 
 def is_image_url(text: str) -> bool:
@@ -77,17 +124,129 @@ def is_image_url(text: str) -> bool:
     )
 
 
+EMOTION_TO_GEM = {
+    "우울함": "우울함 원석", "외로움": "외로움 원석", "상실감": "상실감 원석",
+    "서러움": "서러움 원석", "실망감": "실망감 원석",
+    "걱정": "걱정 원석", "긴장감": "긴장감 원석", "위축감": "위축감 원석",
+    "짜증": "짜증 원석", "억울함": "억울함 원석", "화남": "화남 원석", "적대감": "적대감 원석",
+    "즐거움": "즐거움 원석", "감사함": "감사함 원석", "설렘": "설렘 원석",
+    "뿌듯함": "뿌듯함 원석", "편안함": "편안함 원석",
+    "무기력함": "무기력함 원석", "공허함": "공허함 원석", "후회": "후회 원석",
+}
+GEM_TO_EMOTION = {v: k for k, v in EMOTION_TO_GEM.items()}
+
+GEM_EMOJI = {
+    "우울함 원석": "💙", "외로움 원석": "💙", "상실감 원석": "💙",
+    "서러움 원석": "💙", "실망감 원석": "💙",
+    "걱정 원석": "😰", "긴장감 원석": "😰", "위축감 원석": "😰",
+    "짜증 원석": "🔴", "억울함 원석": "🔴", "화남 원석": "🔴", "적대감 원석": "🔴",
+    "즐거움 원석": "✨", "감사함 원석": "✨", "설렘 원석": "✨",
+    "뿌듯함 원석": "✨", "편안함 원석": "✨",
+    "무기력함 원석": "🌀", "공허함 원석": "🌀", "후회 원석": "🌀",
+    "일상기록": "📝",
+}
+
+EMOTION_CATEGORIES = {
+    "슬픔 계열": ["우울함", "외로움", "상실감", "서러움", "실망감"],
+    "불안/두려움 계열": ["걱정", "긴장감", "위축감"],
+    "분노 계열": ["짜증", "억울함", "화남", "적대감"],
+    "기쁨/긍정 계열": ["즐거움", "감사함", "설렘", "뿌듯함", "편안함"],
+    "복잡/모호 계열": ["무기력함", "공허함", "후회"],
+}
+
+NEGATIVE_GEMS = {
+    EMOTION_TO_GEM[e]
+    for cat, emotions in EMOTION_CATEGORIES.items()
+    if cat != "기쁨/긍정 계열"
+    for e in emotions
+}
+
+REMAINING_MESSAGES = {
+    4: "채집권 4개가 남았어요! 신나게 원석 채집을 이어가요!",
+    3: "채집권 3개가 남았어요. 오늘도 잘 기록하고 있어요.",
+    2: "채집권 2개가 남았어요. 오늘 빛나는 순간이 또 있을까요?",
+    1: "이제 채집권이 1개 남았어요. 오늘의 마지막 원석, 어떤 마음으로 채집해볼까요?",
+    0: "오늘의 채집권을 모두 썼어요.\n내일 오전 10시에 다시 채워드릴게요.",
+}
+
+DANGER_KEYWORDS = [
+    "죽고싶", "죽고 싶", "자살", "자해", "사라지고싶", "사라지고 싶",
+    "없어지고싶", "없어지고 싶", "살기싫", "살기 싫", "죽어버리고싶", "끝내고싶",
+]
+HARMFUL_KEYWORDS = [
+    "섹스", "야동", "포르노", "성인", "씨발", "개새끼", "죽여", "죽일", "살인",
+    "협박", "폭행", "강간", "테러",
+]
+DANGER_MESSAGE = (
+    "많이 힘드시겠어요. 혼자 감당하기 어려운 감정이 느껴질 때는 도움을 받을 수 있어요.\n\n"
+    "📞 자살예방상담전화: 1393 (24시간)\n"
+    "📞 정신건강위기상담전화: 1577-0199 (24시간)\n\n"
+    "당신의 이야기를 들어줄 사람이 있어요. 꼭 전화해보세요."
+)
+HARMFUL_MESSAGE = "해당 기록은 서비스 정책에 따라 채집이 어려워요. 일상 속 소중한 순간을 담아 다시 보내주세요."
+
+WEB_URL = "https://frontend-production-09f81.up.railway.app/login"
+
+BASE_QUICK_REPLIES = [
+    {"label": "원석 도감", "action": "message", "messageText": "도감"},
+    {"label": "내 원석 보기", "action": "message", "messageText": "내 원석"},
+    {"label": "채집 안내", "action": "message", "messageText": "채집 안내"},
+]
+
+SAVE_QUICK_REPLIES = [
+    {"label": "맞아요", "action": "message", "messageText": "맞아요"},
+    {"label": "다시 찾을게요", "action": "message", "messageText": "다시 찾을게요"},
+    {"label": "내 원석 보기", "action": "message", "messageText": "내 원석"},
+    {"label": "원석 도감", "action": "message", "messageText": "도감"},
+]
+
+SAVE_ONLY_QUICK_REPLIES = [
+    {"label": "맞아요", "action": "message", "messageText": "맞아요"},
+    {"label": "다시 찾을게요", "action": "message", "messageText": "다시 찾을게요"},
+]
+
+RETRY_QUICK_REPLIES = [
+    {"label": "다시 시도 🔄", "action": "message", "messageText": "다시 시도"},
+    {"label": "내 원석 보기", "action": "message", "messageText": "내 원석"},
+    {"label": "원석 도감", "action": "message", "messageText": "도감"},
+]
+
+CATEGORY_QUICK_REPLIES = [
+    {"label": cat, "action": "message", "messageText": cat}
+    for cat in EMOTION_CATEGORIES.keys()
+]
+
+DAILY_QUICK_REPLIES = [
+    {"label": "감정 추가하기", "action": "message", "messageText": "감정 추가하기"},
+    {"label": "이대로 저장", "action": "message", "messageText": "이대로 저장"},
+]
+
+MULTI_EMOTION_QUICK_REPLIES = [
+    {"label": "모두 채집", "action": "message", "messageText": "모두 채집"},
+    {"label": "골라서 채집", "action": "message", "messageText": "골라서 채집"},
+]
+
+PHOTO_QUICK_REPLIES = [
+    {"label": "감정 적기", "action": "message", "messageText": "감정 적기"},
+    {"label": "일상으로 저장", "action": "message", "messageText": "일상으로 저장"},
+]
+
+EMOTION_QUICK_REPLIES = [
+    {"label": e, "action": "message", "messageText": e}
+    for e in EMOTION_TO_GEM.keys()
+]
+
+
 def classify_emotion(text: str) -> list[str] | str | None:
+    emotion_list = ", ".join(EMOTION_TO_GEM.keys())
     prompt = (
-        "다음 입력이 일상 기록인지 판단해줘.\n"
-        "인사말만 있거나(예: 하이, 안녕, ㅎㅎ, 테스트 등), 감정이나 일상 내용이 전혀 없는 경우에만 '기록아님'이라고만 답해.\n"
-        "인사말과 함께 감정이나 일상 내용이 포함되어 있으면 감정을 분류해줘.\n"
-        "일상 기록이라면 담긴 감정을 분석해서 아래 매핑에 맞는 원석 이름으로 답해줘.\n"
-        "감정-원석 매핑:\n"
-        "무탈→월장석, 평온→아쿠아마린, 뿌듯→황수정, 기쁨→루비, 만족→앰버, "
-        "설렘→로즈쿼츠, 슬픔→사파이어, 짜증→가넷, 후회→연수정, 위로→오팔\n"
-        "여러 감정이 담겨있으면 원석 이름들을 쉼표로만 구분해서 답해줘. "
-        "감정이 하나라면 원석 이름 하나만 답해줘. 다른 말은 절대 하지 마.\n\n"
+        "다음 입력을 세 가지로 분류해줘.\n"
+        "1. 인사말만 있거나 감정/일상 내용이 없으면: '기록아님'만 답해\n"
+        "2. 일상 사실만 나열되고 감정이 없으면(예: '수업 들었어', '밥 먹었어', '회사 갔다왔어'): '일상기록'만 답해\n"
+        "3. 감정이 담긴 기록이면: 아래 감정 목록 중 해당하는 단어로 답해줘\n"
+        f"감정 목록: {emotion_list}\n"
+        "여러 감정이 담겨있으면 쉼표로만 구분해서 최대 3개까지만 답해줘. "
+        "감정이 하나라면 단어 하나만 답해줘. 다른 말은 절대 하지 마.\n\n"
         f"입력: {text}"
     )
     try:
@@ -108,6 +267,8 @@ def classify_emotion(text: str) -> list[str] | str | None:
         print(f"[classify_emotion raw] {raw}")
         if "기록아님" in raw:
             return "NOT_RECORD"
+        if "일상기록" in raw:
+            return "DAILY_RECORD"
         valid_gem_names = set(EMOTION_TO_GEM.values())
         found = [g for g in valid_gem_names if g in raw]
         if not found:
@@ -121,41 +282,26 @@ def classify_emotion(text: str) -> list[str] | str | None:
 
 
 def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_url: str = None, ai_gems: str = None):
-    # Supabase 저장
     try:
-        data = {
-            "user_id": user_id,
-            "gem": gem,
-            "record_text": record_text,
-            "has_photo": has_photo,
-        }
+        data = {"user_id": user_id, "gem": gem, "record_text": record_text, "has_photo": has_photo}
         if image_url:
             data["image_url"] = image_url
         if ai_gems:
             data["ai_gems"] = ai_gems
         requests.post(
             f"{SUPABASE_URL}/rest/v1/gems",
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=data,
-            timeout=5,
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"},
+            json=data, timeout=5,
         )
     except Exception as e:
         print(f"[save_gem supabase error] {e}")
 
-    # Railway DB 저장
     if RAILWAY_DATABASE_URL:
         try:
             conn = psycopg2.connect(RAILWAY_DATABASE_URL)
             cur = conn.cursor()
             cur.execute(
-                """
-                INSERT INTO chatbot (user_id, gem, record_text, has_photo, image_url, ai_gems)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
+                "INSERT INTO chatbot (user_id, gem, record_text, has_photo, image_url, ai_gems) VALUES (%s, %s, %s, %s, %s, %s)",
                 (user_id, gem, record_text, has_photo, image_url, ai_gems),
             )
             conn.commit()
@@ -184,15 +330,8 @@ def get_gems(user_id: str) -> list:
     try:
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/gems",
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-            },
-            params={
-                "user_id": f"eq.{user_id}",
-                "order": "created_at.desc",
-                "limit": "10",
-            },
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+            params={"user_id": f"eq.{user_id}", "order": "created_at.desc", "limit": "10"},
             timeout=5,
         )
         data = response.json()
@@ -202,93 +341,41 @@ def get_gems(user_id: str) -> list:
         return []
 
 
-EMOTION_QUICK_REPLIES = [
-    {"label": "무탈", "action": "message", "messageText": "무탈"},
-    {"label": "평온", "action": "message", "messageText": "평온"},
-    {"label": "뿌듯", "action": "message", "messageText": "뿌듯"},
-    {"label": "기쁨", "action": "message", "messageText": "기쁨"},
-    {"label": "만족", "action": "message", "messageText": "만족"},
-    {"label": "설렘", "action": "message", "messageText": "설렘"},
-    {"label": "슬픔", "action": "message", "messageText": "슬픔"},
-    {"label": "짜증", "action": "message", "messageText": "짜증"},
-    {"label": "후회", "action": "message", "messageText": "후회"},
-    {"label": "위로", "action": "message", "messageText": "위로"},
-]
+def get_gem_stats(user_id: str) -> tuple[int, int]:
+    """(오늘 채집 수, 전체 채집 수) — 일상기록 제외"""
+    today = _today_kst()
+    record = user_count.get(user_id)
+    today_count = record["count"] if (record and record["date"] == today) else 0
 
-DANGER_KEYWORDS = [
-    "죽고싶", "죽고 싶", "자살", "자해", "사라지고싶", "사라지고 싶",
-    "없어지고싶", "없어지고 싶", "살기싫", "살기 싫", "죽어버리고싶", "끝내고싶",
-]
+    total_count = 0
+    if RAILWAY_DATABASE_URL:
+        try:
+            conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM chatbot WHERE user_id = %s AND gem != '일상기록'", (user_id,))
+            total_count = cur.fetchone()[0]
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"[get_gem_stats error] {e}")
+    else:
+        try:
+            resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/gems",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Prefer": "count=exact"},
+                params={"user_id": f"eq.{user_id}", "gem": "neq.일상기록", "select": "id"},
+                timeout=5,
+            )
+            cr = resp.headers.get("Content-Range", "")
+            total_count = int(cr.split("/")[-1]) if "/" in cr else 0
+        except Exception as e:
+            print(f"[get_gem_stats supabase error] {e}")
 
-HARMFUL_KEYWORDS = [
-    "섹스", "야동", "포르노", "성인", "씨발", "개새끼", "죽여", "죽일", "살인",
-    "협박", "폭행", "강간", "테러",
-]
-
-DANGER_MESSAGE = (
-    "많이 힘드시겠어요. 혼자 감당하기 어려운 감정이 느껴질 때는 도움을 받을 수 있어요.\n\n"
-    "📞 자살예방상담전화: 1393 (24시간)\n"
-    "📞 정신건강위기상담전화: 1577-0199 (24시간)\n\n"
-    "당신의 이야기를 들어줄 사람이 있어요. 꼭 전화해보세요."
-)
-
-HARMFUL_MESSAGE = "해당 기록은 서비스 정책에 따라 채집이 어려워요. 일상 속 소중한 순간을 담아 다시 보내주세요."
-
-EMOTION_TO_GEM = {
-    "무탈": "월장석", "평온": "아쿠아마린", "뿌듯": "황수정",
-    "기쁨": "루비", "만족": "앰버", "설렘": "로즈쿼츠",
-    "슬픔": "사파이어", "짜증": "가넷", "후회": "연수정", "위로": "오팔",
-}
-GEM_TO_EMOTION = {v: k for k, v in EMOTION_TO_GEM.items()}
-
-
-WEB_URL = "https://frontend-production-09f81.up.railway.app/login"
-
-SUPABASE_IMG = "https://tetatvafhnqbtwgfebic.supabase.co/storage/v1/object/public/gem-images"
-GEM_IMAGE_URL = {
-    "월장석": f"{SUPABASE_IMG}/moonstone.png",
-    "아쿠아마린": f"{SUPABASE_IMG}/aquamarine.png",
-    "황수정": f"{SUPABASE_IMG}/citrine.png",
-    "루비": f"{SUPABASE_IMG}/ruby.png",
-    "앰버": f"{SUPABASE_IMG}/amber.png",
-    "로즈쿼츠": f"{SUPABASE_IMG}/rose_quartz.png",
-    "사파이어": f"{SUPABASE_IMG}/sapphire.png",
-    "가넷": f"{SUPABASE_IMG}/garnet.png",
-    "연수정": f"{SUPABASE_IMG}/smoky_quartz.png",
-    "오팔": f"{SUPABASE_IMG}/opal.png",
-}
-
-BASE_QUICK_REPLIES = [
-    {"label": "인벤토리 👜", "action": "message", "messageText": "내 원석"},
-    {"label": "도감 📖", "action": "message", "messageText": "도감"},
-]
-
-SAVE_QUICK_REPLIES = [
-    {"label": "저장하기 💎", "action": "message", "messageText": "저장하기"},
-    {"label": "다른 감정 선택 🔄", "action": "message", "messageText": "다른 감정 선택"},
-    {"label": "인벤토리 👜", "action": "message", "messageText": "내 원석"},
-    {"label": "도감 📖", "action": "message", "messageText": "도감"},
-]
-
-SAVE_ONLY_QUICK_REPLIES = [
-    {"label": "저장하기 💎", "action": "message", "messageText": "저장하기"},
-    {"label": "다른 감정 선택 🔄", "action": "message", "messageText": "다른 감정 선택"},
-]
-
-RETRY_QUICK_REPLIES = [
-    {"label": "다시 시도 🔄", "action": "message", "messageText": "다시 시도"},
-    {"label": "인벤토리 👜", "action": "message", "messageText": "내 원석"},
-    {"label": "도감 📖", "action": "message", "messageText": "도감"},
-]
+    return today_count, total_count
 
 
 def kakao_response(text: str, show_emotion_buttons: bool = False, hide_buttons: bool = False, show_save_button: bool = False, custom_replies: list = None) -> dict:
-    result = {
-        "version": "2.0",
-        "template": {
-            "outputs": [{"simpleText": {"text": text}}],
-        },
-    }
+    result = {"version": "2.0", "template": {"outputs": [{"simpleText": {"text": text}}]}}
     if not hide_buttons:
         if custom_replies is not None:
             result["template"]["quickReplies"] = custom_replies
@@ -301,32 +388,24 @@ def kakao_response(text: str, show_emotion_buttons: bool = False, hide_buttons: 
     return result
 
 
-def kakao_save_complete(gem: str, user_id: str = "") -> dict:
+def kakao_save_complete(gem: str, remaining: int, user_id: str = "", alert_msg: str = "") -> dict:
     emotion = GEM_TO_EMOTION.get(gem, "")
-    gem_label = f"{gem}({emotion})" if emotion else gem
+    display = f"{emotion} 원석" if emotion else gem
     link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
-    card = {
-        "title": f"✨ {gem_label} 원석 채집 완료!",
-        "description": "일상 속 순간을 원석으로 저장했어요.\n오늘 주운 원석은 가방에서 확인해볼 수 있어요!",
-        "buttons": [
-            {
-                "action": "webLink",
-                "label": "닥토 공방 열기 🌐",
-                "webLinkUrl": link_url,
-            }
-        ],
-    }
-    img_url = GEM_IMAGE_URL.get(gem)
-    if img_url:
-        card["thumbnail"] = {"imageUrl": img_url}
+    remaining_msg = REMAINING_MESSAGES.get(remaining, "")
+    description = "세공소에서 직접 다듬어볼 수 있어요."
+    if remaining_msg:
+        description += f"\n\n{remaining_msg}"
+    if alert_msg:
+        description += alert_msg
     return {
         "version": "2.0",
         "template": {
-            "outputs": [
-                {
-                    "basicCard": card
-                }
-            ],
+            "outputs": [{"basicCard": {
+                "title": f"✨ {display}{_josa_eul(display)} 채집했어요!",
+                "description": description,
+                "buttons": [{"action": "webLink", "label": "세공소 가기", "webLinkUrl": link_url}],
+            }}],
             "quickReplies": BASE_QUICK_REPLIES,
         },
     }
@@ -334,36 +413,18 @@ def kakao_save_complete(gem: str, user_id: str = "") -> dict:
 
 def kakao_carousel(gems: list) -> dict:
     cards = []
-    gem_emoji = {
-        "월장석": "🤍", "아쿠아마린": "🩵", "황수정": "💛",
-        "루비": "❤️", "앰버": "🟠", "로즈쿼츠": "🌸",
-        "사파이어": "💙", "가넷": "🔴", "연수정": "🤎", "오팔": "🫧",
-    }
     for g in gems:
-        emoji = gem_emoji.get(g["gem"], "💎")
+        emoji = GEM_EMOJI.get(g["gem"], "💎")
         dt = (datetime.fromisoformat(g["created_at"].replace("Z", "+00:00"))
               .astimezone(__import__("zoneinfo").ZoneInfo("Asia/Seoul"))
               .strftime("%m/%d %H:%M"))
-        card = {
-            "title": f"{emoji} {g['gem']}",
-            "description": f"{dt}\n{g['record_text'] or ''}",
-        }
-        img_url = GEM_IMAGE_URL.get(g["gem"])
-        if img_url:
-            card["thumbnail"] = {"imageUrl": img_url}
-        cards.append(card)
+        cards.append({"title": f"{emoji} {g['gem']}", "description": f"{dt}\n{g['record_text'] or ''}"})
     return {
         "version": "2.0",
         "template": {
             "outputs": [
-                {
-                    "basicCard": cards[0]
-                } if len(cards) == 1 else {
-                    "carousel": {
-                        "type": "basicCard",
-                        "items": cards,
-                    }
-                }
+                {"basicCard": cards[0]} if len(cards) == 1
+                else {"carousel": {"type": "basicCard", "items": cards}}
             ]
         },
     }
@@ -376,20 +437,30 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
         return kakao_response(
             "순간을 조금 더 담아주세요 🪨\n"
             "어떤 일이 있었는지, 어떤 기분이었는지 적어주시면\n"
-            "딱 맞는 원석을 찾아드릴게요!"
+            "딱 맞는 원석을 찾아드릴게요!\n\n"
+            "예시: '오늘 발표가 떨렸는데 잘 끝나서 뿌듯했어'"
+        )
+    if result == "DAILY_RECORD":
+        pending_gem.pop(user_id, None)
+        pending_emotion_selection.pop(user_id, None)
+        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": None, "daily": True}
+        return kakao_response(
+            "오늘의 일상이 담겼어요.\n\n"
+            "이 순간 어떤 마음이었어요?\n"
+            "감정을 함께 남기면 원석으로 채집해드려요.\n\n"
+            "이대로 일상 기록만 남겨도 괜찮아요.",
+            custom_replies=DAILY_QUICK_REPLIES
         )
     if result == "TIMEOUT":
         pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": None, "retry": True}
         return kakao_response(
-            "현재 세공소에 광물이 몰려 분류에 시간이 조금 걸리고 있어요!\n"
-            "잠시 후 다시 시도해볼까요? 🛠️",
+            "현재 세공소에 광물이 몰려 분류에 시간이 조금 걸리고 있어요!\n잠시 후 다시 시도해볼까요? 🛠️",
             custom_replies=RETRY_QUICK_REPLIES
         )
 
     VALID_GEMS = set(EMOTION_TO_GEM.values())
     valid_gems = [g for g in (result or []) if g in VALID_GEMS]
 
-    # 새 메시지 처리 시 이전 대기 상태 초기화
     pending_gem.pop(user_id, None)
     pending_emotion_selection.pop(user_id, None)
     pending_photo.pop(user_id, None)
@@ -401,14 +472,8 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
         if fail_count >= 2:
             classify_fail_count[user_id] = 0
             pending_gem.pop(user_id, None)
-            send_alert_email(
-                "[닥토공방] 감정 분류 2회 실패 - 운영자 개입 필요",
-                f"유저 ID: {user_id}\n내용: {utterance}"
-            )
-            return kakao_response(
-                "세공소 주인장을 직접 불러올게요! 🛠️\n"
-                "잠시만 기다려주시면 운영자가 직접 도와드릴게요."
-            )
+            send_alert_email("[닥토공방] 감정 분류 2회 실패 - 운영자 개입 필요", f"유저 ID: {user_id}\n내용: {utterance}")
+            return kakao_response("세공소 주인장을 직접 불러올게요! 🛠️\n잠시만 기다려주시면 운영자가 직접 도와드릴게요.")
         return kakao_response(
             "앗! 순간이 너무 빨라 줍지 못했어요.\n"
             "지금을 조금 더 깊이 적어 채집을 완료해보세요!\n\n"
@@ -423,26 +488,103 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
             "has_photo": has_photo, "image_url": image_url,
             "ai_gems": ",".join(valid_gems),
         }
-        emotion_buttons = [{"label": e, "action": "message", "messageText": e} for e in emotion_words]
+        gem_names = ", ".join(valid_gems)
         return kakao_response(
-            "이 순간엔 여러 감정이 담겨있네요!\n가장 크게 느껴진 감정을 골라주세요 💎",
-            custom_replies=emotion_buttons
+            f"오늘 여러 마음이 함께 있었네요.\n\n"
+            f"{gem_names}이 보여요.\n\n"
+            "이 원석들로 오늘을 저장해드릴까요?",
+            custom_replies=MULTI_EMOTION_QUICK_REPLIES
         )
 
     gem = valid_gems[0]
     emotion = GEM_TO_EMOTION.get(gem, "")
-    gem_label = f"{gem}({emotion})" if emotion else gem
-    pending_gem[user_id] = {"gem": gem, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": gem}
-    if has_photo:
-        return kakao_response(f"사진과 함께 발견한 {gem_label} 원석이에요! ✨\n저장할까요?", custom_replies=SAVE_ONLY_QUICK_REPLIES)
-    return kakao_response(f"일상 속 순간에서 {gem_label} 원석을 발견했어요! ✨\n저장할까요?", custom_replies=SAVE_ONLY_QUICK_REPLIES)
+    pending_gem[user_id] = {"gem": gem, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": gem, "reclassify_step": 0}
+    return kakao_response(
+        f"{emotion}{_josa_i(emotion)} 느껴졌어요.\n"
+        f"{gem}{_josa_eul(gem)} 채집해드릴까요?\n\n"
+        "다른 감정이었다면 알려주세요.",
+        custom_replies=_gem_save_quick_replies(gem)
+    )
 
 
-def _callback_task(user_id: str, utterance: str, callback_url: str, photo_time, photo_url: str | None):
+def _prepend_greeting(response: dict, greeting: str) -> dict:
+    if not greeting:
+        return response
+    outputs = response.get("template", {}).get("outputs", [])
+    response["template"]["outputs"] = [{"simpleText": {"text": greeting}}] + outputs
+    return response
+
+
+def _check_and_update_visit(user_id: str) -> str | None:
+    """Returns greeting message on first-ever or first-of-day visit, else None."""
+    today = _today_kst()
+    last = user_last_active.get(user_id)
+    user_last_active[user_id] = today
+    if last is None:
+        return "닥토공방에 처음 오셨군요! 반가워요 😊"
+    if last < today:
+        return "오늘도 돌아오셨군요! 🌟"
+    return None
+
+
+def check_negative_accumulation(user_id: str) -> str | None:
+    """Returns an alert message if negative emotions are accumulating, else None."""
+    if not RAILWAY_DATABASE_URL:
+        return None
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        week_ago = (_today_kst() - timedelta(days=6)).isoformat()
+        cur.execute(
+            "SELECT gem, (created_at AT TIME ZONE 'Asia/Seoul')::date as day "
+            "FROM chatbot WHERE user_id = %s AND gem != '일상기록' "
+            "AND (created_at AT TIME ZONE 'Asia/Seoul')::date >= %s "
+            "ORDER BY created_at",
+            (user_id, week_ago),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        if len(rows) < 3:
+            return None
+        negative_count = sum(1 for gem, _ in rows if gem in NEGATIVE_GEMS)
+        if negative_count / len(rows) >= 0.7:
+            return "\n\n💙 최근 힘든 감정들이 많았던 것 같아요. 당신의 마음이 조금 더 편안해지길 바라요."
+        day_gems: dict = defaultdict(list)
+        for gem, day in rows:
+            day_gems[day].append(gem)
+        sorted_days = sorted(day_gems.keys())
+        if len(sorted_days) >= 3:
+            last3 = sorted_days[-3:]
+            if (last3[2] - last3[0]).days == 2:
+                if all(all(g in NEGATIVE_GEMS for g in day_gems[d]) for d in last3):
+                    return "\n\n💙 3일 연속 힘든 감정들이 함께했네요. 잠깐 쉬어가도 괜찮아요."
+        return None
+    except Exception as e:
+        print(f"[check_negative_accumulation error] {e}")
+        return None
+
+
+def _gem_save_quick_replies(gem: str, include_nav: bool = False) -> list:
+    replies = [
+        {"label": f"{gem} 채집하기 💎", "action": "message", "messageText": "맞아요"},
+        {"label": "다시 찾을게요", "action": "message", "messageText": "다시 찾을게요"},
+    ]
+    if include_nav:
+        replies += [
+            {"label": "내 원석 보기", "action": "message", "messageText": "내 원석"},
+            {"label": "원석 도감", "action": "message", "messageText": "도감"},
+        ]
+    return replies
+
+
+def _callback_task(user_id: str, utterance: str, callback_url: str, photo_time, photo_url: str | None, greeting: str | None = None):
     has_photo = bool(photo_time and datetime.now() - photo_time <= PHOTO_TIMEOUT)
     image_url = photo_url if has_photo else None
     result = classify_emotion(utterance)
     response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
+    if greeting:
+        response = _prepend_greeting(response, greeting)
     try:
         requests.post(callback_url, json=response, timeout=5)
     except Exception as e:
@@ -458,7 +600,6 @@ def _callback_task_retry(user_id: str, utterance: str, callback_url: str, has_ph
         print(f"[callback post error] {e}")
 
 
-
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -470,25 +611,15 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     user_id = body.get("userRequest", {}).get("user", {}).get("id", "unknown")
     utterance = body.get("userRequest", {}).get("utterance", "").strip()
 
-    # 위험 기록 감지
     if any(kw in utterance for kw in DANGER_KEYWORDS):
-        background_tasks.add_task(
-            send_alert_email,
-            "[닥토공방] 위험 기록 감지",
-            f"유저 ID: {user_id}\n내용: {utterance}"
-        )
+        background_tasks.add_task(send_alert_email, "[닥토공방] 위험 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
         return JSONResponse(kakao_response(DANGER_MESSAGE))
 
-    # 유해 기록 감지
     if any(kw in utterance for kw in HARMFUL_KEYWORDS):
-        background_tasks.add_task(
-            send_alert_email,
-            "[닥토공방] 유해 기록 감지",
-            f"유저 ID: {user_id}\n내용: {utterance}"
-        )
+        background_tasks.add_task(send_alert_email, "[닥토공방] 유해 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
         return JSONResponse(kakao_response(HARMFUL_MESSAGE))
 
-    # 다시 시도 (타임아웃 후 재시도)
+    # 다시 시도 (타임아웃 후 재분류)
     if utterance == "다시 시도":
         data = pending_gem.get(user_id)
         if not data:
@@ -499,129 +630,232 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         del pending_gem[user_id]
         callback_url = body.get("userRequest", {}).get("callbackUrl")
         if callback_url:
-            background_tasks.add_task(
-                _callback_task_retry, user_id, saved_utterance, callback_url, saved_has_photo, saved_image_url
-            )
+            background_tasks.add_task(_callback_task_retry, user_id, saved_utterance, callback_url, saved_has_photo, saved_image_url)
             return JSONResponse({"version": "2.0", "useCallback": True})
         result = classify_emotion(saved_utterance)
         return JSONResponse(_build_ai_response(user_id, saved_utterance, saved_has_photo, saved_image_url, result))
 
-    # 다른 감정 선택
-    if utterance == "다른 감정 선택":
-        if user_id not in pending_gem:
+    # 다시 찾을게요 — 1회차: 카테고리, 2회차: 전체 20개
+    if utterance == "다시 찾을게요":
+        data = pending_gem.get(user_id)
+        if not data:
             return JSONResponse(kakao_response("저장 대기 중인 원석이 없어요. 일상을 먼저 보내주세요!"))
-        return JSONResponse(kakao_response(
-            "어떤 감정이 더 잘 맞나요? 골라주세요!",
-            show_emotion_buttons=True
-        ))
+        step = data.get("reclassify_step", 0)
+        if step < 2:
+            data["reclassify_step"] = 1
+            return JSONResponse(kakao_response("어떤 결에 더 가까운가요?", custom_replies=CATEGORY_QUICK_REPLIES))
+        else:
+            data["reclassify_step"] = 0
+            return JSONResponse(kakao_response("어떤 감정이 가장 가까운가요?", show_emotion_buttons=True))
 
-    # 저장하기 확인
-    if utterance == "저장하기":
+    # 맞아요 (저장)
+    if utterance == "맞아요":
         data = pending_gem.get(user_id)
         if not data:
             return JSONResponse(kakao_response("저장할 원석이 없어요. 일상을 먼저 보내주세요!"))
         if not data.get("gem"):
-            return JSONResponse(kakao_response(
-                "감정을 먼저 선택해주세요!",
-                show_emotion_buttons=True
-            ))
-        if not check_and_increment(user_id):
+            return JSONResponse(kakao_response("감정을 먼저 선택해주세요!", show_emotion_buttons=True))
+        remaining = check_and_increment(user_id)
+        if remaining is None:
             del pending_gem[user_id]
             return JSONResponse(kakao_response(
                 "오늘 채집 바구니가 가득 찼습니다! 🧺\n"
                 "5개를 모두 줍다니 엄청난 하루를 보내셨군요!\n\n"
-                "아이템은 모두 주웠지만, 일상 속 소중한 순간은 계속 모을 수 있어요."
+                "내일 오전 10시에 다시 채워드릴게요."
             ))
-        background_tasks.add_task(save_gem, user_id, data["gem"], data["text"], data["has_photo"], data.get("image_url"), data.get("ai_gems"))
+        gem_to_save = data["gem"]
+        background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], data["has_photo"], data.get("image_url"), data.get("ai_gems"))
         del pending_gem[user_id]
-        return JSONResponse(kakao_save_complete(data["gem"], user_id))
+        alert_msg = check_negative_accumulation(user_id)
+        return JSONResponse(kakao_save_complete(gem_to_save, remaining, user_id, alert_msg or ""))
 
-    # 퀵 버튼으로 감정 선택 (복수 감정 확인 중 / 다른 감정 선택 중 / 분류 실패 시 직접 선택)
+    # 모두 채집 (복수 감정 전체 저장)
+    if utterance == "모두 채집":
+        sel = pending_emotion_selection.get(user_id)
+        if not sel:
+            return JSONResponse(kakao_response("저장할 원석이 없어요."))
+        gems_to_save = [EMOTION_TO_GEM[e] for e in sel["emotions"] if e in EMOTION_TO_GEM]
+        actual, remaining = check_and_increment_n(user_id, len(gems_to_save))
+        if actual == 0:
+            del pending_emotion_selection[user_id]
+            return JSONResponse(kakao_response("오늘 채집 바구니가 가득 찼습니다! 🧺\n내일 오전 10시에 다시 채워드릴게요."))
+        for gem in gems_to_save[:actual]:
+            background_tasks.add_task(save_gem, user_id, gem, sel["text"], sel["has_photo"], sel.get("image_url"), sel.get("ai_gems"))
+        del pending_emotion_selection[user_id]
+        saved_names = ", ".join(gems_to_save[:actual])
+        remaining_msg = REMAINING_MESSAGES.get(remaining, "")
+        skipped = len(gems_to_save) - actual
+        msg = f"✨ {saved_names}{_josa_eul(saved_names)} 채집했어요!"
+        if skipped > 0:
+            msg += f"\n채집권이 부족해 {skipped}개는 채집하지 못했어요."
+        if remaining_msg:
+            msg += f"\n\n{remaining_msg}"
+        alert_msg = check_negative_accumulation(user_id)
+        if alert_msg:
+            msg += alert_msg
+        return JSONResponse(kakao_response(msg))
+
+    # 골라서 채집 (복수 감정 중 선택)
+    if utterance == "골라서 채집":
+        sel = pending_emotion_selection.get(user_id)
+        if not sel:
+            return JSONResponse(kakao_response("저장할 원석이 없어요."))
+        emotion_buttons = [{"label": e, "action": "message", "messageText": e} for e in sel["emotions"]]
+        return JSONResponse(kakao_response("어떤 원석을 채집할까요?", custom_replies=emotion_buttons))
+
+    # 감정 추가하기 (일상 기록 후 감정 추가)
+    if utterance == "감정 추가하기":
+        data = pending_gem.get(user_id)
+        if not data or not data.get("daily"):
+            return JSONResponse(kakao_response("먼저 일상을 기록해주세요!"))
+        stored_text = data["text"]
+        stored_has_photo = data["has_photo"]
+        stored_image_url = data.get("image_url")
+        callback_url = body.get("userRequest", {}).get("callbackUrl")
+        if callback_url:
+            background_tasks.add_task(_callback_task_retry, user_id, stored_text, callback_url, stored_has_photo, stored_image_url)
+            return JSONResponse({"version": "2.0", "useCallback": True})
+        result = classify_emotion(stored_text)
+        return JSONResponse(_build_ai_response(user_id, stored_text, stored_has_photo, stored_image_url, result))
+
+    # 이대로 저장 (일상 기록만 저장, 채집권 미사용)
+    if utterance == "이대로 저장":
+        data = pending_gem.get(user_id)
+        if not data:
+            return JSONResponse(kakao_response("저장할 기록이 없어요. 일상을 먼저 보내주세요!"))
+        background_tasks.add_task(save_gem, user_id, "일상기록", data["text"], data["has_photo"], data.get("image_url"), None)
+        del pending_gem[user_id]
+        return JSONResponse(kakao_response("일상 기록이 저장됐어요! 📝\n오늘도 소중한 순간을 담아주셨네요."))
+
+    # 일상으로 저장 (사진 → 일상 기록, 채집권 미사용)
+    if utterance == "일상으로 저장":
+        photo_data = pending_photo.get(user_id)
+        if photo_data and datetime.now() - photo_data["time"] <= PHOTO_TIMEOUT:
+            background_tasks.add_task(save_gem, user_id, "일상기록", "", True, photo_data["url"], None)
+            pending_photo.pop(user_id, None)
+            return JSONResponse(kakao_response("사진이 일상 기록으로 저장됐어요! 📝"))
+        return JSONResponse(kakao_response("저장할 사진이 없어요. 사진을 먼저 보내주세요!"))
+
+    # 감정 적기 (사진 후 텍스트 유도)
+    if utterance == "감정 적기":
+        return JSONResponse(kakao_response(
+            "오늘 있었던 일이나 지금 느끼는 마음을 적어봐요.\n짧게 적어도 괜찮아요!",
+            hide_buttons=True
+        ))
+
+    # 감정 퀵버튼 선택
     if utterance in EMOTION_TO_GEM:
         gem = EMOTION_TO_GEM[utterance]
         sel = pending_emotion_selection.get(user_id)
         print(f"[emotion click] utterance={utterance}, sel={sel}, pending_gem={pending_gem.get(user_id)}")
         if sel and utterance in sel["emotions"]:
-            # 복수 감정 중 메인 감정 선택 → 저장 대기 (인벤/도감 숨김)
             del pending_emotion_selection[user_id]
-            pending_gem[user_id] = {
-                "gem": gem, "text": sel["text"],
-                "has_photo": sel["has_photo"], "image_url": sel.get("image_url"),
-                "ai_gems": sel.get("ai_gems"),
-            }
-            gem_label = f"{gem}({utterance})"
-            return JSONResponse(kakao_response(
-                f"{gem_label} 원석을 선택하셨어요! ✨\n저장할까요?",
-                custom_replies=SAVE_ONLY_QUICK_REPLIES
-            ))
+            pending_gem[user_id] = {"gem": gem, "text": sel["text"], "has_photo": sel["has_photo"], "image_url": sel.get("image_url"), "ai_gems": sel.get("ai_gems"), "reclassify_step": 0}
+            return JSONResponse(kakao_response(f"{gem}{_josa_eul(gem)} 선택하셨어요! ✨\n저장할까요?", custom_replies=_gem_save_quick_replies(gem)))
         existing = pending_gem.get(user_id)
         if existing:
-            # 다른 감정으로 교체 → 저장 대기 유지
             existing["gem"] = gem
-            gem_label = f"{gem}({utterance})"
-            return JSONResponse(kakao_response(
-                f"{gem_label} 원석으로 바꿨어요! ✨\n저장할까요?",
-                show_save_button=True
-            ))
-        # pending_gem 없는 상태에서 감정 단어 입력 → 일상 기록 먼저 요청
-        return JSONResponse(kakao_response(
-            "먼저 오늘의 일상을 적어주세요 🪨\n"
-            "어떤 일이 있었는지 보내주시면 원석으로 저장해드릴게요!"
-        ))
+            existing["reclassify_step"] = 0
+            existing.pop("direct_input", None)
+            return JSONResponse(kakao_response(f"{gem}으로 바꿨어요! ✨\n저장할까요?", custom_replies=_gem_save_quick_replies(gem)))
+        return JSONResponse(kakao_response("먼저 오늘의 일상을 적어주세요 🪨\n어떤 일이 있었는지 보내주시면 원석으로 저장해드릴게요!"))
+
+    # 카테고리 선택 (재분류 1회차 → 2회차)
+    if utterance in EMOTION_CATEGORIES:
+        data = pending_gem.get(user_id)
+        if not data:
+            return JSONResponse(kakao_response("저장 대기 중인 원석이 없어요. 일상을 먼저 보내주세요!"))
+        emotions_in_cat = EMOTION_CATEGORIES[utterance]
+        emotion_buttons = [{"label": e, "action": "message", "messageText": e} for e in emotions_in_cat]
+        data["reclassify_step"] = 2
+        return JSONResponse(kakao_response("이 중에서 골라봐요.", custom_replies=emotion_buttons))
 
     # 도감 조회
     if utterance == "도감":
         pdata = pending_gem.get(user_id)
         if pdata and pdata.get("gem"):
-            pending_replies = SAVE_QUICK_REPLIES
+            pending_replies = _gem_save_quick_replies(pdata["gem"], include_nav=True)
         elif pdata and pdata.get("retry"):
             pending_replies = RETRY_QUICK_REPLIES
         else:
-            pending_replies = None
-        return JSONResponse(kakao_response(
-            "📖 닥토 공방 원석 도감\n\n"
-            "✨ 채집 가능한 원석 10가지\n\n"
-            "🤍 월장석 — 무탈한 하루\n"
-            "🩵 아쿠아마린 — 고요하고 평온한 순간\n"
-            "💛 황수정 — 뿌듯하고 자랑스러운 순간\n"
-            "❤️ 루비 — 기쁘고 즐거운 순간\n"
-            "🟠 앰버 — 흡족하고 만족스러운 순간\n"
-            "🌸 로즈쿼츠 — 설레고 두근거리는 순간\n"
-            "💙 사파이어 — 슬프고 우울한 순간\n"
-            "🔴 가넷 — 짜증나고 화나는 순간\n"
-            "🤎 연수정 — 후회되고 아쉬운 순간\n"
-            "🫧 오팔 — 힘들고 위로받고 싶은 순간\n\n"
-            "하루 최대 5개까지 채집할 수 있어요.\n"
-            "오늘은 어떤 원석을 주워볼까요? 🧳",
-            custom_replies=pending_replies
-        ))
+            pending_replies = BASE_QUICK_REPLIES
+        return JSONResponse({
+            "version": "2.0",
+            "template": {
+                "outputs": [{"basicCard": {
+                    "title": "📖 원석 도감",
+                    "description": (
+                        "기록을 통해 채집할 수 있는 감정 원석들이에요.\n\n"
+                        "💙 슬픔 계열\n우울함, 외로움, 상실감, 서러움, 실망감\n\n"
+                        "😰 불안/두려움 계열\n걱정, 긴장감, 위축감\n\n"
+                        "🔴 분노 계열\n짜증, 억울함, 화남, 적대감\n\n"
+                        "✨ 기쁨/긍정 계열\n즐거움, 감사함, 설렘, 뿌듯함, 편안함\n\n"
+                        "🌀 복잡/모호 계열\n무기력함, 공허함, 후회\n\n"
+                        "각 원석은 강화를 통해 보석으로 세공할 수 있어요."
+                    ),
+                    "buttons": [{"action": "webLink", "label": "원석 도감 바로가기", "webLinkUrl": WEB_URL}],
+                }}],
+                "quickReplies": pending_replies,
+            },
+        })
 
     # 원석 가방 조회
     if utterance in ("내 원석", "원석 보기", "가방", "인벤토리"):
         pdata = pending_gem.get(user_id)
         if pdata and pdata.get("gem"):
-            inv_replies = SAVE_QUICK_REPLIES
+            inv_replies = _gem_save_quick_replies(pdata["gem"], include_nav=True)
         elif pdata and pdata.get("retry"):
             inv_replies = RETRY_QUICK_REPLIES
         else:
             inv_replies = BASE_QUICK_REPLIES
-        gems = get_gems(user_id)
-        if not gems:
-            return JSONResponse(kakao_response(
-                "아직 채집한 원석이 없어요!\n일상을 보내주시면 원석으로 저장해드릴게요. 🪨",
-                custom_replies=inv_replies
-            ))
-        response = kakao_carousel(gems)
-        response["template"]["quickReplies"] = inv_replies
-        return JSONResponse(response)
+        today_count, total_count = get_gem_stats(user_id)
+        remaining = get_remaining_count(user_id)
+        link_url = f"{WEB_URL}?kakao_hash={user_id}"
+        if total_count == 0:
+            desc = "아직 채집한 원석이 없어요.\n일상을 기록하면 원석으로 채집해드릴게요!"
+        else:
+            desc = f"오늘 {today_count}개 채집 · 총 {total_count}개 보유\n채집권 {remaining}개 남음"
+        return JSONResponse({
+            "version": "2.0",
+            "template": {
+                "outputs": [{"basicCard": {
+                    "title": "💎 내 원석",
+                    "description": desc,
+                    "buttons": [{"action": "webLink", "label": "내 원석 보러 가기", "webLinkUrl": link_url}],
+                }}],
+                "quickReplies": inv_replies,
+            },
+        })
+
+    # 채집 안내
+    if utterance == "채집 안내":
+        return JSONResponse(kakao_response(
+            "오늘의 마음을 기록하면, 감정 원석으로 채집해드릴게요.\n\n"
+            "글이나 사진으로 자유롭게 기록하면 돼요.\n"
+            "하루 5개까지 채집할 수 있어요.\n"
+            "다 써도 기록은 계속 남길 수 있어요.\n\n"
+            "원석 강화, 도감, 기록 모아보기는 웹에서 가능해요.\n\n"
+            "모든 기록은 안전하게 저장되고,\n"
+            "관리자는 기록에 임의로 접근하지 않아요.\n\n"
+            "문의나 도움이 필요하시면 언제든 채널로 연락해 주세요."
+        ))
 
     # 사진 전송
     if is_image_url(utterance):
         pending_photo[user_id] = {"time": datetime.now(), "url": utterance}
-        return JSONResponse(kakao_response("찰칵! 오늘은 사진으로 일상을 채집했군요!\n카메라를 들어 일상을 찍을 때, 당신은 어떤 기분이 들었나요?\n슬쩍 알려주면 사진에 어울리는 원석을 추천해드릴게요. 📸", hide_buttons=True))
+        return JSONResponse(kakao_response(
+            "사진으로 오늘을 담아주셨네요.\n\n"
+            "이 순간, 어떤 마음이었나요?\n"
+            "한 줄만 더 적어주시면 감정 원석을 찾아드려요.\n"
+            "10분 안에 적어주시면 사진과 함께 저장돼요! ⏰\n\n"
+            "그냥 일상으로 남겨도 괜찮아요.",
+            custom_replies=PHOTO_QUICK_REPLIES
+        ))
 
     if not utterance:
         return JSONResponse(kakao_response("조금 더 자세히 감정을 알려주실 수 있나요?"))
+
+    greeting = _check_and_update_visit(user_id)
 
     photo_data = pending_photo.get(user_id)
     has_photo = bool(photo_data and datetime.now() - photo_data["time"] <= PHOTO_TIMEOUT)
@@ -633,8 +867,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             _callback_task, user_id, utterance, callback_url,
             photo_data["time"] if photo_data else None,
             photo_data["url"] if photo_data else None,
+            greeting,
         )
         return JSONResponse({"version": "2.0", "useCallback": True})
 
     result = classify_emotion(utterance)
-    return JSONResponse(_build_ai_response(user_id, utterance, has_photo, image_url, result))
+    response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
+    if greeting:
+        response = _prepend_greeting(response, greeting)
+    return JSONResponse(response)

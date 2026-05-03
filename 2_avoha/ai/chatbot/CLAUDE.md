@@ -24,7 +24,7 @@ venv\Scripts\pip install -r requirements.txt
 ```
 카카오톡 → 오픈빌더 → POST /webhook
                             ↓ (즉시 {"useCallback": true} 반환)
-                       BackgroundTask → Claude Haiku → Supabase + Railway DB
+                       BackgroundTask → OpenRouter (Gemma 4 26B) → Supabase + Railway DB
                             ↓
                        callbackUrl POST → 카카오 응답
 ```
@@ -36,83 +36,126 @@ venv\Scripts\pip install -r requirements.txt
 - 봇테스트(BuilderBotTest)는 콜백 미지원 → 실제 카카오톡 채널에서만 동작
 
 **인메모리 상태 (서버 재시작 시 초기화):**
-- `user_count` — 유저별 하루 5회 채집권 카운트
+- `user_count` — 유저별 하루 5회 채집권 카운트 `{"date": date(KST), "count": int}`
 - `pending_photo` — 사진 전송 후 텍스트 대기 상태 `{"time": datetime, "url": str}` (10분 타임아웃)
-- `pending_gem` — 저장 대기 상태 `{"gem": str|None, "text": str, "has_photo": bool, "image_url": str|None, "ai_gems": str|None, "retry": bool}` (분류 실패 시 gem=None, TIMEOUT 시 gem=None + retry=True)
+- `pending_gem` — 저장 대기 상태 `{"gem": str|None, "text": str, "has_photo": bool, "image_url": str|None, "ai_gems": str|None, "retry": bool, "daily": bool, "reclassify_step": int}`
+  - gem=None + retry=True: TIMEOUT 후 재시도 대기
+  - gem=None: 분류 실패 후 감정 선택 대기
+  - daily=True: 일상기록 분류 후 감정 추가 대기
+  - reclassify_step: 재분류 단계 (0=초기, 1=카테고리 선택, 2=세부감정 선택)
 - `pending_emotion_selection` — 복수 감정 감지 후 선택 대기 상태 `{"emotions": [emotion_word], "text": str, "has_photo": bool, "image_url": str|None, "ai_gems": str}`
 - `classify_fail_count` — 유저별 감정 분류 연속 실패 횟수 (2회 시 운영자 알림)
+- `user_last_active` — 유저별 마지막 접속일 `{user_id: date(KST)}` (재방문 구분용)
 
 **주요 로직 (webhook 처리 순서):**
 1. 위험/유해 키워드 감지 → 즉시 응답 + 이메일 알림
 2. "다시 시도" → pending_gem에서 원본 텍스트 꺼내 재분류 (콜백 있으면 백그라운드 실행)
-3. "다른 감정 선택" → 10개 감정 퀵버튼 노출 (pending_gem 유지)
-4. "저장하기" → pending_gem 꺼내 gem=None이면 감정 선택 유도, gem 있으면 채집권 차감 후 Supabase + Railway DB 저장
-5. 감정 퀵버튼 선택 (`EMOTION_TO_GEM` 매칭):
-   - `pending_emotion_selection` 중이면 → 선택 감정으로 pending_gem 등록 (ai_gems 전달)
-   - `pending_gem` 있으면 → 원석 교체 (gem=None이면 분류 실패 후 첫 선택, ai_gems 유지)
-   - 그 외(pending_gem 없는 상태) → 일상 기록 먼저 요청 (저장하지 않음)
-6. 도감 조회 ("도감") — pending_gem 상태에 따라 퀵리플라이 분기
-7. 원석 조회 ("내 원석", "원석 보기", "가방", "인벤토리") — pending_gem 상태에 따라 퀵리플라이 분기
-8. 이미지 URL 감지 → `pending_photo` 등록 + 텍스트 유도 (버튼 숨김)
-9. AI 감정 분류 (`classify_emotion`) — timeout=4s (카카오 스킬 5초 제한)
-   - `callbackUrl` 있으면 → `_callback_task` 백그라운드 실행 후 즉시 `useCallback:true` 반환
-   - `NOT_RECORD` 반환 시 → pending_gem/pending_emotion_selection 초기화 후 더 자세히 적도록 안내
-   - `TIMEOUT` 반환 시 → pending_gem에 원본 텍스트 보존(gem=None, retry=True) + "다시 시도 🔄" 버튼 노출
-   - 분류 실패 시 → pending_gem에 원본 텍스트 보존(gem=None) + 퀵버튼 노출, 2회 연속 실패 시 운영자 이메일 알림
-10. 복수 감정 감지 시 → `pending_emotion_selection` 등록 + 감지된 감정만 퀵버튼 노출
-11. 단일 감정 → `pending_gem` 등록 + "저장하기/다른 감정 선택" 버튼 노출
-12. 저장 완료 → `kakao_save_complete()` (basicCard + 원석 이미지 썸네일 + 웹링크 버튼)
+3. "다시 찾을게요" → reclassify_step 확인:
+   - step 0→1: 카테고리 5개 버튼 노출
+   - step ≥2: 전체 20개 감정 버튼 노출 (step 초기화)
+4. "맞아요" → pending_gem 꺼내 채집권 차감 후 Supabase + Railway DB 저장, 부정감정 누적 체크
+5. "모두 채집" → pending_emotion_selection의 모든 감정 저장 (채집권 n개 차감), 부정감정 누적 체크
+6. "골라서 채집" → pending_emotion_selection의 감정 버튼만 노출
+7. "감정 추가하기" → pending_gem(daily=True)의 텍스트로 재분류 실행
+8. "이대로 저장" → 일상기록으로 저장 (채집권 미차감)
+9. "일상으로 저장" → 사진을 일상기록으로 저장 (채집권 미차감)
+10. "감정 적기" → 텍스트 입력 유도 메시지
+11. 감정 퀵버튼 선택 (`EMOTION_TO_GEM` 매칭):
+    - `pending_emotion_selection` 중이면 → 선택 감정으로 pending_gem 등록
+    - `pending_gem` 있으면 → 원석 교체
+    - 그 외 → 일상 기록 먼저 요청
+12. 카테고리 버튼 선택 → 해당 카테고리 감정 버튼 노출, reclassify_step=2
+13. 도감 조회 ("도감") — pending_gem 상태에 따라 퀵리플라이 분기
+14. 원석 조회 ("내 원석" 등) — get_gem_stats() 호출, pending_gem 상태에 따라 분기
+15. 채집 안내 ("채집 안내") — 서비스 안내 텍스트
+16. 이미지 URL 감지 → pending_photo 등록 + [감정 적기] [일상으로 저장] 버튼 노출
+17. 일반 텍스트 → _check_and_update_visit() (재방문 인사) → AI 감정 분류
+    - callbackUrl 있으면 → _callback_task 백그라운드 실행 후 즉시 useCallback:true 반환
+    - NOT_RECORD: 더 자세히 적도록 안내 + 예시 문장
+    - DAILY_RECORD: 일상기록 pending 등록 + [감정 추가하기] [이대로 저장] 버튼
+    - TIMEOUT: pending_gem(retry=True) 등록 + [다시 시도 🔄] 버튼
+    - 분류 실패: pending_gem(gem=None) 등록 + 전체 감정 버튼, 2회 연속 실패 시 운영자 이메일
+    - 복수 감정: pending_emotion_selection 등록 + [모두 채집] [골라서 채집] 버튼
+    - 단일 감정: pending_gem 등록 + [{gem} 채집하기 💎] [다시 찾을게요] 버튼
 
 **채집권 차감 시점:**
-- "저장하기" 클릭 시 (AI 분류 시점이 아님, 분류 실패 후 감정 선택 포함)
+- "맞아요" 클릭 시 (AI 분류 시점이 아님, 분류 실패 후 감정 선택 포함)
+- "모두 채집" 클릭 시 (감정 수만큼 차감, 잔여분만큼만 실제 저장)
+- 일상기록("이대로 저장", "일상으로 저장")은 채집권 미차감
 
 **카카오 응답 포맷:**
 - 텍스트: `simpleText`
-- 채집 완료: `basicCard` (썸네일: 원석 이미지, 제목: `원석(감정) 원석 채집 완료!` + 웹링크 버튼)
-- 원석 목록: `basicCard` (1개) 또는 `carousel` (복수)
+- 채집 완료: `basicCard` (제목: `✨ {감정} 원석을 채집했어요!`, 설명: 잔여 채집권 메시지 + 부정감정 누적 알림(해당 시), 버튼: [세공소 가기] webLink)
+- 도감: `basicCard` (20개 감정 카테고리별 목록 + [원석 도감 바로가기] webLink)
+- 내 원석: `basicCard` (오늘 N개 채집 · 총 M개 보유\n채집권 R개 남음 + [내 원석 보러 가기] webLink)
 - 퀵 리플라이:
-  - 기본: `[인벤토리 👜, 도감 📖]`
-  - 저장 대기 (gem 있음): `[저장하기 💎, 다른 감정 선택 🔄, 인벤토리 👜, 도감 📖]`
-  - 분류 직후 저장 확인: `[저장하기 💎, 다른 감정 선택 🔄]`
-  - 복수 감정 선택: 감지된 감정 버튼만
-  - 복수 감정 선택 후 확인: `[저장하기 💎, 다른 감정 선택 🔄]`
-  - 분류 실패: 감정 10개 + 기본
-  - 타임아웃: `[다시 시도 🔄, 인벤토리 👜, 도감 📖]`
-  - 사진 유도: 숨김
-  - 인벤토리/도감 조회 시 pending_gem 상태에 따라 분기:
-    - gem 있음 → 저장 대기 버튼 세트
-    - gem=None + retry=True (TIMEOUT) → `[다시 시도 🔄, 인벤토리 👜, 도감 📖]`
-    - gem=None (분류 실패) → 기본 버튼 세트
+  - 기본: `[원석 도감, 내 원석 보기, 채집 안내]`
+  - 저장 대기 (gem 있음): `[{gem} 채집하기 💎, 다시 찾을게요, 내 원석 보기, 원석 도감]`
+  - 분류 직후 저장 확인: `[{gem} 채집하기 💎, 다시 찾을게요]`
+  - 일상기록 분류 후: `[감정 추가하기, 이대로 저장]`
+  - 복수 감정: `[모두 채집, 골라서 채집]`
+  - 분류 실패: 전체 20개 감정 버튼
+  - 타임아웃: `[다시 시도 🔄, 내 원석 보기, 원석 도감]`
+  - 사진 입력: `[감정 적기, 일상으로 저장]`
+  - 재분류 1단계: 카테고리 5개 버튼
+  - 재분류 2단계: 해당 카테고리 감정 버튼
+  - 도감/내 원석 조회 시 pending_gem 상태에 따라 분기
+
+**재방문 인사 (_check_and_update_visit):**
+- 역대 첫 접속: "닥토공방에 처음 오셨군요! 반가워요 😊" (AI 응답 앞에 prepend)
+- 당일 첫 접속: "오늘도 돌아오셨군요! 🌟" (AI 응답 앞에 prepend)
+- 당일 재접속: 인사 없음
+- 텍스트 입력(AI 분류 경로)에서만 발동. 버튼 클릭 커맨드 경로에서는 발동 안 됨
+
+**부정감정 누적 알림 (check_negative_accumulation):**
+- 저장 완료 후 Railway DB 조회 (최근 7일, 일상기록 제외)
+- 기쁨/긍정 계열 제외한 나머지 15개 감정 = 부정감정
+- 주간 기록 중 70% 이상 부정감정 → 알림 메시지 채집 완료 카드에 append
+- 3일 연속 모든 기록이 부정감정 → 알림 메시지 채집 완료 카드에 append
+- 최소 3개 기록 있어야 체크
+
+**KST 자정 리셋:**
+- 모든 날짜 비교는 `_today_kst()` (ZoneInfo("Asia/Seoul")) 사용
+- user_count, get_gem_stats, get_remaining_count 모두 KST 기준
 
 **classify_emotion() 반환값:**
-- `list[str]` — 원석 이름 리스트 (단일 또는 복수)
-- `"NOT_RECORD"` — 일상 기록이 아님 (인사말만 있는 경우, 감정+인사말 혼합은 분류함)
-- `"TIMEOUT"` — 4초 초과 (`anthropic.APITimeoutError`)
+- `list[str]` — 원석 이름 리스트 (단일 또는 최대 3개)
+- `"NOT_RECORD"` — 인사말만 있거나 감정/일상 내용 없음
+- `"DAILY_RECORD"` — 감정 없이 일상 사실만 나열
+- `"TIMEOUT"` — 4초 초과 (`requests.exceptions.Timeout`)
 - `None` — 기타 오류
 
-**AI (Claude Haiku):**
-- 모델: `claude-haiku-4-5` (Anthropic SDK)
-- 원석명 or 감정 단어 탐색 후 `EMOTION_TO_GEM`으로 변환
-- "기록아님" 포함 시 `NOT_RECORD` 반환
+**AI (OpenRouter - Gemma 4 26B A4B):**
+- 모델: `google/gemma-4-26b-a4b-it:free` (OpenRouter API)
+- 3분류: 기록아님 / 일상기록 / 감정 단어(최대 3개)
+- timeout=4.0s
 
 **백그라운드 태스크:**
-- `_callback_task(user_id, utterance, callback_url, photo_time, photo_url)` — 일반 메시지 분류 후 callbackUrl POST
-- `_callback_task_retry(user_id, utterance, callback_url, has_photo, image_url)` — "다시 시도" 재분류 후 callbackUrl POST
+- `_callback_task(user_id, utterance, callback_url, photo_time, photo_url, greeting)` — 일반 메시지 분류 후 callbackUrl POST (greeting 있으면 응답 앞에 prepend)
+- `_callback_task_retry(user_id, utterance, callback_url, has_photo, image_url)` — "다시 시도" / "감정 추가하기" 재분류 후 callbackUrl POST
 
 **이메일 알림 발송 시점:**
 - 위험 키워드 감지
 - 유해 키워드 감지
 - 감정 분류 2회 연속 실패
 
-## 감정-원석 매핑
+## 감정-원석 매핑 (20개)
 
-무탈→월장석, 평온→아쿠아마린, 뿌듯→황수정, 기쁨→루비, 만족→앰버, 설렘→로즈쿼츠, 슬픔→사파이어, 짜증→가넷, 후회→연수정, 위로→오팔
+| 카테고리 | 감정 | 원석명 |
+|------|------|------|
+| 슬픔 계열 | 우울함, 외로움, 상실감, 서러움, 실망감 | {감정} 원석 |
+| 불안/두려움 계열 | 걱정, 긴장감, 위축감 | {감정} 원석 |
+| 분노 계열 | 짜증, 억울함, 화남, 적대감 | {감정} 원석 |
+| 기쁨/긍정 계열 | 즐거움, 감사함, 설렘, 뿌듯함, 편안함 | {감정} 원석 |
+| 복잡/모호 계열 | 무기력함, 공허함, 후회 | {감정} 원석 |
+
+원석명은 추후 확정 예정. 현재는 임시로 "{감정} 원석" 형태 사용.
 
 ## 환경 변수
 
 `.env` 파일 필요:
 ```
-ANTHROPIC_API_KEY=
+OPENROUTER_API_KEY=
 SUPABASE_URL=
 SUPABASE_KEY=
 ALERT_EMAIL=
@@ -155,9 +198,5 @@ create table chatbot (
 );
 ```
 
-- `gem` — 사용자가 최종 선택한 원석
-- `ai_gems` — AI 초기 판단 원석 (단일: "루비", 복수: "루비,사파이어", 분류 실패/타임아웃: null)
-
-Storage: `gem-images` 버킷 (Public) — 원석 이미지 호스팅용 (영롱한 보석 단계 10종)
-- 파일명: ruby, amber, aquamarine, rose_quartz, citrine, moonstone, sapphire, garnet, smoky_quartz, opal (.png)
-- `GEM_IMAGE_URL` 딕셔너리로 원석명 → URL 매핑, `kakao_save_complete()`에서 thumbnail으로 사용
+- `gem` — 사용자가 최종 선택한 원석명 (예: "뿌듯함 원석"). 일상기록은 "일상기록" 고정값
+- `ai_gems` — AI 초기 판단 원석 (단일: "뿌듯함 원석", 복수: "뿌듯함 원석,설렘 원석", 분류 실패/타임아웃: null)
