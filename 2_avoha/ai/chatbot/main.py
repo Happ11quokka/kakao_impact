@@ -216,6 +216,7 @@ DANGER_MESSAGE = (
 HARMFUL_MESSAGE = "해당 기록은 서비스 정책에 따라 채집이 어려워요. 일상 속 소중한 순간을 담아 다시 보내주세요."
 
 WEB_URL = "https://frontend-production-09f81.up.railway.app/login"
+DEFAULT_CARD_IMAGE = "https://tetatvafhnqbtwgfebic.supabase.co/storage/v1/object/public/gem-images/moonstone.png"
 
 BASE_QUICK_REPLIES = [
     {"label": "원석 도감", "action": "message", "messageText": "도감"},
@@ -454,6 +455,7 @@ def kakao_save_complete(gem: str, remaining: int, user_id: str = "", alert_msg: 
             "outputs": [{"basicCard": {
                 "title": f"✨ {display}{_josa_eul(display)} 채집했어요!",
                 "description": description,
+                "thumbnail": {"imageUrl": DEFAULT_CARD_IMAGE},
                 "buttons": [{"action": "webLink", "label": "세공소 가기", "webLinkUrl": link_url}],
             }}],
             "quickReplies": BASE_QUICK_REPLIES,
@@ -834,6 +836,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             "template": {
                 "outputs": [{"basicCard": {
                     "title": "📖 원석 도감",
+                    "thumbnail": {"imageUrl": DEFAULT_CARD_IMAGE},
                     "description": (
                         "기록을 통해 채집할 수 있는 감정 원석들이에요.\n\n"
                         "💙 슬픔 계열\n우울함, 외로움, 상실감, 서러움, 실망감\n\n"
@@ -870,6 +873,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             "template": {
                 "outputs": [{"basicCard": {
                     "title": "💎 내 원석",
+                    "thumbnail": {"imageUrl": DEFAULT_CARD_IMAGE},
                     "description": desc,
                     "buttons": [{"action": "webLink", "label": "내 원석 보러 가기", "webLinkUrl": link_url}],
                 }}],
