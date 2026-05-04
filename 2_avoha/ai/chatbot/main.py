@@ -146,6 +146,36 @@ GEM_EMOJI = {
     "일상기록": "📝",
 }
 
+# 챗봇 감정 원석(20종) → 백엔드 emotion_code(10종) 매핑
+# gems 테이블에 저장할 때 사용. 일상기록은 매핑 없음(제외).
+CHATBOT_GEM_TO_EMOTION_CODE: dict[str, str] = {
+    # 기쁨/긍정 계열
+    "뿌듯함 원석": "pride",        # 황수정
+    "즐거움 원석": "joy",          # 루비
+    "감사함 원석": "satisfaction",  # 앰버
+    "설렘 원석": "flutter",        # 로즈쿼츠
+    "편안함 원석": "serenity",     # 아쿠아마린
+    # 슬픔 계열
+    "우울함 원석": "sadness",      # 사파이어
+    "외로움 원석": "sadness",
+    "상실감 원석": "sadness",
+    "서러움 원석": "sadness",
+    "실망감 원석": "sadness",
+    # 분노 계열
+    "짜증 원석": "annoyance",     # 가넷
+    "억울함 원석": "annoyance",
+    "화남 원석": "annoyance",
+    "적대감 원석": "annoyance",
+    # 불안/두려움 계열
+    "걱정 원석": "solace",        # 오팔
+    "긴장감 원석": "solace",
+    "위축감 원석": "solace",
+    # 복잡/모호 계열
+    "무기력함 원석": "untroubled", # 월장석
+    "공허함 원석": "solace",      # 오팔
+    "후회 원석": "regret",        # 연수정
+}
+
 EMOTION_CATEGORIES = {
     "슬픔 계열": ["우울함", "외로움", "상실감", "서러움", "실망감"],
     "불안/두려움 계열": ["걱정", "긴장감", "위축감"],
@@ -304,6 +334,26 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
                 "INSERT INTO chatbot (user_id, gem, record_text, has_photo, image_url, ai_gems) VALUES (%s, %s, %s, %s, %s, %s)",
                 (user_id, gem, record_text, has_photo, image_url, ai_gems),
             )
+
+            # gems 테이블에도 INSERT → 인벤토리 "광물" 탭에 표시
+            emotion_code = CHATBOT_GEM_TO_EMOTION_CODE.get(gem)
+            if emotion_code:
+                cur.execute(
+                    "SELECT id FROM users WHERE provider_user_key = %s LIMIT 1",
+                    (user_id,),
+                )
+                user_row = cur.fetchone()
+                if user_row:
+                    user_uuid = user_row[0]
+                    cur.execute(
+                        "INSERT INTO gems (user_id, emotion_code, tier, source) "
+                        "VALUES (%s, %s, 1, %s)",
+                        (user_uuid, emotion_code, "chatbot"),
+                    )
+                    print(f"[save_gem] synced to gems table: user={user_uuid}, emotion={emotion_code}")
+                else:
+                    print(f"[save_gem] no user found for provider_user_key={user_id}, skipping gems insert")
+
             conn.commit()
             cur.close()
             conn.close()
