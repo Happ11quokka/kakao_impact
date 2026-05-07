@@ -1,19 +1,18 @@
-// === App — 라우팅 + 레이아웃 + AuthGate ===
+// === App — 라우팅 + 레이아웃 + AuthGate (3탭: 캘린더/홈/설정) ===
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import AuthGate from './components/AuthGate';
 import BottomNav from './components/pixel/BottomNav';
-import HomeField from './routes/HomeField';
-import Inventory from './routes/Inventory';
-import Workshop from './routes/Workshop';
-import CollectionBook from './routes/CollectionBook';
-import MyPage from './routes/MyPage';
+import Home from './routes/Home';
+import Calendar from './routes/Calendar';
+import Analysis from './routes/Analysis';
+import Settings from './routes/Settings';
 import Login from './routes/Login';
 import LoginCallback from './routes/LoginCallback';
 
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="phone-frame-wrapper pixel-ui">
+      <div className="phone-frame-wrapper">
         <div className="phone-frame-bezel">
           <div className="phone-frame">
             <Routes>
@@ -24,47 +23,37 @@ export default function App() {
                 element={
                   <AuthGate>
                     <PageLayout>
-                      <HomeField />
+                      <Home />
                     </PageLayout>
                   </AuthGate>
                 }
               />
               <Route
-                path="/inventory"
+                path="/calendar"
                 element={
                   <AuthGate>
                     <PageLayout>
-                      <Inventory />
+                      <Calendar />
                     </PageLayout>
                   </AuthGate>
                 }
               />
               <Route
-                path="/workshop"
+                path="/analysis"
                 element={
                   <AuthGate>
                     <PageLayout>
-                      <Workshop />
+                      <Analysis />
                     </PageLayout>
                   </AuthGate>
                 }
               />
               <Route
-                path="/book"
+                path="/settings"
                 element={
                   <AuthGate>
                     <PageLayout>
-                      <CollectionBook />
-                    </PageLayout>
-                  </AuthGate>
-                }
-              />
-              <Route
-                path="/me"
-                element={
-                  <AuthGate>
-                    <PageLayout>
-                      <MyPage />
+                      <Settings />
                     </PageLayout>
                   </AuthGate>
                 }
@@ -81,7 +70,6 @@ export default function App() {
 function PageLayout({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="pixel-ui"
       style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}
     >
       {children}

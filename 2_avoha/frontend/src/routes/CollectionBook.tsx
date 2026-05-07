@@ -1,184 +1,109 @@
-// === CollectionBook 화면 — 도감 ===
-import { useEffect } from 'react';
-import { useInventoryStore } from '../stores/inventory-store';
-import { EMOTIONS } from '../data/emotions';
-import { RECIPES } from '../data/recipes';
-import { TIER_NAMES, type GemTier } from '../types/gem';
-import GemStone from '../components/pixel/GemStone';
-import { FIELD_SKY, fieldPageChrome, useFieldTimePhase } from '../lib/field-time';
+// === CollectionBook 화면 — Figma 도감 오버레이 ===
 
-const TIERS: GemTier[] = [1, 2, 3, 4];
+const FIGMA_WIDTH = 391;
+const FIGMA_HEIGHT = 540;
 
-/** 카테고리별 실루엣 CSS 표현 */
-const SILHOUETTE_STYLE: Record<string, React.CSSProperties> = {
-  pebble:   { borderRadius: '50%' },
-  crystal:  { borderRadius: '12% 40% 12% 40%' },
-  fragment: { borderRadius: '30% 70% 50% 20%' },
-};
+const FIGMA_EMOTIONS = [
+  { label: '우울', x: 24, y: 41 },
+  { label: '외로움', x: 118, y: 41 },
+  { label: '상실', x: 212, y: 41 },
+  { label: '서러움', x: 306, y: 41 },
+  { label: '실망', x: 24, y: 144 },
+  { label: '걱정', x: 118, y: 144 },
+  { label: '긴장', x: 212, y: 144 },
+  { label: '위축', x: 306, y: 144 },
+  { label: '짜증', x: 24, y: 242 },
+  { label: '억울', x: 118, y: 242 },
+  { label: '화남', x: 212, y: 242 },
+  { label: '적대', x: 306, y: 242 },
+  { label: '즐거움', x: 24, y: 335 },
+  { label: '감사', x: 118, y: 335 },
+  { label: '설렘', x: 212, y: 335 },
+  { label: '뿌듯', x: 306, y: 335 },
+  { label: '편안', x: 24, y: 431 },
+  { label: '무기력', x: 118, y: 431 },
+  { label: '공허', x: 212, y: 431 },
+  { label: '후회', x: 306, y: 431 },
+];
 
-export default function CollectionBook() {
-  const phase = useFieldTimePhase();
-  const chrome = fieldPageChrome(phase);
-  const isDusk = phase === 'dusk';
-  const { gems, fetchInventory } = useInventoryStore();
-  useEffect(() => { fetchInventory(); }, [fetchInventory]);
-
-  const activeGems = gems.filter(g => !g.consumedAt);
-
-  // 감정×등급별 획득 여부
-  const owned = new Set(activeGems.map(g => `${g.emotionCode}-${g.tier}`));
-  const totalSlots = EMOTIONS.length * TIERS.length;
-  const ownedCount = new Set(activeGems.map(g => `${g.emotionCode}-${g.tier}`)).size;
-  const progress = Math.round((ownedCount / totalSlots) * 100);
-
+export default function CollectionBook({ onClose }: { onClose?: () => void }) {
   return (
-    <div style={{
-      flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      background: FIELD_SKY[phase],
-      transition: 'background 2s ease',
-    }}>
-      {/* 헤더 */}
-      <div style={{ padding: '20px 16px 0', textAlign: 'center' }}>
-        <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 700, color: chrome.title }}>도감</h1>
-      </div>
+    <section
+      aria-label="도감"
+      style={{
+        width: '100%',
+        height: '100%',
+        aspectRatio: `${FIGMA_WIDTH} / ${FIGMA_HEIGHT}`,
+        position: 'relative',
+        background: 'var(--color-point-green-light)',
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="도감 닫기"
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 2,
+          width: 24,
+          height: 45,
+          border: 0,
+          background: 'transparent',
+          color: '#000000',
+          fontSize: 18,
+          fontWeight: 400,
+          lineHeight: '45px',
+          padding: 0,
+          cursor: 'pointer',
+          outline: 'none',
+        }}
+      >
+        X
+      </button>
 
-      {/* 수집률 바 */}
-      <div style={{ padding: '16px 16px 0' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: chrome.muted, marginBottom: 6 }}>
-          <span>수집률</span>
-          <span style={{ fontWeight: 700, color: 'var(--color-coral)' }}>{progress}%</span>
-        </div>
-        <div style={{
-          height: 8, borderRadius: 4,
-          background: isDusk ? 'rgba(255,250,244,0.2)' : 'var(--color-surface-dim)',
-          overflow: 'hidden',
-        }}>
+      {FIGMA_EMOTIONS.map((item) => (
+        <div
+          key={item.label}
+          style={{
+            position: 'absolute',
+            left: `${(item.x / FIGMA_WIDTH) * 100}%`,
+            top: `${(item.y / FIGMA_HEIGHT) * 100}%`,
+            width: `${(57 / FIGMA_WIDTH) * 100}%`,
+            height: `${(92 / FIGMA_HEIGHT) * 100}%`,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+          }}
+        >
           <div
-            className="animate-progress"
+            aria-hidden="true"
             style={{
-              height: '100%',
-              width: `${progress}%`,
-              borderRadius: 4,
-              background: 'linear-gradient(90deg, var(--color-coral), var(--color-amber))',
+              width: '100%',
+              height: `${(62 / 92) * 100}%`,
+              borderRadius: 15,
+              background: '#E6E7E2',
             }}
           />
-        </div>
-      </div>
-
-      <div className="no-scrollbar" style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        {/* 감정 광물 그리드 */}
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: chrome.title }}>
-          💎 감정 광물
-        </h2>
-
-        {/* 등급 헤더 */}
-        <div style={{ display: 'grid', gridTemplateColumns: '80px repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
-          <div />
-          {TIERS.map(t => (
-            <div key={t} style={{ textAlign: 'center', fontSize: 9, color: chrome.muted, fontWeight: 600 }}>
-              {TIER_NAMES[t]}
-            </div>
-          ))}
-        </div>
-
-        {/* 감정별 행 */}
-        {EMOTIONS.map((emotion, ei) => (
-          <div
-            key={emotion.code}
-            className="animate-fade-slide-up"
+          <span
             style={{
-              display: 'grid',
-              gridTemplateColumns: '80px repeat(4, 1fr)',
-              gap: 6,
-              marginBottom: 6,
-              animationDelay: `${ei * 40}ms`,
+              display: 'block',
+              width: '100%',
+              marginTop: -2,
+              color: '#5A4A32',
+              fontSize: 'clamp(10px, 3.32vw, 13px)',
+              fontWeight: 400,
+              lineHeight: '32px',
+              textAlign: 'center',
+              wordBreak: 'keep-all',
             }}
           >
-            {/* 감정 라벨 */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 4, fontSize: 11,
-              color: chrome.title, fontWeight: 500,
-            }}>
-              <div style={{
-                width: 8, height: 8,
-                backgroundColor: emotion.hexColor,
-                borderRadius: emotion.silhouette === 'pebble' ? '50%' : emotion.silhouette === 'crystal' ? '2px' : '30%',
-              }} />
-              {emotion.nameKo}
-            </div>
-
-            {/* 등급별 셀 */}
-            {TIERS.map(tier => {
-              const key = `${emotion.code}-${tier}`;
-              const isOwned = owned.has(key);
-              const gem = isOwned ? activeGems.find(g => g.emotionCode === emotion.code && g.tier === tier) : null;
-
-              return (
-                <div
-                  key={tier}
-                  style={{
-                    aspectRatio: '1',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 'var(--radius-sm)',
-                    background: isOwned
-                      ? chrome.card
-                      : (isDusk ? 'rgba(255,250,244,0.16)' : 'var(--color-surface-dim)'),
-                    border: isOwned ? `1px solid ${emotion.hexColor}40` : '1px solid transparent',
-                  }}
-                >
-                  {isOwned && gem ? (
-                    <GemStone gem={gem} size={24} />
-                  ) : (
-                    /* 미획득 실루엣 */
-                    <div style={{
-                      width: 20, height: 20,
-                      backgroundColor: '#D0D0D0',
-                      opacity: 0.4,
-                      ...SILHOUETTE_STYLE[emotion.silhouette],
-                    }} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-
-        {/* 특수 레시피 카드 */}
-        <h2 style={{ fontSize: 14, fontWeight: 700, marginTop: 24, marginBottom: 12, color: chrome.title }}>
-          🃏 특수 레시피
-        </h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-          {RECIPES.map((recipe, i) => (
-            <div
-              key={recipe.slug}
-              className="animate-scale-pop"
-              style={{
-                animationDelay: `${i * 60}ms`,
-                padding: 12,
-                borderRadius: 'var(--radius-md)',
-                background: recipe.unlocked
-                  ? chrome.card
-                  : (isDusk ? 'rgba(255,250,244,0.14)' : 'var(--color-surface-dim)'),
-                border: recipe.unlocked ? '1px solid var(--color-amber)' : '1px solid transparent',
-                textAlign: 'center',
-                opacity: recipe.unlocked ? 1 : 0.5,
-              }}
-            >
-              <div style={{ fontSize: 24, marginBottom: 6 }}>
-                {recipe.unlocked ? '💎' : '❓'}
-              </div>
-              <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink)' }}>
-                {recipe.unlocked ? recipe.nameKo : '???'}
-              </p>
-              <p style={{ fontSize: 9, color: 'var(--color-ink-muted)', marginTop: 4 }}>
-                Lv.{recipe.resultTier}
-              </p>
-            </div>
-          ))}
+            {item.label}
+          </span>
         </div>
-      </div>
-    </div>
+      ))}
+    </section>
   );
 }

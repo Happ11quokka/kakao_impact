@@ -44,6 +44,39 @@
   --color-surface: #FDE8C8;
   --color-surface-dim: #F0E0C8;
 
+  /* === Modern UI Palette (Figma) === */
+}
+
+:root {
+  --color-base: #F7F2EA;
+  --color-point-yellow: #EDE2CC;
+  --color-point-green: #3D6B50;
+  --color-point-green-light: #A0BCA8;
+  --color-text-main: #5A4A32;
+  --color-text-sub: #8B7355;
+
+  --color-gem-sadness-main: #4F6B8A;
+  --color-gem-sadness-sub: #7F95AD;
+  --color-gem-sadness-hi: #C9D6E2;
+  
+  --color-gem-anxiety-main: #CCDBEC;
+  --color-gem-anxiety-sub: #CFCFC8;
+  --color-gem-anxiety-hi: #B8B9B3;
+
+  --color-gem-anger-main: #8A3F3A;
+  --color-gem-anger-sub: #B36A63;
+  --color-gem-anger-hi: #E2C2BE;
+
+  --color-gem-joy-main: #D2B44C;
+  --color-gem-joy-sub: #E5D28B;
+  --color-gem-joy-hi: #F4EED4;
+
+  --color-gem-complex-main: #2F2E2C;
+  --color-gem-complex-sub: #5A5855;
+  --color-gem-complex-hi: #A3A19C;
+}
+
+@theme {
   /* === 감정별 보석 색상 (10종) === */
   --color-gem-untroubled: #E8EAF0;
   --color-gem-serenity: #A0D8EF;
@@ -102,21 +135,17 @@ html, body, #root {
 }
 
 body {
-  background-color: var(--color-cream);
-  color: var(--color-ink);
+  background-color: var(--color-base);
+  color: var(--color-text-main);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   overscroll-behavior: none;
-  background-image:
-    linear-gradient(0deg, rgba(90, 62, 40, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(90, 62, 40, 0.04) 1px, transparent 1px);
-  background-size: 8px 8px;
 }
 
 @media (max-width: 480px) {
-  body { background-color: var(--color-surface); }
+  body { background-color: var(--color-base); }
 }
 
 /* === Phone Frame (desktop preview) === */
@@ -181,9 +210,8 @@ body {
 }
 
 .pixel-ui .phone-frame {
-  background:
-    linear-gradient(180deg, var(--color-cream) 0%, var(--color-peach) 100%);
-  box-shadow: inset 0 0 0 3px var(--color-brown), inset 0 0 0 6px var(--color-beige);
+  background: var(--color-base);
+  /* Remove retro borders to match modern Figma */
 }
 
 .pixel-title {
