@@ -592,24 +592,6 @@ def kakao_save_complete(gem: str, remaining: int, user_id: str = "", alert_msg: 
     }
 
 
-def kakao_carousel(gems: list) -> dict:
-    cards = []
-    for g in gems:
-        emoji = GEM_EMOJI.get(g["gem"], "💎")
-        dt = (datetime.fromisoformat(g["created_at"].replace("Z", "+00:00"))
-              .astimezone(__import__("zoneinfo").ZoneInfo("Asia/Seoul"))
-              .strftime("%m/%d %H:%M"))
-        cards.append({"title": f"{emoji} {g['gem']}", "description": f"{dt}\n{g['record_text'] or ''}"})
-    return {
-        "version": "2.0",
-        "template": {
-            "outputs": [
-                {"basicCard": cards[0]} if len(cards) == 1
-                else {"carousel": {"type": "basicCard", "items": cards}}
-            ]
-        },
-    }
-
 
 def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url: str | None, result) -> dict:
     if result == "NOT_RECORD":
