@@ -77,26 +77,6 @@ function dateInPeriod(date: Date, period: Period, today: Date): boolean {
   return date.getTime() >= start.getTime() && date.getTime() <= today.getTime();
 }
 
-function buildFallbackItems(today: Date): AnalysisItem[] {
-  const codes = ['joy', 'sadness', 'flutter', 'annoyance', 'regret', 'satisfaction', 'serenity', 'sadness', 'pride', 'solace', 'joy', 'annoyance'];
-  return codes.map((code, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() - (index % 9));
-    date.setHours([9, 12, 17, 21][index % 4], 10 + index, 0, 0);
-    const category = mapEmotionToCategory(code);
-    const emotion = getEmotion(code);
-    return {
-      id: `sample-${index}`,
-      emotionCode: code,
-      category,
-      label: detailForItem(code, index),
-      color: emotion?.hexColor ?? CATEGORY_BY_CODE[category].color,
-      createdAt: date.toISOString(),
-      recordText: index % 3 === 0 ? '오늘 마음에 남은 장면을 짧게 기록했어요.' : null,
-    };
-  });
-}
-
 function gemToItem(gem: Gem, index: number): AnalysisItem {
   const category = mapEmotionToCategory(gem.emotionCode);
   const emotion = getEmotion(gem.emotionCode);
@@ -136,8 +116,8 @@ export default function Analysis() {
   const recordTextByDate = useMemo(() => recordToTextByDate(records), [records]);
 
   const items = useMemo(() => {
-    const source = gems.length > 0 ? gems.map(gemToItem) : buildFallbackItems(today);
-    return source
+    return gems
+      .map(gemToItem)
       .filter((item) => dateInPeriod(new Date(item.createdAt), period, today))
       .map((item) => ({
         ...item,
@@ -240,10 +220,21 @@ export default function Analysis() {
         <section style={styles.summaryBand}>
           <div style={styles.summaryText}>
             <span style={styles.sectionLabel}>감정 요약 카드</span>
-            <strong style={styles.summaryTitle}>{topCategory.label}의 결이 가장 또렷했어요</strong>
-            <p style={styles.summaryCopy}>
-              {periodLabel} {activeDays}일 동안 {items.length}개의 원석을 만났고, 그중 {topCategory.count}개가 {topCategory.label} 계열이에요.
-            </p>
+            {items.length === 0 ? (
+              <>
+                <strong style={styles.summaryTitle}>아직 이번 기간엔 원석이 없어요</strong>
+                <p style={styles.summaryCopy}>
+                  카카오톡 챗봇에게 마음을 보내면 원석이 쌓여요.
+                </p>
+              </>
+            ) : (
+              <>
+                <strong style={styles.summaryTitle}>{topCategory.label}의 결이 가장 또렷했어요</strong>
+                <p style={styles.summaryCopy}>
+                  {periodLabel} {activeDays}일 동안 {items.length}개의 원석을 만났고, 그중 {topCategory.count}개가 {topCategory.label} 계열이에요.
+                </p>
+              </>
+            )}
           </div>
           <div style={styles.topGemCluster} aria-label="상위 감정 원석">
             {topItems.length === 0 ? (
@@ -339,7 +330,9 @@ export default function Analysis() {
             caption="이번 기간의 마음 여정"
           />
           <p style={styles.journeyText}>
-            {periodLabel} {items.length}개의 순간을 기록했어요. {topCategory.label}을 가장 많이 마주했고, 긍정 원석도 {positiveCount}번 남아 있어요.
+            {items.length === 0
+              ? `${periodLabel}엔 아직 기록된 원석이 없어요.`
+              : `${periodLabel} ${items.length}개의 순간을 기록했어요. ${topCategory.label}을 가장 많이 마주했고, 긍정 원석도 ${positiveCount}번 남아 있어요.`}
           </p>
           <div style={styles.miniStats}>
             <MiniStat label="기록한 날" value={`${activeDays}일`} />

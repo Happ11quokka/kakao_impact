@@ -43,12 +43,8 @@ export default function Home() {
 
   // 카테고리별 개수 집계 (피그마처럼 화면에 렌더링용)
   const gemCounts = useMemo(() => {
-    if (todayGems.length === 0) {
-      // 데이터가 없을 때 피그마 디자인과 똑같이 보이기 위한 임시 더미 데이터
-      return { sadness: 2, anxiety: 1, anger: 1, joy: 3, complex: 1 };
-    }
     const counts: Record<string, number> = {};
-    todayGems.forEach(gem => {
+    todayGems.forEach((gem) => {
       let cCode = gem.emotionCode;
       if (cCode === 'annoyance') cCode = 'anger';
       if (cCode === 'regret' || cCode === 'solace') cCode = 'complex';
@@ -206,9 +202,14 @@ export default function Home() {
       {/* ── 오늘 채집할 원석 ── */}
       {!showBook && (
       <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column' }}>
-        <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-text-main)', marginBottom: 16 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-text-main)', marginBottom: todayGems.length === 0 ? 6 : 16 }}>
           오늘 채집할 원석
         </h3>
+        {todayGems.length === 0 && (
+          <p style={{ fontSize: 12, color: 'var(--color-text-sub)', margin: '0 0 16px' }}>
+            아직 오늘 채집한 보석이 없어요. 카카오톡 챗봇에게 마음을 보내보세요.
+          </p>
+        )}
 
         {/* 수평 카드 리스트 (스크롤 없이 꽉 차게) */}
         <div
