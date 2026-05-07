@@ -85,7 +85,120 @@ def send_alert_email(subject: str, body: str):
         print(f"[email error] {e}")
 
 
+# --- DB 동기화 헬퍼 (collection_tickets 직접 조작) -------------------------
+# Why: chatbot이 인메모리만 쓰면 백엔드 /me 응답(`collection_tickets` SELECT)과
+#      불일치 → 카톡과 웹 화면 채집권 숫자가 어긋남. provider_user_key로
+#      users.id 조회 후 DB 차감을 시도, 실패(미로그인 등)하면 인메모리 fallback.
+
+def _get_user_uuid(user_id_hash: str) -> str | None:
+    """provider_user_key로 users.id 조회. 없으면 None."""
+    if not RAILWAY_DATABASE_URL:
+        return None
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM users WHERE provider_user_key = %s LIMIT 1",
+            (user_id_hash,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return str(row[0]) if row else None
+    except Exception as e:
+        print(f"[_get_user_uuid error] {e}")
+        return None
+
+
+def _db_get_remaining(user_uuid: str) -> int | None:
+    """오늘(KST) 잔여 채집권 조회. row 없으면 5, 에러 시 None."""
+    if not RAILWAY_DATABASE_URL:
+        return None
+    today = _today_kst()
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT remaining FROM collection_tickets WHERE user_id = %s AND date = %s LIMIT 1",
+            (user_uuid, today),
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else 5
+    except Exception as e:
+        print(f"[_db_get_remaining error] {e}")
+        return None
+
+
+def _db_decrement_ticket(user_uuid: str, n: int) -> tuple[int, int] | None:
+    """
+    오늘(KST) 채집권에서 n개 차감 (UPSERT + FOR UPDATE 단일 TX).
+    Returns: (actual_decremented, remaining) or None on error.
+    """
+    if not RAILWAY_DATABASE_URL:
+        return None
+    today = _today_kst()
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        # 없으면 5로 INSERT, 있으면 그대로 (atomic)
+        cur.execute(
+            """
+            INSERT INTO collection_tickets (user_id, date, remaining)
+            VALUES (%s, %s, 5)
+            ON CONFLICT (user_id, date) DO NOTHING
+            """,
+            (user_uuid, today),
+        )
+        # FOR UPDATE로 같은 TX 안에서 lock
+        cur.execute(
+            "SELECT remaining FROM collection_tickets WHERE user_id = %s AND date = %s FOR UPDATE",
+            (user_uuid, today),
+        )
+        row = cur.fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        current = row[0]
+        actual = min(n, current)
+        new_remaining = current - actual
+        cur.execute(
+            "UPDATE collection_tickets SET remaining = %s WHERE user_id = %s AND date = %s",
+            (new_remaining, user_uuid, today),
+        )
+        conn.commit()
+        return (actual, new_remaining)
+    except Exception as e:
+        print(f"[_db_decrement_ticket error] {e}")
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return None
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def get_remaining_count(user_id: str) -> int:
+    # DB 우선 (OAuth 로그인된 사용자), 실패 시 인메모리 fallback
+    user_uuid = _get_user_uuid(user_id)
+    if user_uuid is not None:
+        db_val = _db_get_remaining(user_uuid)
+        if db_val is not None:
+            return db_val
     today = _today_kst()
     record = user_count.get(user_id)
     if record is None or record["date"] != today:
@@ -95,6 +208,15 @@ def get_remaining_count(user_id: str) -> int:
 
 def check_and_increment(user_id: str) -> int | None:
     """채집권 1개 차감. 잔여 수 반환, 이미 소진 시 None."""
+    user_uuid = _get_user_uuid(user_id)
+    if user_uuid is not None:
+        result = _db_decrement_ticket(user_uuid, 1)
+        if result is not None:
+            actual, remaining = result
+            if actual == 0:
+                return None
+            return remaining
+        # DB 실패 → 인메모리 fallback
     today = _today_kst()
     record = user_count.get(user_id)
     if record is None or record["date"] != today:
@@ -108,6 +230,12 @@ def check_and_increment(user_id: str) -> int | None:
 
 def check_and_increment_n(user_id: str, n: int) -> tuple[int, int]:
     """채집권 n개 차감. (실제 차감 수, 잔여 수) 반환."""
+    user_uuid = _get_user_uuid(user_id)
+    if user_uuid is not None:
+        result = _db_decrement_ticket(user_uuid, n)
+        if result is not None:
+            return result
+        # DB 실패 → 인메모리 fallback
     today = _today_kst()
     record = user_count.get(user_id)
     current = 0 if (record is None or record["date"] != today) else record["count"]
