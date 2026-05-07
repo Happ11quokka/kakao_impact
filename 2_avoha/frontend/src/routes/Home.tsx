@@ -1,8 +1,7 @@
 // === Home 화면 — 모던 UI 버전 ===
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useFieldStore } from '../stores/field-store';
 import { useInventoryStore } from '../stores/inventory-store';
-import { usePetStore } from '../stores/pet-store';
 import { emotionToCategory } from '../lib/emotion-category';
 import { getEmotion } from '../data/emotions';
 import CollectionBook from './CollectionBook';
@@ -19,10 +18,7 @@ const EMOTION_CATEGORIES = [
 export default function Home() {
   const { todayDrops, fetchToday, error: fieldError } = useFieldStore();
   const { ticketsRemaining, gems, fetchInventory } = useInventoryStore();
-  const { feedGem } = usePetStore();
   const [showBook, setShowBook] = useState(false);
-  const [isEating, setIsEating] = useState(false);
-  const [fedGemIds, setFedGemIds] = useState<Set<string>>(new Set());
   const [mascotError, setMascotError] = useState(false);
 
   useEffect(() => {
@@ -30,10 +26,12 @@ export default function Home() {
     fetchInventory();
   }, [fetchToday, fetchInventory]);
 
-  // 오늘 수집한 보석 (먹이지 않은 것)
+  // 오늘 수집한 보석 (BE 기준 consumed_at 미설정만)
+  // NOTE: 마스코트 클릭 = 먹이기 흐름은 의도치 않은 보석 삭제 UX 때문에 비활성화.
+  //       다마고치 EXP 부여는 추후 명시적 인터랙션 또는 BE 동기화로 재구성 예정.
   const todayGems = useMemo(() => {
     return gems.filter((g) => {
-      if (g.consumedAt || fedGemIds.has(g.id)) return false;
+      if (g.consumedAt) return false;
       const d = new Date(g.createdAt);
       const now = new Date();
       return (
@@ -42,7 +40,7 @@ export default function Home() {
         d.getDate() === now.getDate()
       );
     });
-  }, [gems, fedGemIds]);
+  }, [gems]);
 
   // 카테고리별 개수 집계 (피그마처럼 화면에 렌더링용)
   const gemCounts = useMemo(() => {
@@ -53,15 +51,6 @@ export default function Home() {
     });
     return counts;
   }, [todayGems]);
-
-  const handleFeed = useCallback(() => {
-    if (todayGems.length === 0 || isEating) return;
-    const gemToFeed = todayGems[0];
-    setIsEating(true);
-    feedGem(gemToFeed.emotionCode);
-    setFedGemIds(prev => new Set(prev).add(gemToFeed.id));
-    setTimeout(() => setIsEating(false), 800);
-  }, [todayGems, isEating, feedGem]);
 
   const todayDateString = useMemo(() => {
     const now = new Date();
@@ -211,8 +200,8 @@ export default function Home() {
           </div>
 
           {/* ── 펫 영역 (마스코트) ── */}
-          <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={handleFeed}>
-            <div style={{ cursor: 'pointer' }}>
+          <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <div>
               {mascotError ? (
                 <div
                   style={{
