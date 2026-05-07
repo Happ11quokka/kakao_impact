@@ -634,7 +634,6 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
                     ),
                     "thumbnail": {"imageUrl": MASCOT_IMAGE},
                 }}],
-                "quickReplies": BASE_QUICK_REPLIES,
             },
         }
     if result == "DAILY_RECORD":
