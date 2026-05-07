@@ -839,7 +839,21 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         step = data.get("reclassify_step", 0)
         if step < 2:
             data["reclassify_step"] = 1
-            return JSONResponse(kakao_response("어떤 결에 더 가까운가요?", custom_replies=CATEGORY_QUICK_REPLIES))
+            return JSONResponse({
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {"simpleText": {"text": "어떤 결에 더 가까운가요?"}},
+                        {"basicCard": {
+                            "title": "원하는 감정이 없다면",
+                            "description": "일상 기록으로도 저장할 수 있어요.",
+                            "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                            "buttons": [{"action": "message", "label": "일상으로 저장", "messageText": "이대로 저장"}],
+                        }},
+                    ],
+                    "quickReplies": CATEGORY_QUICK_REPLIES,
+                },
+            })
         else:
             data["reclassify_step"] = 0
             return JSONResponse(kakao_response("어떤 감정이 가장 가까운가요?", show_emotion_buttons=True))
@@ -956,6 +970,28 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return JSONResponse(kakao_response(f"{gem}으로 바꿨어요! ✨\n저장할까요?", custom_replies=_gem_save_quick_replies(gem)))
         return JSONResponse(kakao_response("먼저 오늘의 일상을 적어주세요 🪨\n어떤 일이 있었는지 보내주시면 원석으로 저장해드릴게요!"))
 
+    # 이전 단계로 (감정 선택 → 카테고리 선택)
+    if utterance == "이전 단계로":
+        data = pending_gem.get(user_id)
+        if not data:
+            return JSONResponse(kakao_response("저장 대기 중인 원석이 없어요. 일상을 먼저 보내주세요!"))
+        data["reclassify_step"] = 1
+        return JSONResponse({
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {"simpleText": {"text": "어떤 결에 더 가까운가요?"}},
+                    {"basicCard": {
+                        "title": "원하는 감정이 없다면",
+                        "description": "일상 기록으로도 저장할 수 있어요.",
+                        "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                        "buttons": [{"action": "message", "label": "일상으로 저장", "messageText": "이대로 저장"}],
+                    }},
+                ],
+                "quickReplies": CATEGORY_QUICK_REPLIES,
+            },
+        })
+
     # 카테고리 선택 (재분류 1회차 → 2회차)
     if utterance in EMOTION_CATEGORIES:
         data = pending_gem.get(user_id)
@@ -963,8 +999,23 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return JSONResponse(kakao_response("저장 대기 중인 원석이 없어요. 일상을 먼저 보내주세요!"))
         emotions_in_cat = EMOTION_CATEGORIES[utterance]
         emotion_buttons = [{"label": e, "action": "message", "messageText": e} for e in emotions_in_cat]
+        emotion_buttons.append({"label": "이전 단계로", "action": "message", "messageText": "이전 단계로"})
         data["reclassify_step"] = 2
-        return JSONResponse(kakao_response("이 중에서 골라봐요.", custom_replies=emotion_buttons))
+        return JSONResponse({
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {"simpleText": {"text": "이 중에서 골라봐요."}},
+                    {"basicCard": {
+                        "title": "원하는 감정이 없다면",
+                        "description": "일상 기록으로도 저장할 수 있어요.",
+                        "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                        "buttons": [{"action": "message", "label": "일상으로 저장", "messageText": "이대로 저장"}],
+                    }},
+                ],
+                "quickReplies": emotion_buttons,
+            },
+        })
 
     # 도감 조회
     if utterance == "도감":
