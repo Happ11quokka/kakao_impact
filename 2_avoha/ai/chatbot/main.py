@@ -420,7 +420,9 @@ def classify_emotion(text: str) -> list[str] | str | None:
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 50,
             },
-            timeout=4.0,
+            # 카카오 채널은 콜백 모드(useCallback:true)라 5초 제한 회피됨.
+            # OpenRouter free tier가 burst 시 4-8초 걸리는 사례 잦아 10초로 완화.
+            timeout=10.0,
         )
         raw = response.json()["choices"][0]["message"]["content"].strip()
         print(f"[classify_emotion raw] {raw}")
