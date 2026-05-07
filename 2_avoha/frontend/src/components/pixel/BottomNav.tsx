@@ -54,11 +54,15 @@ export default function BottomNav() {
                 {isActive && (
                   <div
                     style={{
-                      width: 13,
-                      height: 13,
+                      width: 16,
+                      height: 16,
                       borderRadius: '50%',
-                      background: 'var(--color-point-green-light)',
-                      border: '1px solid rgba(90, 74, 50, 0.21)',
+                      background: 'rgba(160, 188, 168, 0.24)',
+                      border: '1px solid rgba(160, 188, 168, 0.62)',
+                      boxShadow:
+                        '0 0 0 2px rgba(160, 188, 168, 0.24), 0 0 12px rgba(160, 188, 168, 0.5), 0 0 22px rgba(160, 188, 168, 0.3)',
+                      backdropFilter: 'blur(0.35px)',
+                      transform: 'translateZ(0)',
                     }}
                   />
                 )}

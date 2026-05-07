@@ -1,30 +1,69 @@
 // === CollectionBook 화면 — Figma 도감 오버레이 ===
+import GemStone from '../components/pixel/GemStone';
+import type { Gem } from '../types/gem';
 
 const FIGMA_WIDTH = 391;
 const FIGMA_HEIGHT = 540;
 
-const FIGMA_EMOTIONS = [
-  { label: '우울', x: 24, y: 41 },
-  { label: '외로움', x: 118, y: 41 },
-  { label: '상실', x: 212, y: 41 },
-  { label: '서러움', x: 306, y: 41 },
-  { label: '실망', x: 24, y: 144 },
-  { label: '걱정', x: 118, y: 144 },
-  { label: '긴장', x: 212, y: 144 },
-  { label: '위축', x: 306, y: 144 },
-  { label: '짜증', x: 24, y: 242 },
-  { label: '억울', x: 118, y: 242 },
-  { label: '화남', x: 212, y: 242 },
-  { label: '적대', x: 306, y: 242 },
-  { label: '즐거움', x: 24, y: 335 },
-  { label: '감사', x: 118, y: 335 },
-  { label: '설렘', x: 212, y: 335 },
-  { label: '뿌듯', x: 306, y: 335 },
-  { label: '편안', x: 24, y: 431 },
-  { label: '무기력', x: 118, y: 431 },
-  { label: '공허', x: 212, y: 431 },
-  { label: '후회', x: 306, y: 431 },
-];
+const GRID_X = [24, 118, 212, 306] as const;
+const GRID_Y = [41, 144, 242, 335, 431] as const;
+const EMOTION_ORDER = [
+  // 슬픔 계열
+  '우울', '외로움', '상실', '서러움', '실망',
+  // 불안 계열
+  '걱정', '긴장', '위축',
+  // 분노 계열
+  '짜증', '억울', '화남', '적대',
+  // 기쁨 계열
+  '즐거움', '감사', '설렘', '뿌듯', '편안',
+  // 복잡/모호 계열
+  '무기력', '공허', '후회',
+] as const;
+
+const FIGMA_EMOTIONS = EMOTION_ORDER.map((label, idx) => ({
+  label,
+  x: GRID_X[idx % 4],
+  y: GRID_Y[Math.floor(idx / 4)],
+}));
+
+const LABEL_TO_EMOTION_CODE: Record<string, string> = {
+  // 슬픔 계열
+  우울: 'sadness',
+  외로움: 'sadness',
+  상실: 'sadness',
+  서러움: 'sadness',
+  실망: 'sadness',
+  // 불안 계열
+  걱정: 'solace',
+  긴장: 'solace',
+  위축: 'solace',
+  // 분노 계열
+  짜증: 'annoyance',
+  억울: 'annoyance',
+  화남: 'annoyance',
+  적대: 'annoyance',
+  // 기쁨 계열
+  즐거움: 'joy',
+  감사: 'satisfaction',
+  설렘: 'flutter',
+  뿌듯: 'pride',
+  편안: 'satisfaction',
+  // 복잡/모호 계열
+  무기력: 'untroubled',
+  공허: 'regret',
+  후회: 'regret',
+};
+
+function toBookGem(label: string, idx: number): Gem {
+  const tier = ((idx % 4) + 1) as 1 | 2 | 3 | 4;
+  return {
+    id: `book-${idx}-${label}`,
+    emotionCode: LABEL_TO_EMOTION_CODE[label] ?? 'untroubled',
+    tier,
+    createdAt: new Date().toISOString(),
+    consumedAt: null,
+  };
+}
 
 export default function CollectionBook({ onClose }: { onClose?: () => void }) {
   return (
@@ -78,15 +117,9 @@ export default function CollectionBook({ onClose }: { onClose?: () => void }) {
             alignItems: 'center',
           }}
         >
-          <div
-            aria-hidden="true"
-            style={{
-              width: '100%',
-              height: `${(62 / 92) * 100}%`,
-              borderRadius: 15,
-              background: '#E6E7E2',
-            }}
-          />
+          <div style={{ width: '100%', height: `${(62 / 92) * 100}%`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <GemStone gem={toBookGem(item.label, item.x + item.y)} size={54} variant={item.label} />
+          </div>
           <span
             style={{
               display: 'block',

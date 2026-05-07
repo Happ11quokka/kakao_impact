@@ -4,6 +4,7 @@ import { useInventoryStore } from '../stores/inventory-store';
 import type { Gem } from '../types/gem';
 import { api, type ChatbotRecordDto } from '../lib/api';
 import { getEmotion } from '../data/emotions';
+import GemStone from '../components/pixel/GemStone';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const CALENDAR_BG = '#F9F4EA';
@@ -188,18 +189,11 @@ function GemDayTile({ gems, selected }: { gems: Gem[]; selected: boolean }) {
     >
       {visibleGems.length === 0 ? null : (
         <span style={styles.tileGemRow}>
-          {visibleGems.map((gem) => {
-            const emotion = getEmotion(gem.emotionCode);
-            return (
-              <span
-                key={gem.id}
-                style={{
-                  ...styles.tileGemDot,
-                  background: emotion?.hexColor ?? '#D2B44C',
-                }}
-              />
-            );
-          })}
+          {visibleGems.map((gem) => (
+            <span key={gem.id} style={styles.tileGemStone}>
+              <GemStone gem={gem} size={8} />
+            </span>
+          ))}
         </span>
       )}
     </span>
@@ -245,12 +239,9 @@ function DatePanel({
                   onClick={() => setOpenedRecordId(records[0]?.id ?? null)}
                   style={styles.summaryGemButton}
                 >
-                  <span
-                    style={{
-                      ...styles.summaryGemDot,
-                      background: emotion?.hexColor ?? '#D2B44C',
-                    }}
-                  />
+                  <span style={styles.summaryGemStone}>
+                    <GemStone gem={gem} size={24} variant={emotion?.nameKo} />
+                  </span>
                   <span style={styles.summaryGemLabel}>{emotion?.nameKo ?? gem.emotionCode}</span>
                 </button>
               );
@@ -464,14 +455,16 @@ const styles: Record<string, CSSProperties> = {
   },
   tileGemRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(2, 5px)',
-    gap: 2,
+    gridTemplateColumns: 'repeat(2, 8px)',
+    gap: 1,
   },
-  tileGemDot: {
-    width: 5,
-    height: 5,
-    borderRadius: '50%',
-    boxShadow: '0 0 0 0.5px rgba(30, 51, 40, 0.08)',
+  tileGemStone: {
+    width: 8,
+    height: 8,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   dayNumber: {
     color: 'rgba(86, 71, 48, 0.62)',
@@ -533,11 +526,12 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     outline: 'none',
   },
-  summaryGemDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.15)',
+  summaryGemStone: {
+    width: 24,
+    height: 24,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   summaryGemLabel: {
     color: TEXT_SUB,

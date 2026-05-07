@@ -5,6 +5,7 @@ import type { Gem } from '../types/gem';
 import { api, type ChatbotRecordDto } from '../lib/api';
 import { getEmotion } from '../data/emotions';
 import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
+import GemStone from '../components/pixel/GemStone';
 
 type Period = 'weekly' | 'monthly' | 'custom';
 
@@ -126,9 +127,9 @@ export default function Analysis() {
   }, [items]);
 
   const topItems = useMemo(() => {
-    const counts = new Map<string, { label: string; color: string; count: number }>();
+    const counts = new Map<string, { label: string; color: string; count: number; emotionCode: string }>();
     items.forEach((item) => {
-      const prev = counts.get(item.label) ?? { label: item.label, color: item.color, count: 0 };
+      const prev = counts.get(item.label) ?? { label: item.label, color: item.color, count: 0, emotionCode: item.emotionCode };
       counts.set(item.label, { ...prev, count: prev.count + 1 });
     });
     return [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 3);
@@ -231,7 +232,13 @@ export default function Analysis() {
           {items.length > 0 && (
             <div style={styles.topGemCluster} aria-label="상위 감정 원석">
               {topItems.map((item, index) => (
-                <GemBubble key={item.label} label={item.label} color={item.color} count={item.count} large={index === 0} />
+                <GemBubble
+                key={item.label}
+                label={item.label}
+                emotionCode={item.emotionCode}
+                count={item.count}
+                large={index === 0}
+              />
               ))}
             </div>
           )}
@@ -379,10 +386,27 @@ function SectionHeader({ title, caption }: { title: string; caption: string }) {
   );
 }
 
-function GemBubble({ label, color, count, large = false }: { label: string; color: string; count: number; large?: boolean }) {
+function GemBubble({
+  label,
+  emotionCode,
+  count,
+  large = false,
+}: {
+  label: string;
+  emotionCode: string;
+  count: number;
+  large?: boolean;
+}) {
+  const previewGem: Gem = {
+    id: `analysis-${emotionCode}-${label}`,
+    emotionCode,
+    tier: large ? 3 : 2,
+    createdAt: new Date().toISOString(),
+  };
+
   return (
     <div style={{ ...styles.gemBubble, transform: large ? 'scale(1.08)' : 'scale(0.92)' }}>
-      <span style={{ ...styles.gemStone, background: color }} />
+      <GemStone gem={previewGem} size={34} variant={label} />
       <span style={styles.gemLabel}>{label}</span>
       <span style={styles.gemCount}>x{count}</span>
     </div>

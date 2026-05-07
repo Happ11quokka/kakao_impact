@@ -6,6 +6,9 @@ import { usePetStore } from '../stores/pet-store';
 import { emotionToCategory } from '../lib/emotion-category';
 import { getEmotion } from '../data/emotions';
 import CollectionBook from './CollectionBook';
+import ChibiAvatar from '../components/field/ChibiAvatar';
+import GemStone from '../components/pixel/GemStone';
+import type { Gem } from '../types/gem';
 
 // 피그마 기준 5대 감정 카테고리
 const EMOTION_CATEGORIES = [
@@ -16,12 +19,28 @@ const EMOTION_CATEGORIES = [
   { code: 'complex', label: '복잡', theme: 'complex' },
 ];
 
+const CATEGORY_REPRESENTATIVE_EMOTION: Record<string, string> = {
+  sadness: 'sadness',
+  anxiety: 'solace',
+  anger: 'annoyance',
+  joy: 'satisfaction',
+  complex: 'regret',
+};
+
+const CATEGORY_REPRESENTATIVE_VARIANT: Record<string, string> = {
+  sadness: '우울',
+  anxiety: '걱정',
+  anger: '화남',
+  joy: '즐거움',
+  complex: '공허',
+};
+
 export default function Home() {
   const { todayDrops, fetchToday, error: fieldError } = useFieldStore();
   const { ticketsRemaining, gems, fetchInventory, consumeGem } = useInventoryStore();
   const feedGem = usePetStore((s) => s.feedGem);
   const [showBook, setShowBook] = useState(false);
-  const [mascotError, setMascotError] = useState(false);
+  const [mascotMood, setMascotMood] = useState<'idle' | 'eating'>('idle');
 
   // 먹이기 애니메이션 트리거. 카드를 탭할 때마다 +1 → 마스코트 wrapper 리마운트로 munch 재생.
   const [eatNonce, setEatNonce] = useState(0);
@@ -63,8 +82,15 @@ export default function Home() {
     consumeGem(target.id);
     feedGem(target.emotionCode);
     setEatNonce((n) => n + 1);
+    setMascotMood('eating');
     setPoppedCard({ code: categoryCode, nonce: Date.now() });
   };
+
+  useEffect(() => {
+    if (mascotMood !== 'eating') return;
+    const t = window.setTimeout(() => setMascotMood('idle'), 520);
+    return () => window.clearTimeout(t);
+  }, [mascotMood]);
 
   // 오늘 수집한 보석 (BE 기준 consumed_at 미설정만)
   // NOTE: 마스코트 직접 탭이 아닌 "오늘 채집할 원석" 카드 탭으로 먹이기 트리거.
@@ -101,6 +127,29 @@ export default function Home() {
       counts[cat] = (counts[cat] || 0) + 1;
     });
     return counts;
+  }, [todayGems]);
+
+  const cardGemByCategory = useMemo<Record<string, Gem>>(() => {
+    const nowIso = new Date().toISOString();
+    const grouped: Record<string, Gem | undefined> = {};
+    todayGems.forEach((gem) => {
+      const cat = emotionToCategory(gem.emotionCode);
+      if (!grouped[cat]) grouped[cat] = gem;
+    });
+
+    const result: Record<string, Gem> = {};
+    EMOTION_CATEGORIES.forEach((cat, idx) => {
+      result[cat.code] =
+        grouped[cat.code] ??
+        ({
+          id: `card-${cat.code}-${idx}`,
+          emotionCode: CATEGORY_REPRESENTATIVE_EMOTION[cat.code] ?? 'untroubled',
+          tier: 2,
+          createdAt: nowIso,
+          consumedAt: null,
+        } as Gem);
+    });
+    return result;
   }, [todayGems]);
 
   const todayDateString = useMemo(() => {
@@ -195,7 +244,6 @@ export default function Home() {
           >
             {visibleDrops.map((drop) => {
               const emotion = getEmotion(drop.gem.emotionCode);
-              const color = emotion?.hexColor ?? '#888';
               return (
                 <div
                   key={drop.gem.id}
@@ -204,17 +252,15 @@ export default function Home() {
                     position: 'absolute',
                     left: `${drop.position.x}%`,
                     top: `${drop.position.y}%`,
-                    width: 22,
-                    height: 28,
-                    borderRadius: 7,
-                    background: color,
                     transform: 'translate(-50%, -50%)',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.08), inset 0 -2px 0 rgba(0,0,0,0.06)',
                     animation: 'gemDropIn 0.4s ease-out',
                   }}
-                />
+                >
+                  <GemStone gem={drop.gem} size={40} />
+                </div>
               );
             })}
+            
           </div>
 
           {fieldError && (
@@ -271,77 +317,11 @@ export default function Home() {
                 position: 'relative',
                 animation: eatNonce > 0 ? 'mascotMunch 0.6s ease' : undefined,
                 transformOrigin: '50% 80%',
+                filter: 'saturate(0.86) contrast(0.95)',
               }}
             >
-              {mascotError ? (
-                <div
-                  style={{
-                    width: 150,
-                    height: 150,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: '#EEE',
-                    borderRadius: '50%',
-                    fontSize: 12,
-                    color: '#999',
-                    textAlign: 'center',
-                    lineHeight: 1.4,
-                  }}
-                >
-                  /images/mascot.png<br />이미지를 넣어주세요
-                </div>
-              ) : (
-                <img
-                  src="/images/mascot.png"
-                  alt="마스코트"
-                  style={{ width: 150, height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply', display: 'block' }}
-                  onError={() => setMascotError(true)}
-                  draggable={false}
-                />
-              )}
+              <ChibiAvatar size={150} mood={mascotMood} />
 
-              {/* 먹는 중 반짝임 — eatNonce 바뀔 때마다 inner가 리마운트되므로 자동 재시작 */}
-              {eatNonce > 0 && (
-                <>
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: 4,
-                      left: -2,
-                      fontSize: 18,
-                      animation: 'sparklePop 0.7s ease-out',
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    ✨
-                  </span>
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: -6,
-                      right: 8,
-                      fontSize: 14,
-                      animation: 'sparklePop 0.6s ease-out 0.08s backwards',
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    ✨
-                  </span>
-                  <span
-                    style={{
-                      position: 'absolute',
-                      bottom: 28,
-                      right: -6,
-                      fontSize: 16,
-                      animation: 'sparklePop 0.8s ease-out 0.18s backwards',
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    💫
-                  </span>
-                </>
-              )}
             </div>
           </div>
         </div>
@@ -429,15 +409,13 @@ export default function Home() {
                 }}
               >
                 {/* 상단 컬러 네모 */}
-                <div
-                  style={{
-                    width: 34,
-                    height: 44,
-                    borderRadius: 10,
-                    background: `var(--color-gem-${cat.theme}-main)`,
-                    marginBottom: 8,
-                  }}
-                />
+                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <GemStone
+                    gem={cardGemByCategory[cat.code]}
+                    size={38}
+                    variant={CATEGORY_REPRESENTATIVE_VARIANT[cat.code]}
+                  />
+                </div>
                 <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-main)', marginBottom: 2, letterSpacing: '-0.5px' }}>
                   {cat.label}
                 </span>
