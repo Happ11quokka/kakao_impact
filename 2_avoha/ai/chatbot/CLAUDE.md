@@ -36,7 +36,7 @@ venv\Scripts\pip install -r requirements.txt
 - 봇테스트(BuilderBotTest)는 콜백 미지원 → 실제 카카오톡 채널에서만 동작
 
 **인메모리 상태 (서버 재시작 시 초기화):**
-- `user_count` — 유저별 하루 5회 채집권 카운트 `{"date": date(KST), "count": int}`
+- `user_count` — 유저별 하루 5회 채집권 카운트 `{"date": date(KST), "count": int}` (미로그인 fallback용)
 - `pending_photo` — 사진 전송 후 텍스트 대기 상태 `{"time": datetime, "url": str}` (10분 타임아웃)
 - `pending_gem` — 저장 대기 상태 `{"gem": str|None, "text": str, "has_photo": bool, "image_url": str|None, "ai_gems": str|None, "retry": bool, "daily": bool, "reclassify_step": int}`
   - gem=None + retry=True: TIMEOUT 후 재시도 대기
@@ -83,11 +83,22 @@ venv\Scripts\pip install -r requirements.txt
 - "모두 채집" 클릭 시 (감정 수만큼 차감, 잔여분만큼만 실제 저장)
 - 일상기록("이대로 저장", "일상으로 저장")은 채집권 미차감
 
+**채집권 DB 동기화 (`collection_tickets`):**
+- OAuth 로그인 완료 사용자: `_get_user_uuid()` → `users.id` 조회 후 `collection_tickets` 직접 UPSERT
+- 미로그인 사용자: 인메모리 `user_count` fallback
+- `get_remaining_count`, `check_and_increment`, `check_and_increment_n` 모두 DB 우선
+
+**gems 테이블 동기화 (`CHATBOT_GEM_TO_EMOTION_CODE`):**
+- 채집 저장 시 Railway `chatbot` 테이블과 동시에 `gems` 테이블에도 INSERT
+- `CHATBOT_GEM_TO_EMOTION_CODE`: 챗봇 20개 조각 → 백엔드 10종 `emotion_code` 변환표
+- OAuth 로그인 + 카톡 hash 매핑 완료 사용자만 gems INSERT (미매핑 시 skip)
+- 목적: 웹 인벤토리 "광물" 탭 표시
+
 **카카오 응답 포맷:**
 - 텍스트: `simpleText`
-- 채집 완료: `basicCard` (제목: `✨ {감정} 원석을 채집했어요!`, 설명: 잔여 채집권 메시지 + 부정감정 누적 알림(해당 시), 버튼: [세공소 가기] webLink)
-- 도감: `basicCard` (20개 감정 카테고리별 목록 + [원석 도감 바로가기] webLink)
-- 내 원석: `basicCard` (오늘 N개 채집 · 총 M개 보유\n채집권 R개 남음 + [내 원석 보러 가기] webLink)
+- 채집 완료: `basicCard` (제목: `✨ {조각명}을 채집했어요!`, thumbnail: 감정별 원석 이미지, 설명: 잔여 채집권 메시지 + 부정감정 누적 알림(해당 시), 버튼: [세공소 가기] webLink)
+- 도감: `basicCard` (20개 감정 카테고리별 목록, thumbnail: all_gems.png, 버튼: [원석 도감 바로가기] webLink)
+- 내 원석: `basicCard` (오늘 N개 채집 · 총 M개 보유\n채집권 R개 남음, thumbnail: all_gems.png, 버튼: [내 원석 보러 가기] webLink)
 - 퀵 리플라이:
   - 기본: `[원석 도감, 내 원석 보기, 채집 안내]`
   - 저장 대기 (gem 있음): `[{gem} 채집하기 💎, 다시 찾을게요, 내 원석 보기, 원석 도감]`
@@ -100,6 +111,11 @@ venv\Scripts\pip install -r requirements.txt
   - 재분류 1단계: 카테고리 5개 버튼
   - 재분류 2단계: 해당 카테고리 감정 버튼
   - 도감/내 원석 조회 시 pending_gem 상태에 따라 분기
+
+**이미지 상수:**
+- `GEM_IMAGE_URL` — 감정 조각명 → Supabase 개별 원석 이미지 URL (20개)
+- `ALL_GEMS_IMAGE` — 20개 원석 통합 이미지 (도감/내 원석 카드용)
+- `DEFAULT_CARD_IMAGE` — fallback 이미지 (moonstone.png)
 
 **재방문 인사 (_check_and_update_visit):**
 - 역대 첫 접속: "닥토공방에 처음 오셨군요! 반가워요 😊" (AI 응답 앞에 prepend)
@@ -119,16 +135,16 @@ venv\Scripts\pip install -r requirements.txt
 - user_count, get_gem_stats, get_remaining_count 모두 KST 기준
 
 **classify_emotion() 반환값:**
-- `list[str]` — 원석 이름 리스트 (단일 또는 최대 3개)
+- `list[str]` — 조각 이름 리스트 (단일 또는 최대 3개)
 - `"NOT_RECORD"` — 인사말만 있거나 감정/일상 내용 없음
 - `"DAILY_RECORD"` — 감정 없이 일상 사실만 나열
-- `"TIMEOUT"` — 4초 초과 (`requests.exceptions.Timeout`)
+- `"TIMEOUT"` — 10초 초과 (`requests.exceptions.Timeout`)
 - `None` — 기타 오류
 
 **AI (OpenRouter - Gemma 4 26B A4B):**
 - 모델: `google/gemma-4-26b-a4b-it:free` (OpenRouter API)
 - 3분류: 기록아님 / 일상기록 / 감정 단어(최대 3개)
-- timeout=4.0s
+- timeout=10.0s (콜백 모드라 카카오 5초 제한 무관)
 
 **백그라운드 태스크:**
 - `_callback_task(user_id, utterance, callback_url, photo_time, photo_url, greeting)` — 일반 메시지 분류 후 callbackUrl POST (greeting 있으면 응답 앞에 prepend)
@@ -141,15 +157,31 @@ venv\Scripts\pip install -r requirements.txt
 
 ## 감정-원석 매핑 (20개)
 
-| 카테고리 | 감정 | 원석명 |
-|------|------|------|
-| 슬픔 계열 | 우울함, 외로움, 상실감, 서러움, 실망감 | {감정} 원석 |
-| 불안/두려움 계열 | 걱정, 긴장감, 위축감 | {감정} 원석 |
-| 분노 계열 | 짜증, 억울함, 화남, 적대감 | {감정} 원석 |
-| 기쁨/긍정 계열 | 즐거움, 감사함, 설렘, 뿌듯함, 편안함 | {감정} 원석 |
-| 복잡/모호 계열 | 무기력함, 공허함, 후회 | {감정} 원석 |
+| 카테고리 | 감정 | 조각명 | 이미지 파일 |
+|------|------|------|------|
+| 슬픔 계열 | 우울함 | 우울함 조각 | depression.png |
+| 슬픔 계열 | 외로움 | 외로움 조각 | loneliness.png |
+| 슬픔 계열 | 상실감 | 상실감 조각 | loss.png |
+| 슬픔 계열 | 서러움 | 서러움 조각 | sorrow.png |
+| 슬픔 계열 | 실망감 | 실망감 조각 | disappointment.png |
+| 불안/두려움 계열 | 걱정 | 걱정 조각 | worry.png |
+| 불안/두려움 계열 | 긴장감 | 긴장감 조각 | tension.png |
+| 불안/두려움 계열 | 위축감 | 위축감 조각 | timidity.png |
+| 분노 계열 | 짜증 | 짜증 조각 | irritation.png |
+| 분노 계열 | 억울함 | 억울함 조각 | resentment.png |
+| 분노 계열 | 화남 | 화남 조각 | anger.png |
+| 분노 계열 | 적대감 | 적대감 조각 | hostility.png |
+| 기쁨/긍정 계열 | 즐거움 | 즐거움 조각 | joy.png |
+| 기쁨/긍정 계열 | 감사함 | 감사함 조각 | gratitude.png |
+| 기쁨/긍정 계열 | 설렘 | 설렘 조각 | flutter.png |
+| 기쁨/긍정 계열 | 뿌듯함 | 뿌듯함 조각 | pride.png |
+| 기쁨/긍정 계열 | 편안함 | 편안함 조각 | serenity.png |
+| 복잡/모호 계열 | 무기력함 | 무기력함 조각 | lethargy.png |
+| 복잡/모호 계열 | 공허함 | 공허함 조각 | emptiness.png |
+| 복잡/모호 계열 | 후회 | 후회 조각 | regret.png |
 
-원석명은 추후 확정 예정. 현재는 임시로 "{감정} 원석" 형태 사용.
+- 1~3단계: `{감정} 조각` 형태로 DB 저장
+- 4단계 세공 완성 시 이름 변환은 웹에서 처리
 
 ## 환경 변수
 
@@ -186,17 +218,33 @@ create table gems (
 ## Railway DB 스키마
 
 ```sql
+-- 채팅 기록 (챗봇 저장 원본)
 create table chatbot (
   id bigint generated always as identity primary key,
   user_id text not null,
-  gem text not null,
+  gem text not null,        -- 최종 선택 조각명 (예: "뿌듯함 조각"). 일상기록은 "일상기록"
   record_text text,
   has_photo boolean default false,
   image_url text,
-  ai_gems text,
+  ai_gems text,             -- AI 초기 판단 (단일: "뿌듯함 조각", 복수: "뿌듯함 조각,설렘 조각", 실패/타임아웃: null)
   created_at timestamptz default now()
 );
-```
 
-- `gem` — 사용자가 최종 선택한 원석명 (예: "뿌듯함 원석"). 일상기록은 "일상기록" 고정값
-- `ai_gems` — AI 초기 판단 원석 (단일: "뿌듯함 원석", 복수: "뿌듯함 원석,설렘 원석", 분류 실패/타임아웃: null)
+-- 인벤토리 광물 (웹 표시용)
+create table gems (
+  id uuid primary key,
+  user_id uuid references users(id),
+  emotion_code text not null,  -- 백엔드 10종 코드 (예: "pride", "sadness")
+  tier int default 1,
+  source text default 'chatbot',
+  created_at timestamptz default now()
+);
+
+-- 채집권 (카톡-웹 동기화)
+create table collection_tickets (
+  user_id uuid references users(id),
+  date date not null,
+  remaining int not null default 5,
+  primary key (user_id, date)
+);
+```
