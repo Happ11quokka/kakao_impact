@@ -11,10 +11,12 @@ BE 파트의 의사결정·삽질·완료 기록. 시간순 정렬.
 | [03](./03-be-3-fastify-oauth.md) | BE-3 · Fastify + Kakao OAuth + /me | 2026-04-18 | 완료 (브라우저 수동 검증 대기) |
 | [04](./04-be-4-to-12-api-surface.md) | BE-4~8·12 · API 표면 (webhook, ops/SSE, inventory·세공, events, health) | 2026-04-18 | 완료 (DB·Redis 통합 수동 검증 대기) |
 | [05](./05-fe-be-integration-analysis.md) | FE↔BE 연동 현황 진단 및 차기 우선순위 결정 | 2026-05-07 | 분석 완료 (구현은 차기 세션) |
+| [06](./06-fe-be-ai-integration-cleanup.md) | FE↔BE↔Chatbot 통합 정상화 + 더미/UX 정리 (Pivot 회복 세션) | 2026-05-07 | 완료 (production 배포 검증) |
 
 ## 진행 중 / 다음
 
-- **AuthGate 정상화 (FE)** — `fetchMe()` 호출로 교체, 401 시 `/login` redirect (05 로그에서 도출, ROI 최대)
+- ~~**AuthGate 정상화 (FE)**~~ ✅ 완료 (06 세션, commit `bdb6f04`/`8ecd751`)
+- ~~**채집권 동기화**~~ ✅ 완료 (06 세션, commit `84a42dd` — chatbot이 `collection_tickets` 직접 차감)
 - **BE-1** — Railway 프로비저닝 + 도메인 + env 주입
 - **BE-5** — `avoha-agent` 워커 연동 (AI 파트와 계약: `emotion-queue` consume, `ai_suggestion` 업데이트, status='proposed')
 - **BE-9** — rembg 업스트림 연결 + 폴라로이드 폴백
