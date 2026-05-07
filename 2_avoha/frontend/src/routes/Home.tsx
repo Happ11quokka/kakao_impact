@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useFieldStore } from '../stores/field-store';
 import { useInventoryStore } from '../stores/inventory-store';
+import { usePetStore } from '../stores/pet-store';
 import { emotionToCategory } from '../lib/emotion-category';
 import { getEmotion } from '../data/emotions';
 import CollectionBook from './CollectionBook';
@@ -17,18 +18,57 @@ const EMOTION_CATEGORIES = [
 
 export default function Home() {
   const { todayDrops, fetchToday, error: fieldError } = useFieldStore();
-  const { ticketsRemaining, gems, fetchInventory } = useInventoryStore();
+  const { ticketsRemaining, gems, fetchInventory, consumeGem } = useInventoryStore();
+  const feedGem = usePetStore((s) => s.feedGem);
   const [showBook, setShowBook] = useState(false);
   const [mascotError, setMascotError] = useState(false);
+
+  // 먹이기 애니메이션 트리거. 카드를 탭할 때마다 +1 → 마스코트 wrapper 리마운트로 munch 재생.
+  const [eatNonce, setEatNonce] = useState(0);
+  // 어떤 카테고리 카드가 방금 탭됐는지 (cardPop 애니 + 키 리셋용 nonce 포함).
+  const [poppedCard, setPoppedCard] = useState<{ code: string; nonce: number } | null>(null);
 
   useEffect(() => {
     fetchToday();
     fetchInventory();
   }, [fetchToday, fetchInventory]);
 
+  // 카드 팝 애니 끝나면 상태 클리어 → 다음 탭에서 다시 트리거 가능.
+  useEffect(() => {
+    if (!poppedCard) return;
+    const t = setTimeout(() => setPoppedCard(null), 500);
+    return () => clearTimeout(t);
+  }, [poppedCard]);
+
+  // 카테고리 카드 탭 = 해당 카테고리에서 가장 오래된 미소비 보석을 1개 먹임.
+  // 마스코트 직접 탭이 아닌 카드 탭만 허용해서 의도치 않은 보석 소비 방지(이전 커밋 정책 유지).
+  const handleFeed = (categoryCode: string) => {
+    // 클로저 stale 방지: 가장 최신 store 상태에서 후보 선정 → 빠른 연타도 정확히 1개씩 소비.
+    const allGems = useInventoryStore.getState().gems;
+    const now = new Date();
+    const target = allGems
+      .filter((g) => !g.consumedAt)
+      .filter((g) => {
+        const d = new Date(g.createdAt);
+        return (
+          d.getFullYear() === now.getFullYear() &&
+          d.getMonth() === now.getMonth() &&
+          d.getDate() === now.getDate()
+        );
+      })
+      .filter((g) => emotionToCategory(g.emotionCode) === categoryCode)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+    if (!target) return;
+
+    consumeGem(target.id);
+    feedGem(target.emotionCode);
+    setEatNonce((n) => n + 1);
+    setPoppedCard({ code: categoryCode, nonce: Date.now() });
+  };
+
   // 오늘 수집한 보석 (BE 기준 consumed_at 미설정만)
-  // NOTE: 마스코트 클릭 = 먹이기 흐름은 의도치 않은 보석 삭제 UX 때문에 비활성화.
-  //       다마고치 EXP 부여는 추후 명시적 인터랙션 또는 BE 동기화로 재구성 예정.
+  // NOTE: 마스코트 직접 탭이 아닌 "오늘 채집할 원석" 카드 탭으로 먹이기 트리거.
+  //       소비는 현재 프론트 로컬(`consumeGem`)만 수행. BE 동기화는 추후.
   const todayGems = useMemo(() => {
     return gems.filter((g) => {
       if (g.consumedAt) return false;
@@ -41,6 +81,17 @@ export default function Home() {
       );
     });
   }, [gems]);
+
+  // 마스코트 주위 필드에 떠있는 원석 중, 로컬에서 소비된 건 즉시 숨김.
+  // field-store는 consumedAt를 추적 안 함 → inventory의 consumedAt와 cross-ref.
+  const consumedGemIds = useMemo(
+    () => new Set(gems.filter((g) => g.consumedAt).map((g) => g.id)),
+    [gems],
+  );
+  const visibleDrops = useMemo(
+    () => todayDrops.filter((d) => !consumedGemIds.has(d.gem.id)),
+    [todayDrops, consumedGemIds],
+  );
 
   // 카테고리별 개수 집계 (피그마처럼 화면에 렌더링용)
   const gemCounts = useMemo(() => {
@@ -142,7 +193,7 @@ export default function Home() {
               zIndex: 1,
             }}
           >
-            {todayDrops.map((drop) => {
+            {visibleDrops.map((drop) => {
               const emotion = getEmotion(drop.gem.emotionCode);
               const color = emotion?.hexColor ?? '#888';
               return (
@@ -159,6 +210,7 @@ export default function Home() {
                     background: color,
                     transform: 'translate(-50%, -50%)',
                     boxShadow: '0 1px 4px rgba(0,0,0,0.08), inset 0 -2px 0 rgba(0,0,0,0.06)',
+                    animation: 'gemDropIn 0.4s ease-out',
                   }}
                 />
               );
@@ -200,8 +252,27 @@ export default function Home() {
           </div>
 
           {/* ── 펫 영역 (마스코트) ── */}
-          <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <div>
+          {/* 두 단계 wrapper:
+              - outer: 항상 mascotBreathe 무한 반복 (살짝의 미세 호흡감)
+              - inner: 먹일 때 mascotMunch 1회 재생. eatNonce가 바뀌면 리마운트되며 애니가 다시 처음부터 재생됨. */}
+          <div
+            style={{
+              position: 'relative',
+              zIndex: 2,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              animation: 'mascotBreathe 3.6s ease-in-out infinite',
+            }}
+          >
+            <div
+              key={`mascot-${eatNonce}`}
+              style={{
+                position: 'relative',
+                animation: eatNonce > 0 ? 'mascotMunch 0.6s ease' : undefined,
+                transformOrigin: '50% 80%',
+              }}
+            >
               {mascotError ? (
                 <div
                   style={{
@@ -224,9 +295,52 @@ export default function Home() {
                 <img
                   src="/images/mascot.png"
                   alt="마스코트"
-                  style={{ width: 150, height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply' }}
+                  style={{ width: 150, height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply', display: 'block' }}
                   onError={() => setMascotError(true)}
+                  draggable={false}
                 />
+              )}
+
+              {/* 먹는 중 반짝임 — eatNonce 바뀔 때마다 inner가 리마운트되므로 자동 재시작 */}
+              {eatNonce > 0 && (
+                <>
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 4,
+                      left: -2,
+                      fontSize: 18,
+                      animation: 'sparklePop 0.7s ease-out',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    ✨
+                  </span>
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: -6,
+                      right: 8,
+                      fontSize: 14,
+                      animation: 'sparklePop 0.6s ease-out 0.08s backwards',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    ✨
+                  </span>
+                  <span
+                    style={{
+                      position: 'absolute',
+                      bottom: 28,
+                      right: -6,
+                      fontSize: 16,
+                      animation: 'sparklePop 0.8s ease-out 0.18s backwards',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    💫
+                  </span>
+                </>
               )}
             </div>
           </div>
@@ -282,10 +396,18 @@ export default function Home() {
         >
           {EMOTION_CATEGORIES.map(cat => {
             const count = gemCounts[cat.code] || 0;
+            const isPopping = poppedCard?.code === cat.code;
+            const disabled = count === 0;
             return (
-              <div
-                key={cat.code}
+              <button
+                type="button"
+                // poppedCard.nonce가 바뀌면 key가 바뀌어 리마운트 → cardPop이 매 탭마다 처음부터 재생.
+                key={isPopping ? `${cat.code}-${poppedCard.nonce}` : cat.code}
+                onClick={disabled ? undefined : () => handleFeed(cat.code)}
+                disabled={disabled}
+                aria-label={`${cat.label} 원석 ${count}개 — 마스코트에게 먹이기`}
                 style={{
+                  position: 'relative',
                   flex: 1,
                   display: 'flex',
                   flexDirection: 'column',
@@ -295,6 +417,15 @@ export default function Home() {
                   borderRadius: 15,
                   background: 'white',
                   boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+                  border: 'none',
+                  font: 'inherit',
+                  cursor: disabled ? 'default' : 'pointer',
+                  opacity: disabled ? 0.45 : 1,
+                  transition: 'opacity 0.2s ease, transform 0.1s ease',
+                  animation: isPopping ? 'cardPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' : undefined,
+                  WebkitTapHighlightColor: 'transparent',
+                  touchAction: 'manipulation',
+                  overflow: 'visible',
                 }}
               >
                 {/* 상단 컬러 네모 */}
@@ -313,7 +444,26 @@ export default function Home() {
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sub)' }}>
                   x{count}
                 </span>
-              </div>
+
+                {/* 탭 직후 카드 위에 -1 표시 살짝 띄움 */}
+                {isPopping && (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      top: 4,
+                      right: 6,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: 'var(--color-point-green, #4CAF50)',
+                      animation: 'minusFloat 0.6s ease-out forwards',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    -1
+                  </span>
+                )}
+              </button>
             );
           })}
         </div>
@@ -327,6 +477,52 @@ export default function Home() {
         @keyframes slideDown {
           from { transform: translateY(-8px); opacity: 0; }
           to { transform: translateY(0); opacity: 1; }
+        }
+        /* 마스코트 항상 살짝 숨쉬듯 — 미세한 상하 이동 + 스케일 */
+        @keyframes mascotBreathe {
+          0%, 100% { transform: translateY(0) scale(1); }
+          50%      { transform: translateY(-3px) scale(1.015); }
+        }
+        /* 카드 탭 시 마스코트가 한 번 통통 튀며 먹는 모션 */
+        @keyframes mascotMunch {
+          0%   { transform: translateY(0) scaleX(1) scaleY(1) rotate(0deg); }
+          18%  { transform: translateY(-10px) scaleX(0.92) scaleY(1.10) rotate(-3deg); }
+          38%  { transform: translateY(4px) scaleX(1.06) scaleY(0.92) rotate(2deg); }
+          60%  { transform: translateY(-4px) scaleX(0.98) scaleY(1.04) rotate(-1deg); }
+          82%  { transform: translateY(1px) scaleX(1.02) scaleY(0.98) rotate(0.5deg); }
+          100% { transform: translateY(0) scaleX(1) scaleY(1) rotate(0deg); }
+        }
+        /* 카드 탭 피드백 — 살짝 눌렸다가 통통 튀어오름 */
+        @keyframes cardPop {
+          0%   { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
+          25%  { transform: scale(0.93); box-shadow: 0 1px 4px  rgba(0,0,0,0.06); }
+          60%  { transform: scale(1.06); box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
+          100% { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
+        }
+        /* 마스코트 주변 반짝임 입자 */
+        @keyframes sparklePop {
+          0%   { transform: translateY(0) scale(0.4) rotate(0deg);   opacity: 0; }
+          25%  { transform: translateY(-4px) scale(1.1) rotate(20deg); opacity: 1; }
+          100% { transform: translateY(-22px) scale(0.5) rotate(80deg); opacity: 0; }
+        }
+        /* 카드에서 살짝 떠오르는 -1 인디케이터 */
+        @keyframes minusFloat {
+          0%   { transform: translateY(0) scale(0.6);  opacity: 0; }
+          25%  { transform: translateY(-2px) scale(1); opacity: 1; }
+          100% { transform: translateY(-22px) scale(0.95); opacity: 0; }
+        }
+        /* 새 원석이 마스코트 주변에 떨어질 때 사용 */
+        @keyframes gemDropIn {
+          0%   { transform: translate(-50%, -130%) scale(0.6); opacity: 0; }
+          70%  { transform: translate(-50%, -42%)  scale(1.08); opacity: 1; }
+          100% { transform: translate(-50%, -50%)  scale(1);    opacity: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          /* 모션 줄이기 환경에선 호흡/먹기 애니 끄고 색·텍스트만 갱신 */
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+          }
         }
       `}</style>
     </div>
