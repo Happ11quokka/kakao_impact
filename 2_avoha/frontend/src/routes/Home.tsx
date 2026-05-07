@@ -4,6 +4,7 @@ import { useFieldStore } from '../stores/field-store';
 import { useInventoryStore } from '../stores/inventory-store';
 import { usePetStore } from '../stores/pet-store';
 import { emotionToCategory } from '../lib/emotion-category';
+import { getEmotion } from '../data/emotions';
 import CollectionBook from './CollectionBook';
 
 // 피그마 기준 5대 감정 카테고리
@@ -16,7 +17,7 @@ const EMOTION_CATEGORIES = [
 ];
 
 export default function Home() {
-  const { fetchToday } = useFieldStore();
+  const { todayDrops, fetchToday } = useFieldStore();
   const { ticketsRemaining, gems, fetchInventory } = useInventoryStore();
   const { feedGem } = usePetStore();
   const [showBook, setShowBook] = useState(false);
@@ -137,6 +138,31 @@ export default function Home() {
               zIndex: 0,
             }}
           />
+
+          {/* 오늘 드롭된 원석 흩뿌리기 (백엔드 결정적 좌표 0..100%) */}
+          {todayDrops.map((drop) => {
+            const emotion = getEmotion(drop.gem.emotionCode);
+            const color = emotion?.hexColor ?? '#888';
+            return (
+              <div
+                key={drop.gem.id}
+                title={emotion?.nameKo ?? drop.gem.emotionCode}
+                style={{
+                  position: 'absolute',
+                  left: `${drop.position.x}%`,
+                  top: `${drop.position.y}%`,
+                  width: 22,
+                  height: 28,
+                  borderRadius: 7,
+                  background: color,
+                  transform: 'translate(-50%, -50%)',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.08), inset 0 -2px 0 rgba(0,0,0,0.06)',
+                  zIndex: 1,
+                  pointerEvents: 'none',
+                }}
+              />
+            );
+          })}
 
           {/* ── 날짜 ── */}
           <div style={{ position: 'relative', zIndex: 1, display: 'flex', justifyContent: 'center', marginBottom: 20 }}>

@@ -1,5 +1,6 @@
 // === Pet Store — 다마고치 상태 (프론트 전용, BE 연동 대비) ===
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 /**
  * 성장 단계 — 에셋 추가 시 여기에 단계만 추가하면 됨.
@@ -38,46 +39,64 @@ interface PetState {
 const EXP_PER_GEM = 10;
 const EXP_PER_LEVEL = 50;
 
-export const usePetStore = create<PetState>((set, get) => ({
-  level: 1,
-  exp: 0,
-  expToNext: EXP_PER_LEVEL,
-  stage: 'baby',
-  totalFed: 0,
-  lastFedAt: null,
-
-  feedGem: (_emotionCode: string) => {
-    const { exp, level, totalFed } = get();
-    const newExp = exp + EXP_PER_GEM;
-    let leveledUp = false;
-
-    if (newExp >= EXP_PER_LEVEL) {
-      const newLevel = level + 1;
-      set({
-        level: newLevel,
-        exp: newExp - EXP_PER_LEVEL,
-        stage: stageForLevel(newLevel),
-        totalFed: totalFed + 1,
-        lastFedAt: new Date().toISOString(),
-      });
-      leveledUp = true;
-    } else {
-      set({
-        exp: newExp,
-        totalFed: totalFed + 1,
-        lastFedAt: new Date().toISOString(),
-      });
-    }
-    return { leveledUp };
-  },
-
-  syncFromServer: (data) => {
-    set({
-      level: data.level,
-      exp: data.exp,
+export const usePetStore = create<PetState>()(
+  persist(
+    (set, get) => ({
+      level: 1,
+      exp: 0,
       expToNext: EXP_PER_LEVEL,
-      stage: stageForLevel(data.level),
-      totalFed: data.totalFed,
-    });
-  },
-}));
+      stage: 'baby',
+      totalFed: 0,
+      lastFedAt: null,
+
+      feedGem: (_emotionCode: string) => {
+        const { exp, level, totalFed } = get();
+        const newExp = exp + EXP_PER_GEM;
+        let leveledUp = false;
+
+        if (newExp >= EXP_PER_LEVEL) {
+          const newLevel = level + 1;
+          set({
+            level: newLevel,
+            exp: newExp - EXP_PER_LEVEL,
+            stage: stageForLevel(newLevel),
+            totalFed: totalFed + 1,
+            lastFedAt: new Date().toISOString(),
+          });
+          leveledUp = true;
+        } else {
+          set({
+            exp: newExp,
+            totalFed: totalFed + 1,
+            lastFedAt: new Date().toISOString(),
+          });
+        }
+        return { leveledUp };
+      },
+
+      syncFromServer: (data) => {
+        set({
+          level: data.level,
+          exp: data.exp,
+          expToNext: EXP_PER_LEVEL,
+          stage: stageForLevel(data.level),
+          totalFed: data.totalFed,
+        });
+      },
+    }),
+    {
+      name: 'avoha-pet',
+      storage: createJSONStorage(() => localStorage),
+      // 메서드는 직렬화 불가 → state 필드만 저장
+      partialize: (state) => ({
+        level: state.level,
+        exp: state.exp,
+        expToNext: state.expToNext,
+        stage: state.stage,
+        totalFed: state.totalFed,
+        lastFedAt: state.lastFedAt,
+      }),
+      version: 1,
+    }
+  )
+);
