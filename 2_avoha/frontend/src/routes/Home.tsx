@@ -17,12 +17,13 @@ const EMOTION_CATEGORIES = [
 ];
 
 export default function Home() {
-  const { todayDrops, fetchToday } = useFieldStore();
+  const { todayDrops, fetchToday, error: fieldError } = useFieldStore();
   const { ticketsRemaining, gems, fetchInventory } = useInventoryStore();
   const { feedGem } = usePetStore();
   const [showBook, setShowBook] = useState(false);
   const [isEating, setIsEating] = useState(false);
   const [fedGemIds, setFedGemIds] = useState<Set<string>>(new Set());
+  const [mascotError, setMascotError] = useState(false);
 
   useEffect(() => {
     fetchToday();
@@ -139,33 +140,63 @@ export default function Home() {
             }}
           />
 
-          {/* 오늘 드롭된 원석 흩뿌리기 (백엔드 결정적 좌표 0..100%) */}
-          {todayDrops.map((drop) => {
-            const emotion = getEmotion(drop.gem.emotionCode);
-            const color = emotion?.hexColor ?? '#888';
-            return (
-              <div
-                key={drop.gem.id}
-                title={emotion?.nameKo ?? drop.gem.emotionCode}
-                style={{
-                  position: 'absolute',
-                  left: `${drop.position.x}%`,
-                  top: `${drop.position.y}%`,
-                  width: 22,
-                  height: 28,
-                  borderRadius: 7,
-                  background: color,
-                  transform: 'translate(-50%, -50%)',
-                  boxShadow: '0 1px 4px rgba(0,0,0,0.08), inset 0 -2px 0 rgba(0,0,0,0.06)',
-                  zIndex: 1,
-                  pointerEvents: 'none',
-                }}
-              />
-            );
-          })}
+          {/* 보석 layer — 배경 원과 동일한 287x287 영역에 한정. 백엔드 좌표(0..100%)는 이 영역 기준 */}
+          <div
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: 287,
+              height: 287,
+              pointerEvents: 'none',
+              zIndex: 1,
+            }}
+          >
+            {todayDrops.map((drop) => {
+              const emotion = getEmotion(drop.gem.emotionCode);
+              const color = emotion?.hexColor ?? '#888';
+              return (
+                <div
+                  key={drop.gem.id}
+                  title={emotion?.nameKo ?? drop.gem.emotionCode}
+                  style={{
+                    position: 'absolute',
+                    left: `${drop.position.x}%`,
+                    top: `${drop.position.y}%`,
+                    width: 22,
+                    height: 28,
+                    borderRadius: 7,
+                    background: color,
+                    transform: 'translate(-50%, -50%)',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.08), inset 0 -2px 0 rgba(0,0,0,0.06)',
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {fieldError && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                fontSize: 11,
+                color: 'var(--color-text-sub)',
+                background: 'rgba(255,255,255,0.7)',
+                padding: '2px 8px',
+                borderRadius: 999,
+                zIndex: 3,
+              }}
+            >
+              오늘의 원석을 못 불러왔어요
+            </div>
+          )}
 
           {/* ── 날짜 ── */}
-          <div style={{ position: 'relative', zIndex: 1, display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+          <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
             <div
               style={{
                 background: 'var(--color-point-yellow)',
@@ -180,18 +211,34 @@ export default function Home() {
           </div>
 
           {/* ── 펫 영역 (마스코트) ── */}
-          <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={handleFeed}>
+          <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={handleFeed}>
             <div style={{ cursor: 'pointer' }}>
-              <img 
-                src="/images/mascot.png" 
-                alt="마스코트" 
-                style={{ width: 150, height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply' }}
-                onError={(e) => {
-                  // 이미지 로드 실패시 임시 대체 텍스트
-                  e.currentTarget.style.display = 'none';
-                  e.currentTarget.parentElement!.innerHTML = '<div style="width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; background: #EEE; border-radius: 50%; font-size: 12px; color: #999;">/images/mascot.png<br/>이미지를 넣어주세요</div>';
-                }}
-              />
+              {mascotError ? (
+                <div
+                  style={{
+                    width: 150,
+                    height: 150,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: '#EEE',
+                    borderRadius: '50%',
+                    fontSize: 12,
+                    color: '#999',
+                    textAlign: 'center',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  /images/mascot.png<br />이미지를 넣어주세요
+                </div>
+              ) : (
+                <img
+                  src="/images/mascot.png"
+                  alt="마스코트"
+                  style={{ width: 150, height: 'auto', objectFit: 'contain', mixBlendMode: 'multiply' }}
+                  onError={() => setMascotError(true)}
+                />
+              )}
             </div>
           </div>
         </div>

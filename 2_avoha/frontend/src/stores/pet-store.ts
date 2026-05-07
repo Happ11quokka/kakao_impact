@@ -4,12 +4,12 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 
 /**
  * 성장 단계 — 에셋 추가 시 여기에 단계만 추가하면 됨.
- * 현재는 'baby' 한 단계만 사용.
+ * 'egg'는 부화 애니메이션용 슬롯(Tamagotchi.tsx에서 렌더러 정의), 현재 stageForLevel 분기 없음.
  */
 export type PetStage = 'egg' | 'baby' | 'child' | 'adult';
 
-const STAGE_THRESHOLDS: Record<PetStage, number> = {
-  egg: 0,
+// 'egg'는 level 기반 도달 단계가 아니므로 threshold에서 제외 (별도 트리거로만 진입).
+const STAGE_THRESHOLDS: Record<Exclude<PetStage, 'egg'>, number> = {
   baby: 0,   // 기본 시작 단계
   child: 5,  // level 5부터
   adult: 10, // level 10부터
@@ -78,6 +78,7 @@ export const usePetStore = create<PetState>()(
         set({
           level: data.level,
           exp: data.exp,
+          // 현재는 레벨별 고정 EXP_PER_LEVEL. 서버 contract가 동적이 되면 data에서 받아 반영.
           expToNext: EXP_PER_LEVEL,
           stage: stageForLevel(data.level),
           totalFed: data.totalFed,
@@ -97,6 +98,8 @@ export const usePetStore = create<PetState>()(
         lastFedAt: state.lastFedAt,
       }),
       version: 1,
+      // hydration race 가드가 필요한 UI(예: 펫 스탯 카드)는
+      // `usePetStore.persist.hasHydrated()` 또는 onRehydrateStorage 사용.
     }
   )
 );
