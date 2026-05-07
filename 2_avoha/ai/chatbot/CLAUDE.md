@@ -51,8 +51,9 @@ venv\Scripts\pip install -r requirements.txt
 1. 위험/유해 키워드 감지 → 즉시 응답 + 이메일 알림
 2. "다시 시도" → pending_gem에서 원본 텍스트 꺼내 재분류 (콜백 있으면 백그라운드 실행)
 3. "다시 찾을게요" → reclassify_step 확인:
-   - step 0→1: 카테고리 5개 버튼 노출
+   - step 0→1: 카테고리 5개 버튼 + 일상저장 카드 노출
    - step ≥2: 전체 20개 감정 버튼 노출 (step 초기화)
+3-1. "이전 단계로" → reclassify_step=1로 리셋, 카테고리 5개 버튼 + 일상저장 카드 노출
 4. "맞아요" → pending_gem 꺼내 채집권 차감 후 Supabase + Railway DB 저장, 부정감정 누적 체크
 5. "모두 채집" → pending_emotion_selection의 모든 감정 저장 (채집권 n개 차감), 부정감정 누적 체크
 6. "골라서 채집" → pending_emotion_selection의 감정 버튼만 노출
@@ -64,7 +65,7 @@ venv\Scripts\pip install -r requirements.txt
     - `pending_emotion_selection` 중이면 → 선택 감정으로 pending_gem 등록
     - `pending_gem` 있으면 → 원석 교체
     - 그 외 → 일상 기록 먼저 요청
-12. 카테고리 버튼 선택 → 해당 카테고리 감정 버튼 노출, reclassify_step=2
+12. 카테고리 버튼 선택 → 해당 카테고리 감정 버튼 + [이전 단계로] 버튼 + 일상저장 카드 노출, reclassify_step=2
 13. 도감 조회 ("도감") — pending_gem 상태에 따라 퀵리플라이 분기
 14. 원석 조회 ("내 원석" 등) — get_gem_stats() 호출, pending_gem 상태에 따라 분기
 15. 채집 안내 ("채집 안내") — 서비스 안내 텍스트
@@ -97,6 +98,9 @@ venv\Scripts\pip install -r requirements.txt
 **카카오 응답 포맷:**
 - 텍스트: `simpleText`
 - 채집 완료: `basicCard` (제목: `✨ {조각명}을 채집했어요!`, thumbnail: 감정별 원석 이미지, 설명: 잔여 채집권 메시지 + 부정감정 누적 알림(해당 시), 버튼: [세공소 가기] webLink)
+- NOT_RECORD: `basicCard` (thumbnail: MASCOT_IMAGE, quickReplies 없음)
+- 채집 안내: `basicCard` (thumbnail: MASCOT_IMAGE, 버튼: [세공소 가기] webLink)
+- 재분류 일상저장: `basicCard` (thumbnail: MASCOT_IMAGE, 버튼: [일상으로 저장] message) — 재분류 1·2단계에서 simpleText 아래 두 번째 말풍선으로 노출
 - 도감: `basicCard` (20개 감정 카테고리별 목록, thumbnail: all_gems.png, 버튼: [원석 도감 바로가기] webLink)
 - 내 원석: `basicCard` (오늘 N개 채집 · 총 M개 보유\n채집권 R개 남음, thumbnail: all_gems.png, 버튼: [내 원석 보러 가기] webLink)
 - 퀵 리플라이:
@@ -108,13 +112,14 @@ venv\Scripts\pip install -r requirements.txt
   - 분류 실패: 전체 20개 감정 버튼
   - 타임아웃: `[다시 시도 🔄, 내 원석 보기, 원석 도감]`
   - 사진 입력: `[감정 적기, 일상으로 저장]`
-  - 재분류 1단계: 카테고리 5개 버튼
-  - 재분류 2단계: 해당 카테고리 감정 버튼
+  - 재분류 1단계: 카테고리 5개 버튼 + 일상저장 basicCard (MASCOT_IMAGE)
+  - 재분류 2단계: 해당 카테고리 감정 버튼 + [이전 단계로] + 일상저장 basicCard (MASCOT_IMAGE)
   - 도감/내 원석 조회 시 pending_gem 상태에 따라 분기
 
 **이미지 상수:**
 - `GEM_IMAGE_URL` — 감정 조각명 → Supabase 개별 원석 이미지 URL (20개)
 - `ALL_GEMS_IMAGE` — 20개 원석 통합 이미지 (도감/내 원석 카드용)
+- `MASCOT_IMAGE` — 마스코트 이미지 2:1 (NOT_RECORD·채집 안내·재분류 일상저장 카드용)
 - `DEFAULT_CARD_IMAGE` — fallback 이미지 (moonstone.png)
 
 **재방문 인사 (_check_and_update_visit):**
