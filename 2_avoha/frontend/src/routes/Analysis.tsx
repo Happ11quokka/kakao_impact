@@ -4,9 +4,9 @@ import { useInventoryStore } from '../stores/inventory-store';
 import type { Gem } from '../types/gem';
 import { api, type ChatbotRecordDto } from '../lib/api';
 import { getEmotion } from '../data/emotions';
+import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
 
 type Period = 'weekly' | 'monthly' | 'custom';
-type CategoryCode = 'sadness' | 'anxiety' | 'anger' | 'joy' | 'complex';
 
 type Category = {
   code: CategoryCode;
@@ -47,16 +47,8 @@ function startOfWeek(date: Date): Date {
   return d;
 }
 
-function mapEmotionToCategory(code: string): CategoryCode {
-  if (code === 'sadness') return 'sadness';
-  if (code === 'annoyance') return 'anger';
-  if (code === 'joy' || code === 'pride' || code === 'satisfaction' || code === 'flutter') return 'joy';
-  if (code === 'serenity' || code === 'untroubled') return 'complex';
-  return 'complex';
-}
-
 function detailForItem(code: string, index: number): string {
-  const category = CATEGORY_BY_CODE[mapEmotionToCategory(code)];
+  const category = CATEGORY_BY_CODE[emotionToCategory(code)];
   const known = getEmotion(code)?.nameKo;
   if (known && known !== category.label) return known;
   return category.details[index % category.details.length];
@@ -78,7 +70,7 @@ function dateInPeriod(date: Date, period: Period, today: Date): boolean {
 }
 
 function gemToItem(gem: Gem, index: number): AnalysisItem {
-  const category = mapEmotionToCategory(gem.emotionCode);
+  const category = emotionToCategory(gem.emotionCode);
   const emotion = getEmotion(gem.emotionCode);
   return {
     id: gem.id,
@@ -236,15 +228,13 @@ export default function Analysis() {
               </>
             )}
           </div>
-          <div style={styles.topGemCluster} aria-label="상위 감정 원석">
-            {topItems.length === 0 ? (
-              <GemBubble label="기록" color="#D8CBB5" count={0} large />
-            ) : (
-              topItems.map((item, index) => (
+          {items.length > 0 && (
+            <div style={styles.topGemCluster} aria-label="상위 감정 원석">
+              {topItems.map((item, index) => (
                 <GemBubble key={item.label} label={item.label} color={item.color} count={item.count} large={index === 0} />
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section style={styles.section}>
@@ -312,16 +302,25 @@ export default function Analysis() {
             ))}
           </div>
           <p style={styles.insightText}>
-            {selectedCategoryMeta.label} 중에서도 {selectedDetails.sort((a, b) => b.count - a.count)[0]?.label ?? selectedCategoryMeta.details[0]}을 가장 자주 마주했어요.
+            {items.length === 0
+              ? '아직 분석할 원석이 없어요. 기록이 쌓이면 세부 패턴이 보여요.'
+              : `${selectedCategoryMeta.label} 중에서도 ${selectedDetails.slice().sort((a, b) => b.count - a.count)[0]?.label ?? selectedCategoryMeta.details[0]}을 가장 자주 마주했어요.`}
           </p>
         </section>
 
         <section style={styles.questionBand}>
           <span style={styles.sectionLabel}>주간 자기인지 질문 recap</span>
-          <p style={styles.questionText}>
-            {topCategory.label}이 올라왔던 순간은 주로 언제였나요?
-          </p>
-          <p style={styles.questionHint}>이유를 캐묻기보다, 장소나 상황을 하나만 떠올려도 충분해요.</p>
+          {items.length === 0 ? (
+            <>
+              <p style={styles.questionText}>이번 기간엔 아직 돌아볼 순간이 쌓이지 않았어요.</p>
+              <p style={styles.questionHint}>한 줄 기록이 충분해요. 짧은 마음 한 조각만 남겨도 다음에 꺼내볼 수 있어요.</p>
+            </>
+          ) : (
+            <>
+              <p style={styles.questionText}>{topCategory.label}이 올라왔던 순간은 주로 언제였나요?</p>
+              <p style={styles.questionHint}>이유를 캐묻기보다, 장소나 상황을 하나만 떠올려도 충분해요.</p>
+            </>
+          )}
         </section>
 
         <section style={styles.section}>
@@ -341,16 +340,30 @@ export default function Analysis() {
           </div>
         </section>
 
-        <section style={{ ...styles.careBand, background: careNeeded ? '#EBCDC6' : '#DCE7D8' }}>
-          <span style={styles.sectionLabel}>{careNeeded ? '행동 추천 카드' : 'Recap'}</span>
-          <strong style={styles.careTitle}>
-            {careNeeded ? '묵직한 감정이 조금 쌓였어요' : '빛났던 순간을 다시 볼게요'}
-          </strong>
-          <p style={styles.careText}>
-            {careNeeded
-              ? '오늘은 완료 여부를 묻지 않을게요. 물 한 잔, 짧은 산책, 편한 사람에게 안부 보내기 중 하나만 골라보세요.'
-              : '좋았던 감정은 작게 다시 보는 것만으로도 마음에 오래 남아요.'}
-          </p>
+        <section
+          style={{
+            ...styles.careBand,
+            background: items.length === 0 ? '#EDE2CC' : careNeeded ? '#EBCDC6' : '#DCE7D8',
+          }}
+        >
+          <span style={styles.sectionLabel}>
+            {items.length === 0 ? '시작 가이드' : careNeeded ? '행동 추천 카드' : 'Recap'}
+          </span>
+          {items.length === 0 ? (
+            <>
+              <strong style={styles.careTitle}>마음 한 조각부터 시작해볼까요</strong>
+              <p style={styles.careText}>카카오톡 챗봇에 짧은 메시지를 보내면, 그 순간이 원석으로 바뀌어 여기에 쌓여요.</p>
+            </>
+          ) : (
+            <>
+              <strong style={styles.careTitle}>{careNeeded ? '묵직한 감정이 조금 쌓였어요' : '빛났던 순간을 다시 볼게요'}</strong>
+              <p style={styles.careText}>
+                {careNeeded
+                  ? '오늘은 완료 여부를 묻지 않을게요. 물 한 잔, 짧은 산책, 편한 사람에게 안부 보내기 중 하나만 골라보세요.'
+                  : '좋았던 감정은 작게 다시 보는 것만으로도 마음에 오래 남아요.'}
+              </p>
+            </>
+          )}
         </section>
       </main>
     </div>

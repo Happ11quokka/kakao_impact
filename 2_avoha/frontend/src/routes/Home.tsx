@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useFieldStore } from '../stores/field-store';
 import { useInventoryStore } from '../stores/inventory-store';
 import { usePetStore } from '../stores/pet-store';
+import { emotionToCategory } from '../lib/emotion-category';
 import CollectionBook from './CollectionBook';
 
 // 피그마 기준 5대 감정 카테고리
@@ -45,11 +46,8 @@ export default function Home() {
   const gemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     todayGems.forEach((gem) => {
-      let cCode = gem.emotionCode;
-      if (cCode === 'annoyance') cCode = 'anger';
-      if (cCode === 'regret' || cCode === 'solace') cCode = 'complex';
-      if (cCode === 'pride' || cCode === 'satisfaction' || cCode === 'flutter') cCode = 'joy';
-      counts[cCode] = (counts[cCode] || 0) + 1;
+      const cat = emotionToCategory(gem.emotionCode);
+      counts[cat] = (counts[cat] || 0) + 1;
     });
     return counts;
   }, [todayGems]);
@@ -207,7 +205,7 @@ export default function Home() {
         </h3>
         {todayGems.length === 0 && (
           <p style={{ fontSize: 12, color: 'var(--color-text-sub)', margin: '0 0 16px' }}>
-            아직 오늘 채집한 보석이 없어요. 카카오톡 챗봇에게 마음을 보내보세요.
+            아직 오늘 채집한 원석이 없어요. 카카오톡 챗봇에게 마음을 보내보세요.
           </p>
         )}
 
