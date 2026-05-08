@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../lib/api';
+import ChibiAvatar from '../components/field/ChibiAvatar';
 
 const ERROR_MESSAGES: Record<string, string> = {
   token_exchange: '카카오 인증 중 문제가 발생했어요. 잠시 후 다시 시도해주세요.',
@@ -65,7 +66,7 @@ export default function Login() {
           gap: 16,
         }}
       >
-        <div className="animate-float" style={{ fontSize: 48 }}>💎</div>
+        <ChibiAvatar className="animate-float" size={86} />
         <p style={{ color: 'var(--color-ink-muted)', fontSize: 14 }}>챗봇과 연결 중...</p>
       </div>
     );
@@ -85,7 +86,9 @@ export default function Login() {
       }}
     >
       <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div className="animate-float" style={{ fontSize: 64 }}>💎</div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <ChibiAvatar className="animate-float" size={104} />
+        </div>
         <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 28, fontWeight: 700, color: 'var(--color-ink)' }}>
           아보하
         </h1>

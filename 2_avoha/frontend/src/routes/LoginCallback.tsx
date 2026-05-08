@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuthStore } from '../stores/auth-store';
+import ChibiAvatar from '../components/field/ChibiAvatar';
 
 export default function LoginCallback() {
   const navigate = useNavigate();
@@ -48,7 +49,7 @@ export default function LoginCallback() {
         gap: 16,
       }}
     >
-      <div className="animate-float" style={{ fontSize: 48 }}>💎</div>
+      <ChibiAvatar className="animate-float" size={86} />
       <p style={{ color: 'var(--color-ink-muted)', fontSize: 14 }}>로그인 중...</p>
     </div>
   );
