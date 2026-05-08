@@ -44,7 +44,6 @@ venv\Scripts\pip install -r requirements.txt
   - daily=True: 일상기록 분류 후 감정 추가 대기
   - reclassify_step: 재분류 단계 (0=초기, 1=카테고리 선택, 2=세부감정 선택)
 - `pending_emotion_selection` — 복수 감정 감지 후 선택 대기 상태 `{"emotions": [emotion_word], "text": str, "has_photo": bool, "image_url": str|None, "ai_gems": str}`
-- `classify_fail_count` — 유저별 감정 분류 연속 실패 횟수 (2회 시 운영자 알림)
 - `user_last_active` — 유저별 마지막 접속일 `{user_id: date(KST)}` (재방문 구분용)
 
 **주요 로직 (webhook 처리 순서):**
@@ -158,7 +157,6 @@ venv\Scripts\pip install -r requirements.txt
 **이메일 알림 발송 시점:**
 - 위험 키워드 감지
 - 유해 키워드 감지
-- 감정 분류 2회 연속 실패
 
 ## 감정-원석 매핑 (20개)
 

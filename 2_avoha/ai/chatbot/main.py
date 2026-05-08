@@ -43,7 +43,6 @@ user_count: dict = {}
 pending_photo: dict = {}
 pending_gem: dict = {}
 pending_emotion_selection: dict = {}
-classify_fail_count: dict = {}
 user_last_active: dict = {}  # {user_id: date(KST)}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
@@ -427,8 +426,10 @@ def classify_emotion(text: str) -> list[str] | str | None:
     prompt = (
         "다음 입력을 세 가지로 분류해줘.\n"
         "1. 인사말만 있거나 감정/일상 내용이 없으면: '기록아님'만 답해\n"
-        "2. 일상 사실만 나열되고 감정이 없으면(예: '수업 들었어', '밥 먹었어', '회사 갔다왔어'): '일상기록'만 답해\n"
+        "2. 일상 사실만 나열되고 감정이 전혀 느껴지지 않으면(예: '수업 들었어', '밥 먹었어', '회사 갔다왔어'): '일상기록'만 답해\n"
         "3. 감정이 담긴 기록이면: 아래 감정 목록 중 해당하는 단어로 답해줘\n"
+        "   감정 단어가 직접 등장하지 않아도 문장의 맥락과 뉘앙스에서 감정이 느껴지면 추론해서 답해줘.\n"
+        "   (예: '드디어 배가 나아졌어' → 편안함, '오늘 발표 잘 끝났다' → 뿌듯함, '기다리던 택배 왔다' → 설렘)\n"
         f"감정 목록: {emotion_list}\n"
         "여러 감정이 담겨있으면 쉼표로만 구분해서 최대 3개까지만 답해줘. "
         "감정이 하나라면 단어 하나만 답해줘. 다른 말은 절대 하지 마.\n\n"
@@ -663,19 +664,13 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
     pending_photo.pop(user_id, None)
 
     if not valid_gems:
-        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": None}
-        fail_count = classify_fail_count.get(user_id, 0) + 1
-        classify_fail_count[user_id] = fail_count
-        if fail_count >= 2:
-            classify_fail_count[user_id] = 0
-            pending_gem.pop(user_id, None)
-            send_alert_email("[닥토공방] 감정 분류 2회 실패 - 운영자 개입 필요", f"유저 ID: {user_id}\n내용: {utterance}")
-            return kakao_response("세공소 주인장을 직접 불러올게요! 🛠️\n잠시만 기다려주시면 운영자가 직접 도와드릴게요.")
+        pending_gem[user_id] = {"gem": None, "text": utterance, "has_photo": has_photo, "image_url": image_url, "ai_gems": None, "daily": True}
         return kakao_response(
-            "앗! 순간이 너무 빨라 줍지 못했어요.\n"
-            "지금을 조금 더 깊이 적어 채집을 완료해보세요!\n\n"
-            "아래 감정 버튼을 눌러 더 쉽게 주울 수도 있어요!",
-            show_emotion_buttons=True
+            "오늘의 일상이 담겼어요.\n\n"
+            "이 순간 어떤 마음이었어요?\n"
+            "감정을 함께 남기면 원석으로 채집해드려요.\n\n"
+            "이대로 일상 기록만 남겨도 괜찮아요.",
+            custom_replies=DAILY_QUICK_REPLIES
         )
 
     if len(valid_gems) >= 2:
