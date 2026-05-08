@@ -1052,20 +1052,22 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse({
             "version": "2.0",
             "template": {
-                "outputs": [{"basicCard": {
-                    "title": "기록을 통해 채집할 수 있는 감정 원석들이에요.",
-                    "thumbnail": {"imageUrl": ALL_GEMS_IMAGE},
-                    "description": (
+                "outputs": [
+                    {"simpleText": {"text": (
+                        "기록을 통해 채집할 수 있는 감정 원석들이에요.\n\n"
                         "감정 원석은 총 20종,\n크게 다섯 가지 결을 가지고 있어요.\n\n"
                         "💙 슬픔의 결\n우울함 조각 · 외로움 조각 · 상실감 조각 · 서러움 조각 · 실망감 조각\n위로받고 싶은 일상의 순간들이 담겨요.\n\n"
                         "🤍 불안/두려움의 결\n걱정 조각 · 긴장감 조각 · 위축감 조각\n마음이 팽팽해지는 순간들이 담겨요.\n\n"
                         "🧡 분노의 결\n짜증 조각 · 억울함 조각 · 화남 조각 · 적대감 조각\n뜨겁고 단단한 감정들이 담겨요.\n\n"
                         "💛 기쁨/긍정의 결\n즐거움 조각 · 감사함 조각 · 설렘 조각 · 뿌듯함 조각 · 편안함 조각\n따뜻하고 빛나는 순간들이 담겨요.\n\n"
                         "🩶 복잡/모호의 결\n무기력함 조각 · 공허함 조각 · 후회 조각\n잘 정의되지 않는 감정들이 담겨요.\n\n"
-                        "각 원석은 강화를 통해 보석으로 세공할 수 있어요.\n자세한 원석 이야기는 도감에서 만나봐요."
-                    ),
-                    "buttons": [{"action": "webLink", "label": "원석 도감 바로가기", "webLinkUrl": WEB_URL}],
-                }}],
+                        "각 원석은 강화를 통해 보석으로 세공할 수 있어요."
+                    )}},
+                    {"basicCard": {
+                        "thumbnail": {"imageUrl": ALL_GEMS_IMAGE},
+                        "buttons": [{"action": "webLink", "label": "원석 도감 바로가기", "webLinkUrl": WEB_URL}],
+                    }},
+                ],
                 "quickReplies": pending_replies,
             },
         })
