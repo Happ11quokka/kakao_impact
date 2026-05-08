@@ -714,8 +714,31 @@ def _prepend_greeting(response: dict, greeting: str) -> dict:
 def _check_and_update_visit(user_id: str) -> str | None:
     """Returns greeting message on first-ever or first-of-day visit, else None."""
     today = _today_kst()
-    last = user_last_active.get(user_id)
+    last = None
+
+    # DB 우선: 서버 재시작 시 인메모리 초기화 문제 방지
+    if RAILWAY_DATABASE_URL:
+        try:
+            conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT MAX((created_at AT TIME ZONE 'Asia/Seoul')::date) FROM chatbot WHERE user_id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if row and row[0]:
+                last = row[0]
+        except Exception as e:
+            print(f"[_check_and_update_visit db error] {e}")
+
+    # DB에 기록 없으면 인메모리 fallback (당일 첫 접속 감지용)
+    if last is None:
+        last = user_last_active.get(user_id)
+
     user_last_active[user_id] = today
+
     if last is None:
         return "닥토공방에 처음 오셨군요! 반가워요 😊"
     if last < today:
