@@ -1079,14 +1079,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             inv_replies = RETRY_QUICK_REPLIES
         else:
             inv_replies = BASE_QUICK_REPLIES
-        today_count, total_count = get_gem_stats(user_id)
+        _, total_count = get_gem_stats(user_id)
         remaining = get_remaining_count(user_id)
         link_url = f"{WEB_URL}?kakao_hash={user_id}"
         if total_count == 0:
             desc = "아직 채집한 원석이 없어요.\n일상을 기록하면 원석으로 채집해드릴게요!"
         else:
             desc = (
-                f"오늘 {today_count}개 채집 · 총 {total_count}개 보유\n채집권 {remaining}개 남음\n\n"
+                f"총 {total_count}개 보유 · 채집권 {remaining}개 남음\n\n"
                 "아래 링크에서 보유한 원석의 종류와 수량,\n강화 현황을 한눈에 볼 수 있어요."
             )
         return JSONResponse({
