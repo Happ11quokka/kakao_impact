@@ -1057,16 +1057,16 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             "version": "2.0",
             "template": {
                 "outputs": [{"basicCard": {
-                    "title": "📖 원석 도감",
+                    "title": "기록을 통해 채집할 수 있는 감정 원석들이에요.",
                     "thumbnail": {"imageUrl": ALL_GEMS_IMAGE},
                     "description": (
-                        "기록을 통해 채집할 수 있는 감정 원석들이에요.\n\n"
-                        "💙 슬픔 계열\n우울함, 외로움, 상실감, 서러움, 실망감\n\n"
-                        "😰 불안/두려움 계열\n걱정, 긴장감, 위축감\n\n"
-                        "🔴 분노 계열\n짜증, 억울함, 화남, 적대감\n\n"
-                        "✨ 기쁨/긍정 계열\n즐거움, 감사함, 설렘, 뿌듯함, 편안함\n\n"
-                        "🌀 복잡/모호 계열\n무기력함, 공허함, 후회\n\n"
-                        "각 원석은 강화를 통해 보석으로 세공할 수 있어요."
+                        "감정 원석은 총 20종,\n크게 다섯 가지 결을 가지고 있어요.\n\n"
+                        "💙 슬픔의 결\n우울함 조각 · 외로움 조각 · 상실감 조각 · 서러움 조각 · 실망감 조각\n위로받고 싶은 일상의 순간들이 담겨요.\n\n"
+                        "🤍 불안/두려움의 결\n걱정 조각 · 긴장감 조각 · 위축감 조각\n마음이 팽팽해지는 순간들이 담겨요.\n\n"
+                        "🧡 분노의 결\n짜증 조각 · 억울함 조각 · 화남 조각 · 적대감 조각\n뜨겁고 단단한 감정들이 담겨요.\n\n"
+                        "💛 기쁨/긍정의 결\n즐거움 조각 · 감사함 조각 · 설렘 조각 · 뿌듯함 조각 · 편안함 조각\n따뜻하고 빛나는 순간들이 담겨요.\n\n"
+                        "🩶 복잡/모호의 결\n무기력함 조각 · 공허함 조각 · 후회 조각\n잘 정의되지 않는 감정들이 담겨요.\n\n"
+                        "각 원석은 강화를 통해 보석으로 세공할 수 있어요.\n자세한 원석 이야기는 도감에서 만나봐요."
                     ),
                     "buttons": [{"action": "webLink", "label": "원석 도감 바로가기", "webLinkUrl": WEB_URL}],
                 }}],
@@ -1089,12 +1089,15 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if total_count == 0:
             desc = "아직 채집한 원석이 없어요.\n일상을 기록하면 원석으로 채집해드릴게요!"
         else:
-            desc = f"오늘 {today_count}개 채집 · 총 {total_count}개 보유\n채집권 {remaining}개 남음"
+            desc = (
+                f"오늘 {today_count}개 채집 · 총 {total_count}개 보유\n채집권 {remaining}개 남음\n\n"
+                "아래 링크에서 보유한 원석의 종류와 수량,\n강화 현황을 한눈에 볼 수 있어요."
+            )
         return JSONResponse({
             "version": "2.0",
             "template": {
                 "outputs": [{"basicCard": {
-                    "title": "💎 내 원석",
+                    "title": "지금까지 채집한 원석을 보여드릴게요.",
                     "thumbnail": {"imageUrl": ALL_GEMS_IMAGE},
                     "description": desc,
                     "buttons": [{"action": "webLink", "label": "내 원석 보러 가기", "webLinkUrl": link_url}],
@@ -1109,15 +1112,19 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             "version": "2.0",
             "template": {
                 "outputs": [{"basicCard": {
-                    "title": "닥토 공방에 오신 걸 환영해요 🪨",
+                    "title": "오늘의 마음을 기록하면, 감정 원석으로 채집해드릴게요.",
                     "description": (
-                        "오늘의 마음을 기록하면, 감정 원석으로 채집해드릴게요.\n\n"
-                        "글이나 사진으로 자유롭게 기록하면 돼요.\n"
+                        "채집 방법\n"
+                        "글이나 사진으로 자유롭게 기록하면 돼요.\n\n"
+                        "채집권\n"
                         "하루 5개까지 채집할 수 있어요.\n"
                         "다 써도 기록은 계속 남길 수 있어요.\n\n"
+                        "웹에서 더 많이\n"
                         "원석 강화, 도감, 기록 모아보기는 웹에서 가능해요.\n\n"
-                        "모든 기록은 안전하게 저장되고,\n"
-                        "관리자는 기록에 임의로 접근하지 않아요."
+                        "개인정보 안내\n"
+                        "모든 기록은 안전하게 저장되며,\n"
+                        "관리자는 기록에 임의로 접근하지 않아요.\n"
+                        "문의나 도움이 필요하신 경우 언제든 채널로 말씀해주세요."
                     ),
                     "thumbnail": {"imageUrl": MASCOT_IMAGE},
                     "buttons": [{"action": "webLink", "label": "세공소 가기", "webLinkUrl": WEB_URL}],
