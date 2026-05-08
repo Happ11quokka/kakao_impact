@@ -628,13 +628,14 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
             "version": "2.0",
             "template": {
                 "outputs": [{"basicCard": {
-                    "title": "순간을 조금 더 담아주세요 🪨",
-                    "description": (
-                        "어떤 일이 있었는지, 어떤 기분이었는지 적어주시면\n"
-                        "딱 맞는 원석을 찾아드릴게요!\n\n"
-                        "예시: '오늘 발표가 떨렸는데 잘 끝나서 뿌듯했어'"
-                    ),
+                    "title": "여기서는 기록을 통해 감정 원석을 채집할 수 있어요.",
+                    "description": "오늘 있었던 일이나 지금 느끼는 마음을 적어봐요.",
                     "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                    "buttons": [
+                        {"action": "message", "label": "내 원석 보기", "messageText": "내 원석"},
+                        {"action": "message", "label": "채집 안내", "messageText": "채집 안내"},
+                        {"action": "webLink", "label": "세공소 가기", "webLinkUrl": WEB_URL},
+                    ],
                 }}],
             },
         }
