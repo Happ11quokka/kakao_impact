@@ -120,7 +120,7 @@ venv\Scripts\pip install -r requirements.txt
 - `GEM_IMAGE_URL` — 감정 조각명 → Supabase 개별 원석 이미지 URL (20개)
 - `ALL_GEMS_IMAGE` — 20개 원석 통합 이미지 (도감/내 원석 카드용)
 - `MASCOT_IMAGE` — 마스코트 이미지 2:1 (NOT_RECORD·채집 안내·재분류 일상저장 카드용)
-- `DEFAULT_CARD_IMAGE` — fallback 이미지 (moonstone.png)
+- `DEFAULT_CARD_IMAGE` — fallback 이미지 (depression.png)
 
 **재방문 인사 (_check_and_update_visit):**
 - 역대 첫 접속: "닥토공방에 처음 오셨군요! 반가워요 😊" (AI 응답 앞에 prepend)
