@@ -716,7 +716,8 @@ def _check_and_update_visit(user_id: str) -> str | None:
     today = _today_kst()
     last = None
 
-    # DB 우선: 서버 재시작 시 인메모리 초기화 문제 방지
+    # DB에서 마지막 저장일 조회
+    last_db = None
     if RAILWAY_DATABASE_URL:
         try:
             conn = psycopg2.connect(RAILWAY_DATABASE_URL)
@@ -729,13 +730,16 @@ def _check_and_update_visit(user_id: str) -> str | None:
             cur.close()
             conn.close()
             if row and row[0]:
-                last = row[0]
+                last_db = row[0]
         except Exception as e:
             print(f"[_check_and_update_visit db error] {e}")
 
-    # DB에 기록 없으면 인메모리 fallback (당일 첫 접속 감지용)
-    if last is None:
-        last = user_last_active.get(user_id)
+    # DB 날짜와 인메모리 날짜 중 더 최근 것 사용
+    last_mem = user_last_active.get(user_id)
+    if last_db and last_mem:
+        last = max(last_db, last_mem)
+    else:
+        last = last_db or last_mem
 
     user_last_active[user_id] = today
 
