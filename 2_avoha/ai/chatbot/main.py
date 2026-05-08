@@ -344,31 +344,31 @@ DANGER_MESSAGE = (
 HARMFUL_MESSAGE = "해당 기록은 서비스 정책에 따라 채집이 어려워요. 일상 속 소중한 순간을 담아 다시 보내주세요."
 
 WEB_URL = "https://frontend-production-09f81.up.railway.app/login"
-DEFAULT_CARD_IMAGE = "https://tetatvafhnqbtwgfebic.supabase.co/storage/v1/object/public/gem-images/moonstone.png"
-ALL_GEMS_IMAGE = "https://tetatvafhnqbtwgfebic.supabase.co/storage/v1/object/public/gem-images/all_gems.png"
-MASCOT_IMAGE = "https://tetatvafhnqbtwgfebic.supabase.co/storage/v1/object/public/gem-images/mascot_2x1.png"
-_GEM_IMG_BASE = "https://tetatvafhnqbtwgfebic.supabase.co/storage/v1/object/public/gem-images"
+DEFAULT_CARD_IMAGE = ""
+ALL_GEMS_IMAGE = ""
+MASCOT_IMAGE = ""
+_GEM_IMG_BASE = ""
 GEM_IMAGE_URL = {
-    "우울함 조각": f"{_GEM_IMG_BASE}/depression.png",
-    "외로움 조각": f"{_GEM_IMG_BASE}/loneliness.png",
-    "상실감 조각": f"{_GEM_IMG_BASE}/loss.png",
-    "서러움 조각": f"{_GEM_IMG_BASE}/sorrow.png",
-    "실망감 조각": f"{_GEM_IMG_BASE}/disappointment.png",
-    "걱정 조각":   f"{_GEM_IMG_BASE}/worry.png",
-    "긴장감 조각": f"{_GEM_IMG_BASE}/tension.png",
-    "위축감 조각": f"{_GEM_IMG_BASE}/timidity.png",
-    "짜증 조각":   f"{_GEM_IMG_BASE}/irritation.png",
-    "억울함 조각": f"{_GEM_IMG_BASE}/resentment.png",
-    "화남 조각":   f"{_GEM_IMG_BASE}/anger.png",
-    "적대감 조각": f"{_GEM_IMG_BASE}/hostility.png",
-    "즐거움 조각": f"{_GEM_IMG_BASE}/joy.png",
-    "감사함 조각": f"{_GEM_IMG_BASE}/gratitude.png",
-    "설렘 조각":   f"{_GEM_IMG_BASE}/flutter.png",
-    "뿌듯함 조각": f"{_GEM_IMG_BASE}/pride.png",
-    "편안함 조각": f"{_GEM_IMG_BASE}/serenity.png",
-    "무기력함 조각": f"{_GEM_IMG_BASE}/lethargy.png",
-    "공허함 조각": f"{_GEM_IMG_BASE}/emptiness.png",
-    "후회 조각":   f"{_GEM_IMG_BASE}/regret.png",
+    "우울함 조각": "",
+    "외로움 조각": "",
+    "상실감 조각": "",
+    "서러움 조각": "",
+    "실망감 조각": "",
+    "걱정 조각":   "",
+    "긴장감 조각": "",
+    "위축감 조각": "",
+    "짜증 조각":   "",
+    "억울함 조각": "",
+    "화남 조각":   "",
+    "적대감 조각": "",
+    "즐거움 조각": "",
+    "감사함 조각": "",
+    "설렘 조각":   "",
+    "뿌듯함 조각": "",
+    "편안함 조각": "",
+    "무기력함 조각": "",
+    "공허함 조각": "",
+    "후회 조각":   "",
 }
 
 BASE_QUICK_REPLIES = [
