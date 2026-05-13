@@ -391,15 +391,15 @@ SAVE_ONLY_QUICK_REPLIES = [
     {"label": "다시 찾을게요", "action": "message", "messageText": "다시 찾을게요"},
 ]
 
+CATEGORY_QUICK_REPLIES = [
+    {"label": cat, "action": "message", "messageText": cat}
+    for cat in EMOTION_CATEGORIES.keys()
+]
+
 RETRY_QUICK_REPLIES = [
     {"label": "다시 시도 🔄", "action": "message", "messageText": "다시 시도"},
     {"label": "내 원석 보기", "action": "message", "messageText": "내 원석"},
     {"label": "원석 도감", "action": "message", "messageText": "도감"},
-]
-
-CATEGORY_QUICK_REPLIES = [
-    {"label": cat, "action": "message", "messageText": cat}
-    for cat in EMOTION_CATEGORIES.keys()
 ]
 
 DAILY_QUICK_REPLIES = [
@@ -449,9 +449,7 @@ def classify_emotion(text: str) -> list[str] | str | None:
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 50,
             },
-            # 카카오 채널은 콜백 모드(useCallback:true)라 5초 제한 회피됨.
-            # OpenRouter free tier가 burst 시 4-8초 걸리는 사례 잦아 10초로 완화.
-            timeout=10.0,
+            timeout=60.0,
         )
         raw = response.json()["choices"][0]["message"]["content"].strip()
         print(f"[classify_emotion raw] {raw}")
@@ -723,6 +721,10 @@ def _prepend_greeting(response: dict, greeting: str) -> dict:
 def _check_and_update_visit(user_id: str) -> str | None:
     """Returns greeting message on first-ever or first-of-day visit, else None."""
     today = _today_kst()
+
+    if user_last_active.get(user_id) == today:
+        return None
+
     last = None
 
     # DB에서 마지막 저장일 조회
