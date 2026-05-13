@@ -7,7 +7,7 @@
 ```
 사용자 → 카카오톡 → 오픈빌더 → FastAPI 서버
                                       ↓ (즉시 useCallback:true 반환)
-                               BackgroundTask → OpenRouter (Gemma 4 26B)
+                               BackgroundTask → OpenAI API
                                       ↓                ↓
                               Supabase DB ←────── 조각 결정
                               Railway DB ←────── (동시 저장)
@@ -74,7 +74,7 @@
 | 항목 | 선택 |
 |---|---|
 | 백엔드 | FastAPI + uvicorn |
-| AI | OpenRouter — google/gemma-4-26b-a4b-it:free |
+| AI | OpenAI API — gpt-4.1-mini |
 | DB | Supabase (PostgreSQL) + Railway PostgreSQL |
 | 배포 | Railway |
 | 챗봇 플랫폼 | 카카오 i 오픈빌더 |
@@ -83,7 +83,8 @@
 ## 환경 변수 (.env)
 
 ```
-OPENROUTER_API_KEY=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
 SUPABASE_URL=
 SUPABASE_KEY=
 ALERT_EMAIL=

@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict
 import requests
 import os
+import time
 import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
@@ -12,7 +13,8 @@ import psycopg2
 
 load_dotenv()
 
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ALERT_EMAIL = os.getenv("ALERT_EMAIL")
@@ -423,6 +425,53 @@ EMOTION_QUICK_REPLIES = [
 ]
 
 
+def _call_openai_chat(prompt: str) -> dict | None:
+    for attempt in range(1, 3):
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": OPENAI_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 50,
+                    "temperature": 0,
+                },
+                timeout=30.0,
+            )
+            try:
+                data = response.json()
+            except ValueError:
+                data = None
+
+            if response.status_code == 200 and data and "choices" in data:
+                return data
+
+            print(f"[classify_emotion status] attempt={attempt} status={response.status_code}")
+            print(f"[classify_emotion body] {response.text[:1000]}")
+            if attempt < 2 and response.status_code in {408, 409, 429, 500, 502, 503, 504}:
+                time.sleep(attempt)
+                continue
+            return None
+        except requests.exceptions.Timeout:
+            print(f"[classify_emotion timeout] attempt={attempt}")
+            if attempt < 2:
+                time.sleep(attempt)
+                continue
+            return None
+        except requests.exceptions.RequestException as e:
+            print(f"[classify_emotion request error] attempt={attempt} error={e}")
+            if attempt < 2:
+                time.sleep(attempt)
+                continue
+            return None
+
+    return None
+
+
 def classify_emotion(text: str) -> list[str] | str | None:
     emotion_list = ", ".join(EMOTION_TO_GEM.keys())
     prompt = (
@@ -437,21 +486,15 @@ def classify_emotion(text: str) -> list[str] | str | None:
         "감정이 하나라면 단어 하나만 답해줘. 다른 말은 절대 하지 마.\n\n"
         f"입력: {text}"
     )
+    if not OPENAI_API_KEY:
+        print("[classify_emotion config error] OPENAI_API_KEY is not configured")
+        return "TIMEOUT"
+
     try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "google/gemma-4-26b-a4b-it:free",
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 50,
-            },
-            timeout=60.0,
-        )
-        raw = response.json()["choices"][0]["message"]["content"].strip()
+        data = _call_openai_chat(prompt)
+        if not data:
+            return "TIMEOUT"
+        raw = data["choices"][0]["message"]["content"].strip()
         print(f"[classify_emotion raw] {raw}")
         if "기록아님" in raw:
             return "NOT_RECORD"
@@ -462,8 +505,6 @@ def classify_emotion(text: str) -> list[str] | str | None:
         if not found:
             found = [EMOTION_TO_GEM[e] for e in EMOTION_TO_GEM if e in raw]
         return found if found else None
-    except requests.exceptions.Timeout:
-        return "TIMEOUT"
     except Exception as e:
         print(f"[classify_emotion error] {e}")
         return None

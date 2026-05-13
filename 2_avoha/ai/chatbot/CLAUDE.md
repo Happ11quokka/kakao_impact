@@ -24,7 +24,7 @@ venv\Scripts\pip install -r requirements.txt
 ```
 카카오톡 → 오픈빌더 → POST /webhook
                             ↓ (즉시 {"useCallback": true} 반환)
-                       BackgroundTask → OpenRouter (Gemma 4 26B) → Supabase + Railway DB
+                       BackgroundTask → OpenAI API → Supabase + Railway DB
                             ↓
                        callbackUrl POST → 카카오 응답
 ```
@@ -142,13 +142,13 @@ venv\Scripts\pip install -r requirements.txt
 - `list[str]` — 조각 이름 리스트 (단일 또는 최대 3개)
 - `"NOT_RECORD"` — 인사말만 있거나 감정/일상 내용 없음
 - `"DAILY_RECORD"` — 감정 없이 일상 사실만 나열
-- `"TIMEOUT"` — 10초 초과 (`requests.exceptions.Timeout`)
+- `"TIMEOUT"` — API timeout 또는 재시도 후 실패
 - `None` — 기타 오류
 
-**AI (OpenRouter - Gemma 4 26B A4B):**
-- 모델: `google/gemma-4-26b-a4b-it:free` (OpenRouter API)
+**AI (OpenAI API):**
+- 모델: `gpt-4.1-mini` 기본값 (`OPENAI_MODEL`로 변경 가능)
 - 3분류: 기록아님 / 일상기록 / 감정 단어(최대 3개)
-- timeout=10.0s (콜백 모드라 카카오 5초 제한 무관)
+- timeout=30.0s, 일시 오류는 1회 재시도 (콜백 모드라 카카오 5초 제한 무관)
 
 **백그라운드 태스크:**
 - `_callback_task(user_id, utterance, callback_url, photo_time, photo_url, greeting)` — 일반 메시지 분류 후 callbackUrl POST (greeting 있으면 응답 앞에 prepend)
@@ -190,7 +190,8 @@ venv\Scripts\pip install -r requirements.txt
 
 `.env` 파일 필요:
 ```
-OPENROUTER_API_KEY=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
 SUPABASE_URL=
 SUPABASE_KEY=
 ALERT_EMAIL=
