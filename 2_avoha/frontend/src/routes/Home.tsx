@@ -13,10 +13,12 @@ type ReappraiseMode = 'idle' | 'select' | 'reflect' | 'breathe';
 
 type WalkItem = {
   id: string;
-  gem: Gem;
+  kind: 'emotion' | 'memory';
+  gem: Gem | null;
   record: ChatbotRecordDto | null;
   displayEmotionCode: string;
   status: 'suggested' | 'confirmed';
+  createdAt: string;
 };
 
 const EMOTION_VARIANT: Record<string, string> = {
@@ -74,6 +76,17 @@ function gemWithEmotion(gem: Gem, emotionCode: string): Gem {
   return { ...gem, emotionCode };
 }
 
+function itemToGem(item: WalkItem): Gem {
+  return item.gem
+    ? gemWithEmotion(item.gem, item.displayEmotionCode)
+    : {
+        id: `memory-gem-${item.id}`,
+        emotionCode: item.displayEmotionCode,
+        tier: 1,
+        createdAt: item.createdAt,
+      };
+}
+
 export default function Home() {
   const { ticketsRemaining, gems, fetchInventory } = useInventoryStore();
   const [records, setRecords] = useState<ChatbotRecordDto[]>([]);
@@ -106,13 +119,31 @@ export default function Home() {
   }, [records]);
 
   const walkItems = useMemo<WalkItem[]>(() => {
-    return todayGems.map((gem, index) => ({
+    const emotionRecords = todayRecords.filter((record) => record.gem !== '일상기록');
+    const emotionItems: WalkItem[] = todayGems.map((gem, index) => ({
       id: gem.id,
+      kind: 'emotion',
       gem,
-      record: todayRecords[index] ?? null,
+      record: emotionRecords[index] ?? null,
       displayEmotionCode: emotionOverrides[gem.id] ?? gem.emotionCode,
       status: confirmedIds.has(gem.id) ? 'confirmed' : 'suggested',
+      createdAt: gem.createdAt,
     }));
+    const memoryItems: WalkItem[] = todayRecords
+      .filter((record) => record.gem === '일상기록')
+      .map((record) => ({
+        id: `record-${record.id}`,
+        kind: 'memory',
+        gem: null,
+        record,
+        displayEmotionCode: emotionOverrides[`record-${record.id}`] ?? 'untroubled',
+        status: confirmedIds.has(`record-${record.id}`) ? 'confirmed' : 'suggested',
+        createdAt: record.createdAt,
+      }));
+
+    return [...emotionItems, ...memoryItems].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
   }, [confirmedIds, emotionOverrides, todayGems, todayRecords]);
 
   useEffect(() => {
@@ -241,6 +272,7 @@ export default function Home() {
                 const left = walkItems.length <= 1 ? 50 : 14 + (index / (walkItems.length - 1)) * 72;
                 const active = index === currentIndex;
                 const confirmed = item.status === 'confirmed';
+                const showAsGem = item.kind === 'emotion' || confirmed;
                 return (
                   <button
                     key={item.id}
@@ -255,20 +287,28 @@ export default function Home() {
                       setMascotWalking(true);
                       openItem(item);
                     }}
-                    aria-label={`${emotion?.nameKo ?? item.displayEmotionCode} 원석 감정하기`}
+                    aria-label={
+                      showAsGem
+                        ? `${emotion?.nameKo ?? item.displayEmotionCode} 원석 감정하기`
+                        : '일상 기록 확인하기'
+                    }
                     style={{
                       ...styles.pathGem,
                       left: `${left}%`,
-                      filter: confirmed ? 'none' : 'grayscale(0.25) saturate(0.72)',
-                      opacity: confirmed ? 1 : 0.86,
-                      transform: active ? 'translate(-50%, -50%) scale(1.14)' : 'translate(-50%, -50%)',
+                      filter: showAsGem && !confirmed ? 'grayscale(0.12) saturate(0.82)' : 'none',
+                      opacity: showAsGem ? 0.95 : 1,
+                      transform: active ? 'translate(-50%, -50%) scale(1.08)' : 'translate(-50%, -50%)',
                     }}
                   >
-                    <GemStone
-                      gem={gemWithEmotion(item.gem, item.displayEmotionCode)}
-                      size={active ? 46 : 38}
-                      variant={EMOTION_VARIANT[item.displayEmotionCode]}
-                    />
+                    {showAsGem ? (
+                      <GemStone
+                        gem={itemToGem(item)}
+                        size={active ? 28 : 23}
+                        variant={EMOTION_VARIANT[item.displayEmotionCode]}
+                      />
+                    ) : (
+                      <MemoryShard active={active} hasPhoto={Boolean(item.record?.hasPhoto)} />
+                    )}
                     {item.record?.hasPhoto && <span style={styles.photoSpark}>사진</span>}
                   </button>
                 );
@@ -276,7 +316,9 @@ export default function Home() {
             </div>
 
             <button type="button" onClick={() => currentItem && openItem(currentItem)} style={styles.inspectBubble}>
-              {currentEmotion?.nameKo ?? '오늘'} 원석 감정하기
+              {currentItem?.kind === 'memory' && currentItem.status !== 'confirmed'
+                ? '일상 기록 확인하기'
+                : `${currentEmotion?.nameKo ?? '오늘'} 원석 감정하기`}
             </button>
           </>
         )}
@@ -298,7 +340,9 @@ export default function Home() {
         <h2 style={styles.panelTitle}>오늘 길 위의 원석</h2>
         <div style={styles.summaryRow}>
           {(['joy', 'complex', 'sadness', 'anger', 'anxiety'] as CategoryCode[]).map((category) => {
-            const count = walkItems.filter((item) => emotionToCategory(item.displayEmotionCode) === category).length;
+            const count = walkItems
+              .filter((item) => item.kind === 'emotion' || item.status === 'confirmed')
+              .filter((item) => emotionToCategory(item.displayEmotionCode) === category).length;
             return (
               <div key={category} style={styles.summaryChip}>
                 <span>{CATEGORY_LABEL[category]}</span>
@@ -381,14 +425,19 @@ function AppraisalPopup({
   const record = item.record;
   const question = REFLECTION_QUESTIONS[reflectionStep];
   const breathText = ['숨을 들이마셔요', '잠깐 머물러요', '천천히 내쉬어요'][breathPhase] ?? '천천히 내쉬어요';
+  const isMemoryPending = item.kind === 'memory' && item.status !== 'confirmed';
 
   return (
     <div style={styles.modalLayer}>
-      <section style={styles.popup} aria-label="원석 감정 결과">
+      <section style={styles.popup} aria-label={isMemoryPending ? '일상 기록 확인' : '원석 감정 결과'}>
         <button type="button" onClick={onClose} aria-label="닫기" style={styles.closeButton}>×</button>
         <div style={styles.popupHeader}>
-          <span style={styles.popupEyebrow}>원석 감정 결과</span>
-          <strong>이 기록은 ‘{emotion?.nameKo ?? item.displayEmotionCode} 원석’으로 감정되었어요.</strong>
+          <span style={styles.popupEyebrow}>{isMemoryPending ? '일상 기록' : '원석 감정 결과'}</span>
+          <strong>
+            {isMemoryPending
+              ? '아직 감정이 정해지지 않은 기록이에요.'
+              : `이 기록은 ‘${emotion?.nameKo ?? item.displayEmotionCode} 원석’으로 감정되었어요.`}
+          </strong>
         </div>
 
         {record?.hasPhoto && (
@@ -398,13 +447,19 @@ function AppraisalPopup({
         )}
 
         <p style={styles.recordText}>
-          {record?.recordText ?? '채집한 기록과 연결된 원석이에요. 지금 감정을 확인해볼 수 있어요.'}
+          {record?.recordText ?? (isMemoryPending ? '카카오톡에서 저장한 일상 기록이에요.' : '채집한 기록과 연결된 원석이에요. 지금 감정을 확인해볼 수 있어요.')}
         </p>
 
         {mode === 'idle' && (
           <div style={styles.actionStack}>
-            <button type="button" onClick={onConfirm} style={styles.confirmButton}>{emotion?.nameKo ?? '이 감정'}이 맞아요</button>
-            <button type="button" onClick={onReappraise} style={styles.lightButton}>다시 감정하기</button>
+            {isMemoryPending ? (
+              <button type="button" onClick={onReappraise} style={styles.confirmButton}>감정 선택하기</button>
+            ) : (
+              <button type="button" onClick={onConfirm} style={styles.confirmButton}>{emotion?.nameKo ?? '이 감정'}이 맞아요</button>
+            )}
+            <button type="button" onClick={isMemoryPending ? onBreathe : onReappraise} style={styles.lightButton}>
+              {isMemoryPending ? '5초 숨 고르고 고르기' : '다시 감정하기'}
+            </button>
             <button type="button" onClick={onReflect} style={styles.lightButton}>잘 모르겠어요</button>
             <button type="button" onClick={onClose} style={styles.textButton}>나중에 볼게요</button>
           </div>
@@ -470,6 +525,27 @@ function PixelCloud({ left, top, scale }: { left: number; top: number; scale: nu
       <span style={{ ...styles.cloudBlock, left: 10, top: 0, width: 24, height: 24 }} />
       <span style={{ ...styles.cloudBlock, left: 30, top: 4, width: 22, height: 20 }} />
     </div>
+  );
+}
+
+function MemoryShard({ active, hasPhoto }: { active: boolean; hasPhoto: boolean }) {
+  return (
+    <span
+      style={{
+        ...styles.memoryShard,
+        width: active ? 30 : 26,
+        height: active ? 28 : 24,
+      }}
+      aria-hidden="true"
+    >
+      <span style={styles.memoryShardGlow} />
+      <span
+        style={{
+          ...styles.memoryShardCore,
+          background: hasPhoto ? 'rgba(232, 243, 255, 0.8)' : 'rgba(255, 253, 245, 0.74)',
+        }}
+      />
+    </span>
   );
 }
 
@@ -628,23 +704,23 @@ const styles: Record<string, CSSProperties> = {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 118,
-    height: 78,
+    bottom: 74,
+    height: 44,
     zIndex: 4,
   },
   pathGem: {
     position: 'absolute',
-    top: 35,
+    top: 18,
     border: 0,
     background: 'transparent',
     padding: 0,
     cursor: 'pointer',
     transition: 'transform 220ms ease, opacity 180ms ease, filter 180ms ease',
-    animation: 'gemPulse 2.3s ease-in-out infinite',
+    animation: 'none',
   },
   photoSpark: {
     position: 'absolute',
-    top: -10,
+    top: -13,
     left: '50%',
     transform: 'translateX(-50%)',
     minWidth: 28,
@@ -659,7 +735,7 @@ const styles: Record<string, CSSProperties> = {
   inspectBubble: {
     position: 'absolute',
     left: '50%',
-    bottom: 208,
+    bottom: 136,
     zIndex: 6,
     transform: 'translateX(-50%)',
     border: '2px solid #315C2E',
@@ -944,6 +1020,32 @@ const styles: Record<string, CSSProperties> = {
     border: '2px solid #2F5FB8',
     borderRadius: 2,
     boxShadow: 'inset -2px -2px 0 #D9ECFF',
+  },
+  memoryShard: {
+    position: 'relative',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+    background: 'rgba(255, 255, 255, 0.36)',
+    border: '2px dashed rgba(255, 255, 255, 0.72)',
+    boxShadow: '0 4px 0 rgba(49, 92, 46, 0.14), inset 0 0 12px rgba(255,255,255,0.44)',
+    backdropFilter: 'blur(1.5px)',
+  },
+  memoryShardGlow: {
+    position: 'absolute',
+    inset: -5,
+    borderRadius: 10,
+    background: 'rgba(255, 255, 255, 0.12)',
+    filter: 'blur(5px)',
+  },
+  memoryShardCore: {
+    position: 'relative',
+    width: '58%',
+    height: '48%',
+    borderRadius: 4,
+    background: 'rgba(255, 253, 245, 0.74)',
+    boxShadow: 'inset -2px -2px 0 rgba(47, 95, 184, 0.14)',
   },
   hill: {
     position: 'absolute',

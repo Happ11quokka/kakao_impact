@@ -21,6 +21,7 @@ function dtoToDrop(dto: FieldDropDto): FieldDrop {
     id: dto.id,
     emotionCode: dto.emotionCode,
     tier: dto.tier as GemTier,
+    source: dto.source,
     createdAt: dto.createdAt,
     consumedAt: null,
   };
