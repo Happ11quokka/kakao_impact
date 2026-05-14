@@ -7,12 +7,12 @@ import { getEmotion } from '../data/emotions';
 import GemStone from '../components/pixel/GemStone';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-const CALENDAR_BG = '#6FB6FF';
+const CALENDAR_BG = '#F9F4EA';
 const DAY_TILE = '#EDE2CC';
 const DETAIL_PANEL = '#A0BCA8';
 const TEXT_MAIN = '#1E3328';
 const TEXT_SUB = '#3D6050';
-const TITLE_TEXT = '#FFFFFF';
+const TITLE_TEXT = '#564730';
 
 type CalendarCell = {
   date: Date;
@@ -413,11 +413,6 @@ const styles: Record<string, CSSProperties> = {
   calendarArea: {
     position: 'relative',
     zIndex: 1,
-    background: '#FFFDF5',
-    border: '2px solid rgba(47, 95, 184, 0.28)',
-    borderRadius: 12,
-    padding: '14px 10px 16px',
-    boxShadow: '0 8px 0 rgba(37, 75, 139, 0.14)',
   },
   weekHeader: {
     display: 'grid',

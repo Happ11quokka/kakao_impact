@@ -21,7 +21,6 @@ function dtoToGem(dto: GemDto): Gem {
     id: dto.id,
     emotionCode: dto.emotionCode,
     tier: dto.tier as GemTier,
-    source: dto.source,
     sourceMessageId: dto.sourceMessageId ?? undefined,
     craftedFrom: dto.craftedFrom.length > 0 ? dto.craftedFrom : undefined,
     createdAt: dto.createdAt,

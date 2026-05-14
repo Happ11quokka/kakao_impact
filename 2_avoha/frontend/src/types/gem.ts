@@ -20,7 +20,6 @@ export interface Gem {
   id: string;
   emotionCode: string;
   tier: GemTier;
-  source?: string | null;
   sourceMessageId?: string;
   sourceText?: string;          // mock용: 원본 메시지 텍스트
   craftedFrom?: string[];
