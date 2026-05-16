@@ -1491,7 +1491,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if not data:
             return JSONResponse(kakao_response("저장 대기 중인 원석이 없어요. 일상을 먼저 보내주세요!"))
         step = data.get("reclassify_step", 0)
-        if step < 2:
+        if step < 1:
             data["reclassify_step"] = 1
             return JSONResponse({
                 "version": "2.0",
