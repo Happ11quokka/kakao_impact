@@ -1766,6 +1766,28 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 custom_replies=PHOTO_QUICK_REPLIES
             ))
 
+    # 다중 이벤트 흐름 진행 중인 경우 (감정분류 모드)
+    ev_state = pending_event_groups.get(user_id)
+    if ev_state and ev_state.get("mode") == "emotion" and utterance:
+        idx = ev_state["current_index"]
+        events = ev_state["events"]
+        if 0 <= idx < len(events):
+            current_event = events[idx]
+            event_urls = current_event["photo_urls"]
+            event_image_url = event_urls[0] if event_urls else None
+            # 추가 사진은 단순기록으로 즉시 저장
+            for _extra_url in event_urls[1:]:
+                background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None)
+            # 현재 이벤트 분류 시도
+            result = classify_emotion_with_supervisor(utterance)
+            response = _build_ai_response(
+                user_id, utterance, bool(event_image_url), event_image_url, result,
+            )
+            # pending_gem이 세팅되어 있으면 이벤트 진행 메타데이터를 추가로 저장
+            if user_id in pending_gem:
+                pending_gem[user_id]["event_flow"] = True
+            return JSONResponse(response)
+
     if not utterance:
         return JSONResponse(kakao_response("조금 더 자세히 감정을 알려주실 수 있나요?"))
 
