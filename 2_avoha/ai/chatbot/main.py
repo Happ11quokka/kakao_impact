@@ -51,7 +51,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
-user_count: dict = {}
 pending_photo: dict = {}
 pending_gem: dict = {}
 pending_emotion_selection: dict = {}
@@ -111,163 +110,6 @@ def send_alert_email(subject: str, body: str):
 #      불일치 → 카톡과 웹 화면 채집권 숫자가 어긋남. provider_user_key로
 #      users.id 조회 후 DB 차감을 시도, 실패(미로그인 등)하면 인메모리 fallback.
 
-def _get_user_uuid(user_id_hash: str) -> str | None:
-    """provider_user_key로 users.id 조회. 없으면 None."""
-    if not RAILWAY_DATABASE_URL:
-        return None
-    try:
-        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id FROM users WHERE provider_user_key = %s LIMIT 1",
-            (user_id_hash,),
-        )
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        return str(row[0]) if row else None
-    except Exception as e:
-        print(f"[_get_user_uuid error] {e}")
-        return None
-
-
-def _db_get_remaining(user_uuid: str) -> int | None:
-    """오늘(KST) 잔여 채집권 조회. row 없으면 5, 에러 시 None."""
-    if not RAILWAY_DATABASE_URL:
-        return None
-    today = _today_kst()
-    try:
-        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT remaining FROM collection_tickets WHERE user_id = %s AND date = %s LIMIT 1",
-            (user_uuid, today),
-        )
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        return row[0] if row else 5
-    except Exception as e:
-        print(f"[_db_get_remaining error] {e}")
-        return None
-
-
-def _db_decrement_ticket(user_uuid: str, n: int) -> tuple[int, int] | None:
-    """
-    오늘(KST) 채집권에서 n개 차감 (UPSERT + FOR UPDATE 단일 TX).
-    Returns: (actual_decremented, remaining) or None on error.
-    """
-    if not RAILWAY_DATABASE_URL:
-        return None
-    today = _today_kst()
-    conn = None
-    cur = None
-    try:
-        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
-        cur = conn.cursor()
-        # 없으면 5로 INSERT, 있으면 그대로 (atomic)
-        cur.execute(
-            """
-            INSERT INTO collection_tickets (user_id, date, remaining)
-            VALUES (%s, %s, 5)
-            ON CONFLICT (user_id, date) DO NOTHING
-            """,
-            (user_uuid, today),
-        )
-        # FOR UPDATE로 같은 TX 안에서 lock
-        cur.execute(
-            "SELECT remaining FROM collection_tickets WHERE user_id = %s AND date = %s FOR UPDATE",
-            (user_uuid, today),
-        )
-        row = cur.fetchone()
-        if row is None:
-            conn.rollback()
-            return None
-        current = row[0]
-        actual = min(n, current)
-        new_remaining = current - actual
-        cur.execute(
-            "UPDATE collection_tickets SET remaining = %s WHERE user_id = %s AND date = %s",
-            (new_remaining, user_uuid, today),
-        )
-        conn.commit()
-        return (actual, new_remaining)
-    except Exception as e:
-        print(f"[_db_decrement_ticket error] {e}")
-        if conn is not None:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-        return None
-    finally:
-        if cur is not None:
-            try:
-                cur.close()
-            except Exception:
-                pass
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-
-def get_remaining_count(user_id: str) -> int:
-    # DB 우선 (OAuth 로그인된 사용자), 실패 시 인메모리 fallback
-    user_uuid = _get_user_uuid(user_id)
-    if user_uuid is not None:
-        db_val = _db_get_remaining(user_uuid)
-        if db_val is not None:
-            return db_val
-    today = _today_kst()
-    record = user_count.get(user_id)
-    if not isinstance(record, dict) or record.get("date") != today:
-        return 5
-    return max(0, 5 - _safe_count(record.get("count")))
-
-
-def check_and_increment(user_id: str) -> int | None:
-    """채집권 1개 차감. 잔여 수 반환, 이미 소진 시 None."""
-    user_uuid = _get_user_uuid(user_id)
-    if user_uuid is not None:
-        result = _db_decrement_ticket(user_uuid, 1)
-        if result is not None:
-            actual, remaining = result
-            if actual == 0:
-                return None
-            return remaining
-        # DB 실패 → 인메모리 fallback
-    today = _today_kst()
-    record = user_count.get(user_id)
-    if not isinstance(record, dict) or record.get("date") != today:
-        user_count[user_id] = {"date": today, "count": 1}
-        return 4
-    current = _safe_count(record.get("count"))
-    if current >= 5:
-        return None
-    record["count"] = current + 1
-    return 5 - record["count"]
-
-
-def check_and_increment_n(user_id: str, n: int) -> tuple[int, int]:
-    """채집권 n개 차감. (실제 차감 수, 잔여 수) 반환."""
-    user_uuid = _get_user_uuid(user_id)
-    if user_uuid is not None:
-        result = _db_decrement_ticket(user_uuid, n)
-        if result is not None:
-            return result
-        # DB 실패 → 인메모리 fallback
-    today = _today_kst()
-    record = user_count.get(user_id)
-    current = 0 if (not isinstance(record, dict) or record.get("date") != today) else _safe_count(record.get("count"))
-    can = max(0, 5 - current)
-    actual = min(n, can)
-    if actual > 0:
-        user_count[user_id] = {"date": today, "count": current + actual}
-    return actual, max(0, 5 - current - actual)
-
-
 def is_image_url(text: str) -> bool:
     if " " in text or "\n" in text:
         return False
@@ -290,6 +132,32 @@ def is_video_url(text: str) -> bool:
     if "kakaocdn.net" in lowered and "videoplay" in lowered:
         return True
     return False
+
+
+def _db_get_today_count(user_id: str) -> int:
+    """오늘(KST) 채집한 원석 수 (일상기록 제외). 에러 시 0 반환."""
+    if not RAILWAY_DATABASE_URL:
+        return 0
+    today = _today_kst()
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM chatbot
+            WHERE user_id = %s
+              AND gem != '일상기록'
+              AND (created_at AT TIME ZONE 'Asia/Seoul')::date = %s
+            """,
+            (user_id, today),
+        )
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return int(count)
+    except Exception as e:
+        print(f"[_db_get_today_count error] {e}")
+        return 0
 
 
 EMOTION_TO_GEM = {
@@ -358,13 +226,6 @@ NEGATIVE_GEMS = {
     for e in emotions
 }
 
-REMAINING_MESSAGES = {
-    4: "채집권 4개가 남았어요! 신나게 원석 채집을 이어가요!",
-    3: "채집권 3개가 남았어요. 오늘도 잘 기록하고 있어요.",
-    2: "채집권 2개가 남았어요. 오늘 빛나는 순간이 또 있을까요?",
-    1: "이제 채집권이 1개 남았어요. 오늘의 마지막 원석, 어떤 마음으로 채집해볼까요?",
-    0: "오늘의 채집권을 모두 썼어요.\n내일 오전 10시에 다시 채워드릴게요.",
-}
 
 DANGER_KEYWORDS = [
     "죽고싶", "죽고 싶", "자살", "자해", "사라지고싶", "사라지고 싶",
@@ -997,10 +858,7 @@ def _extract_payload_value(body, key: str) -> str:
 
 def get_gem_stats(user_id: str) -> tuple[int, int]:
     """(오늘 채집 수, 전체 채집 수) — 일상기록 제외"""
-    today = _today_kst()
-    record = user_count.get(user_id)
-    today_count = _safe_count(record.get("count")) if (isinstance(record, dict) and record.get("date") == today) else 0
-
+    today_count = _db_get_today_count(user_id)
     total_count = 0
     if RAILWAY_DATABASE_URL:
         try:
@@ -1014,7 +872,6 @@ def get_gem_stats(user_id: str) -> tuple[int, int]:
             print(f"[get_gem_stats error] {e}")
     else:
         print("[get_gem_stats railway error] RAILWAY_DATABASE_URL is not configured")
-
     return today_count, total_count
 
 
@@ -1094,13 +951,12 @@ def _safe_pending_photo(user_id: str) -> tuple[bool, str | None, datetime | None
     return True, str(photo_url), photo_time
 
 
-def kakao_save_complete(gem: str, remaining: int, user_id: str = "", alert_msg: str = "") -> dict:
+def kakao_save_complete(gem: str, today_count: int, user_id: str = "", alert_msg: str = "") -> dict:
     display = gem
     link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
-    remaining_msg = REMAINING_MESSAGES.get(remaining, "")
     description = "세공소에서 직접 다듬어볼 수 있어요."
-    if remaining_msg:
-        description += f"\n\n{remaining_msg}"
+    if today_count > 0:
+        description += f"\n\n오늘 {today_count}번째 원석이에요! 🪨"
     if alert_msg:
         description += alert_msg
     return {
@@ -1541,19 +1397,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return JSONResponse(kakao_response("저장할 원석이 없어요. 일상을 먼저 보내주세요!"))
         if not data.get("gem"):
             return JSONResponse(kakao_response("감정을 먼저 선택해주세요!", show_emotion_buttons=True))
-        remaining = check_and_increment(user_id)
-        if remaining is None:
-            pending_gem.pop(user_id, None)
-            return JSONResponse(kakao_response(
-                "오늘 채집 바구니가 가득 찼습니다! 🧺\n"
-                "5개를 모두 줍다니 엄청난 하루를 보내셨군요!\n\n"
-                "내일 오전 10시에 다시 채워드릴게요."
-            ))
         gem_to_save = data["gem"]
+        today_count = _db_get_today_count(user_id) + 1
         background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"))
         pending_gem.pop(user_id, None)
         alert_msg = check_negative_accumulation(user_id)
-        response = kakao_save_complete(gem_to_save, remaining, user_id, alert_msg or "")
+        response = kakao_save_complete(gem_to_save, today_count, user_id, alert_msg or "")
         response = _maybe_attach_reflection_invite(response, user_id, gem_to_save, data["text"])
         return JSONResponse(response)
 
@@ -1563,26 +1412,17 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if not sel:
             return JSONResponse(kakao_response("저장할 원석이 없어요."))
         gems_to_save = [EMOTION_TO_GEM[e] for e in sel["emotions"] if e in EMOTION_TO_GEM]
-        actual, remaining = check_and_increment_n(user_id, len(gems_to_save))
-        if actual == 0:
-            pending_emotion_selection.pop(user_id, None)
-            return JSONResponse(kakao_response("오늘 채집 바구니가 가득 찼습니다! 🧺\n내일 오전 10시에 다시 채워드릴게요."))
-        for gem in gems_to_save[:actual]:
+        for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"))
         pending_emotion_selection.pop(user_id, None)
-        saved_names = ", ".join(gems_to_save[:actual])
-        remaining_msg = REMAINING_MESSAGES.get(remaining, "")
-        skipped = len(gems_to_save) - actual
-        msg = f"✨ {saved_names}{_josa_eul(saved_names)} 채집했어요!"
-        if skipped > 0:
-            msg += f"\n채집권이 부족해 {skipped}개는 채집하지 못했어요."
-        if remaining_msg:
-            msg += f"\n\n{remaining_msg}"
+        saved_names = ", ".join(gems_to_save)
+        today_count = _db_get_today_count(user_id) + len(gems_to_save)
+        msg = f"✨ {saved_names}{_josa_eul(saved_names)} 채집했어요!\n오늘 {today_count}번째 원석이에요! 🪨"
         alert_msg = check_negative_accumulation(user_id)
         if alert_msg:
             msg += alert_msg
         response = kakao_response(msg)
-        for gem in gems_to_save[:actual]:
+        for gem in gems_to_save:
             response = _maybe_attach_reflection_invite(response, user_id, gem, sel["text"])
             if user_id in pending_reflection:
                 break
@@ -1738,14 +1578,13 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             inv_replies = RETRY_QUICK_REPLIES
         else:
             inv_replies = BASE_QUICK_REPLIES
-        _, total_count = get_gem_stats(user_id)
-        remaining = get_remaining_count(user_id)
+        today_count, total_count = get_gem_stats(user_id)
         link_url = f"{WEB_URL}?kakao_hash={user_id}"
         if total_count == 0:
             desc = "아직 채집한 원석이 없어요.\n일상을 기록하면 원석으로 채집해드릴게요!"
         else:
             desc = (
-                f"총 {total_count}개 보유 · 채집권 {remaining}개 남음\n\n"
+                f"총 {total_count}개 보유 · 오늘 {today_count}번 기록했어요\n\n"
                 "아래 링크에서 보유한 원석의 종류와 수량,\n강화 현황을 한눈에 볼 수 있어요."
             )
         return JSONResponse({
@@ -1771,9 +1610,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     "description": (
                         "채집 방법\n"
                         "글이나 사진으로 자유롭게 기록하면 돼요.\n\n"
-                        "채집권\n"
-                        "하루 5개까지 채집할 수 있어요.\n"
-                        "다 써도 기록은 계속 남길 수 있어요.\n\n"
                         "웹에서 더 많이\n"
                         "원석 강화, 도감, 기록 모아보기는 웹에서 가능해요.\n\n"
                         "개인정보 안내\n"
