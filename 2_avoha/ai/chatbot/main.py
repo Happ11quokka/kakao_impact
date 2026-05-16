@@ -57,8 +57,10 @@ pending_gem: dict = {}
 pending_emotion_selection: dict = {}
 user_last_active: dict = {}  # {user_id: date(KST)}
 pending_simple_record: dict = {}  # {user_id: True} 단순기록 모드 여부
+pending_reflection: dict = {}  # {user_id: {question_id, question_text, stage, linked_date}}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
+reflection_schema_ready = False
 
 
 def _today_kst() -> date:
@@ -322,6 +324,17 @@ EMOTION_CATEGORIES = {
     "복잡/모호 계열": ["무기력함", "공허함", "후회"],
 }
 
+EMOTION_TO_REFLECTION_CATEGORY = {
+    emotion: category.replace(" 계열", "").replace("/두려움", "").replace("/모호", "")
+    for category, emotions in EMOTION_CATEGORIES.items()
+    for emotion in emotions
+}
+GEM_TO_REFLECTION_CATEGORY = {
+    EMOTION_TO_GEM[emotion]: category
+    for emotion, category in EMOTION_TO_REFLECTION_CATEGORY.items()
+}
+POSITIVE_REFLECTION_CATEGORY = "기쁨/긍정"
+
 NEGATIVE_GEMS = {
     EMOTION_TO_GEM[e]
     for cat, emotions in EMOTION_CATEGORIES.items()
@@ -425,6 +438,33 @@ PHOTO_QUICK_REPLIES = [
 EMOTION_QUICK_REPLIES = [
     {"label": e, "action": "message", "messageText": e}
     for e in EMOTION_TO_GEM.keys()
+]
+
+REFLECTION_INVITE_QUICK_REPLIES = [
+    {"label": "질문 받을게요", "action": "message", "messageText": "질문 받을게요"},
+    {"label": "건너뛸게요", "action": "message", "messageText": "건너뛸게요"},
+]
+
+REFLECTION_QUESTION_QUICK_REPLIES = [
+    {"label": "답할게요", "action": "message", "messageText": "답할게요"},
+    {"label": "건너뛸게요", "action": "message", "messageText": "건너뛸게요"},
+]
+
+REFLECTION_ANSWER_QUICK_REPLIES = [
+    {"label": "건너뛸게요", "action": "message", "messageText": "건너뛸게요"},
+]
+
+INITIAL_REFLECTION_QUESTIONS = [
+    ("Q_SAD_01", "슬픔", "이 감정이 느껴졌던 순간, 어떤 상황이었나요?"),
+    ("Q_SAD_02", "슬픔", "그 순간 혼자였나요, 누군가와 함께였나요?"),
+    ("Q_ANG_01", "분노", "그 순간 막히거나 답답했던 게 있었나요?"),
+    ("Q_ANG_02", "분노", "그 상황에서 내가 원했던 게 뭔지 떠올려볼 수 있나요?"),
+    ("Q_ANX_01", "불안", "이 감정이 느껴졌을 때 몸이 어떤 상태였나요?"),
+    ("Q_ANX_02", "불안", "무엇이 걱정됐는지 한 가지만 떠올려볼 수 있나요?"),
+    ("Q_COM_01", "복잡", "이 감정을 한 단어로 표현하면 뭐가 떠오르나요?"),
+    ("Q_GEN_01", "general", "오늘 기록한 감정이 느껴졌던 순간, 어떤 상황이었나요?"),
+    ("Q_GEN_02", "general", "그 순간을 지금 다시 떠올리면 어떤 느낌인가요?"),
+    ("Q_GEN_03", "general", "오늘 이 감정 말고 다른 감정도 느꼈나요?"),
 ]
 
 
@@ -647,6 +687,289 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
     except Exception as e:
         print(f"[save_gem railway error] {e}")
 
+
+def _ensure_reflection_schema() -> bool:
+    global reflection_schema_ready
+    if reflection_schema_ready:
+        return True
+    if not RAILWAY_DATABASE_URL:
+        print("[reflection schema] RAILWAY_DATABASE_URL is not configured")
+        return False
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS questions (
+                question_id VARCHAR PRIMARY KEY,
+                category VARCHAR NOT NULL,
+                question_text TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_questions_category ON questions(category)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS questions_log (
+                id SERIAL PRIMARY KEY,
+                user_id VARCHAR NOT NULL,
+                question_id VARCHAR NOT NULL,
+                asked_date DATE DEFAULT CURRENT_DATE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE (user_id, asked_date)
+            )
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_questions_log_user_date ON questions_log(user_id, asked_date)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS records (
+                id SERIAL PRIMARY KEY,
+                user_id VARCHAR,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """
+        )
+        cur.execute("ALTER TABLE records ADD COLUMN IF NOT EXISTS type VARCHAR DEFAULT 'record'")
+        cur.execute("ALTER TABLE records ADD COLUMN IF NOT EXISTS question_id VARCHAR NULL")
+        cur.execute("ALTER TABLE records ADD COLUMN IF NOT EXISTS question_text TEXT NULL")
+        cur.execute("ALTER TABLE records ADD COLUMN IF NOT EXISTS answer_text TEXT NULL")
+        cur.execute("ALTER TABLE records ADD COLUMN IF NOT EXISTS linked_date DATE NULL")
+        cur.execute("ALTER TABLE records ADD COLUMN IF NOT EXISTS week_id VARCHAR NULL")
+        cur.executemany(
+            """
+            INSERT INTO questions (question_id, category, question_text)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (question_id) DO NOTHING
+            """,
+            INITIAL_REFLECTION_QUESTIONS,
+        )
+        conn.commit()
+        reflection_schema_ready = True
+        return True
+    except Exception as e:
+        print(f"[reflection schema error] {e}")
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return False
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _normalize_reflection_category(emotion: str = "", emotion_category: str = "") -> str:
+    category = (emotion_category or "").strip()
+    if category:
+        category = category.replace(" 계열", "").replace("/두려움", "").replace("/모호", "")
+        if category.startswith("기쁨"):
+            return POSITIVE_REFLECTION_CATEGORY
+        return category
+
+    if emotion in EMOTION_TO_REFLECTION_CATEGORY:
+        return EMOTION_TO_REFLECTION_CATEGORY[emotion]
+    if emotion in GEM_TO_REFLECTION_CATEGORY:
+        return GEM_TO_REFLECTION_CATEGORY[emotion]
+    gem = EMOTION_TO_GEM.get(emotion)
+    if gem and gem in GEM_TO_REFLECTION_CATEGORY:
+        return GEM_TO_REFLECTION_CATEGORY[gem]
+    return "general"
+
+
+def _select_reflection_question(user_id: str, category: str) -> dict | None:
+    if not _ensure_reflection_schema():
+        return None
+
+    today = _today_kst()
+    week_ago = today - timedelta(days=6)
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM questions_log WHERE user_id = %s AND asked_date = %s LIMIT 1",
+            (user_id, today),
+        )
+        if cur.fetchone():
+            return None
+
+        for target_category in (category, "general"):
+            cur.execute(
+                """
+                SELECT question_id, question_text
+                FROM questions
+                WHERE category = %s
+                  AND question_id NOT IN (
+                      SELECT question_id
+                      FROM questions_log
+                      WHERE user_id = %s AND asked_date >= %s
+                  )
+                ORDER BY question_id
+                LIMIT 1
+                """,
+                (target_category, user_id, week_ago),
+            )
+            row = cur.fetchone()
+            if row:
+                question_id, question_text = row
+                cur.execute(
+                    """
+                    INSERT INTO questions_log (user_id, question_id, asked_date)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, asked_date) DO NOTHING
+                    """,
+                    (user_id, question_id, today),
+                )
+                if cur.rowcount != 1:
+                    conn.rollback()
+                    return None
+                conn.commit()
+                return {"question_id": str(question_id), "question_text": str(question_text)}
+
+        conn.rollback()
+        return None
+    except Exception as e:
+        print(f"[select reflection question error] {e}")
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return None
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def check_reflection_question(user_id: str, emotion: str = "", emotion_category: str = "", text_length: int = 0) -> dict:
+    category = _normalize_reflection_category(emotion, emotion_category)
+    if text_length < 15 or category == POSITIVE_REFLECTION_CATEGORY:
+        return {"should_ask": False}
+
+    question = _select_reflection_question(user_id, category)
+    if not question:
+        return {"should_ask": False}
+    return {"should_ask": True, **question}
+
+
+def save_reflection_answer(user_id: str, answer_text: str, question_id: str, question_text: str, linked_date: date | None = None) -> bool:
+    if not answer_text:
+        return False
+    if not _ensure_reflection_schema():
+        return False
+
+    linked = linked_date or _today_kst()
+    iso = linked.isocalendar()
+    week_id = f"{iso.year}-W{iso.week:02d}"
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO records (user_id, type, question_id, question_text, answer_text, linked_date, week_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (user_id, "reflection", question_id, question_text, answer_text, linked, week_id),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[save reflection error] {e}")
+        return False
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _maybe_attach_reflection_invite(response: dict, user_id: str, gem: str, record_text: str) -> dict:
+    emotion = GEM_TO_EMOTION.get(gem, gem)
+    result = check_reflection_question(
+        user_id=user_id,
+        emotion=emotion,
+        emotion_category=GEM_TO_REFLECTION_CATEGORY.get(gem, ""),
+        text_length=len(record_text or ""),
+    )
+    if not result.get("should_ask"):
+        return response
+
+    pending_reflection[user_id] = {
+        "question_id": result["question_id"],
+        "question_text": result["question_text"],
+        "stage": "invited",
+        "linked_date": _today_kst(),
+    }
+    response.setdefault("template", {}).setdefault("outputs", []).append(
+        {"simpleText": {"text": "잠깐, 하나만 물어봐도 될까요?"}}
+    )
+    response["template"]["quickReplies"] = REFLECTION_INVITE_QUICK_REPLIES
+    return response
+
+
+def _safe_pending_reflection(user_id: str) -> dict | None:
+    data = pending_reflection.get(user_id)
+    if not isinstance(data, dict) or not data.get("question_id") or not data.get("question_text"):
+        pending_reflection.pop(user_id, None)
+        return None
+    return data
+
+
+def _extract_payload_value(body, key: str) -> str:
+    if not isinstance(body, dict):
+        return ""
+    value = body.get(key)
+    if value is not None:
+        return str(value).strip()
+
+    action = body.get("action")
+    if isinstance(action, dict):
+        params = action.get("params")
+        if isinstance(params, dict) and params.get(key) is not None:
+            return str(params.get(key)).strip()
+
+    contexts = body.get("contexts")
+    if isinstance(contexts, list):
+        for context in contexts:
+            if not isinstance(context, dict):
+                continue
+            params = context.get("params")
+            if isinstance(params, dict) and params.get(key) is not None:
+                return str(params.get(key)).strip()
+    return ""
 
 
 
@@ -1034,6 +1357,43 @@ def _callback_task_analysis(user_id: str, callback_url: str):
         print(f"[_callback_task_analysis error] {e}")
 
 
+@app.post("/skill/check-question")
+async def skill_check_question(request: Request):
+    try:
+        body = await request.json()
+    except Exception as e:
+        print(f"[check-question json error] {e}")
+        body = {}
+
+    user_id = _extract_payload_value(body, "user_id") or _extract_kakao_request(body)[0]
+    emotion = _extract_payload_value(body, "emotion")
+    emotion_category = _extract_payload_value(body, "emotion_category")
+    try:
+        text_length = int(_extract_payload_value(body, "text_length") or 0)
+    except ValueError:
+        text_length = 0
+
+    return JSONResponse(check_reflection_question(user_id, emotion, emotion_category, text_length))
+
+
+@app.post("/skill/save-reflection")
+async def skill_save_reflection(request: Request):
+    try:
+        body = await request.json()
+    except Exception as e:
+        print(f"[save-reflection json error] {e}")
+        body = {}
+
+    user_id = _extract_payload_value(body, "user_id") or _extract_kakao_request(body)[0]
+    answer_text = _extract_payload_value(body, "answer_text") or _extract_kakao_request(body)[1]
+    question_id = _extract_payload_value(body, "question_id")
+    question_text = _extract_payload_value(body, "question_text")
+
+    if answer_text:
+        save_reflection_answer(user_id, answer_text, question_id, question_text)
+    return JSONResponse(kakao_response("잘 담아뒀어요 ✎", custom_replies=BASE_QUICK_REPLIES))
+
+
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -1051,6 +1411,25 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if any(kw in utterance for kw in HARMFUL_KEYWORDS):
         background_tasks.add_task(send_alert_email, "[닥토공방] 유해 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
         return JSONResponse(kakao_response(HARMFUL_MESSAGE))
+
+    reflection = _safe_pending_reflection(user_id)
+    if reflection and utterance == "건너뛸게요":
+        pending_reflection.pop(user_id, None)
+        return JSONResponse(kakao_response("알겠어요 :)", custom_replies=BASE_QUICK_REPLIES))
+
+    if reflection and utterance == "질문 받을게요":
+        reflection["stage"] = "question_shown"
+        return JSONResponse(kakao_response(
+            reflection["question_text"],
+            custom_replies=REFLECTION_QUESTION_QUICK_REPLIES
+        ))
+
+    if reflection and utterance == "답할게요":
+        reflection["stage"] = "awaiting_answer"
+        return JSONResponse(kakao_response(
+            "편하게 적어주세요 :)",
+            custom_replies=REFLECTION_ANSWER_QUICK_REPLIES
+        ))
 
     # 모드 선택 메뉴
     if utterance == "모드":
@@ -1152,7 +1531,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"))
         pending_gem.pop(user_id, None)
         alert_msg = check_negative_accumulation(user_id)
-        return JSONResponse(kakao_save_complete(gem_to_save, remaining, user_id, alert_msg or ""))
+        response = kakao_save_complete(gem_to_save, remaining, user_id, alert_msg or "")
+        response = _maybe_attach_reflection_invite(response, user_id, gem_to_save, data["text"])
+        return JSONResponse(response)
 
     # 모두 채집 (복수 감정 전체 저장)
     if utterance == "모두 채집":
@@ -1178,7 +1559,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         alert_msg = check_negative_accumulation(user_id)
         if alert_msg:
             msg += alert_msg
-        return JSONResponse(kakao_response(msg))
+        response = kakao_response(msg)
+        for gem in gems_to_save[:actual]:
+            response = _maybe_attach_reflection_invite(response, user_id, gem, sel["text"])
+            if user_id in pending_reflection:
+                break
+        return JSONResponse(response)
 
     # 골라서 채집 (복수 감정 중 선택)
     if utterance == "골라서 채집":
@@ -1381,6 +1767,23 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 "quickReplies": BASE_QUICK_REPLIES,
             },
         })
+
+    reflection = _safe_pending_reflection(user_id)
+    if reflection and reflection.get("stage") == "awaiting_answer":
+        linked_date = reflection.get("linked_date")
+        if not isinstance(linked_date, date):
+            linked_date = _today_kst()
+        if utterance:
+            background_tasks.add_task(
+                save_reflection_answer,
+                user_id,
+                utterance,
+                reflection["question_id"],
+                reflection["question_text"],
+                linked_date,
+            )
+        pending_reflection.pop(user_id, None)
+        return JSONResponse(kakao_response("잘 담아뒀어요 ✎", custom_replies=BASE_QUICK_REPLIES))
 
     # 사진 전송
     if is_image_url(utterance):
