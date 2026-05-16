@@ -1704,11 +1704,19 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 단순기록 모드 텍스트 처리
     if pending_simple_record.get(user_id):
+        pending_simple_buffer.setdefault(user_id, []).append(
+            {"text": utterance, "has_photo": False, "image_url": None}
+        )
+        if callback_url:
+            pending_simple_callback[user_id] = callback_url
+        existing = pending_simple_timer.pop(user_id, None)
+        if existing and not existing.done():
+            existing.cancel()
+        pending_simple_timer[user_id] = asyncio.create_task(_flush_simple_records(user_id))
+        if callback_url:
+            return JSONResponse({"version": "2.0", "useCallback": True})
         background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None)
-        return JSONResponse(kakao_response(
-            "기록됐어요! ",
-            custom_replies=BASE_QUICK_REPLIES
-        ))
+        return JSONResponse(kakao_response("기록됐어요! ", custom_replies=BASE_QUICK_REPLIES))
 
     daily_data = _safe_pending_gem(user_id, require_text=True)
     if daily_data and daily_data.get("daily") and daily_data.get("awaiting_emotion_add"):
