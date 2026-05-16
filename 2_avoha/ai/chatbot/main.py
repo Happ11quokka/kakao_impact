@@ -1827,6 +1827,27 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     has_photo, image_urls, photo_time = _safe_pending_photo(user_id)
     image_url = image_urls[0] if image_urls else None
+
+    # 사진 2장 이상이면 EXIF 그룹화 시도 → 다중 이벤트면 순차 모드 진입
+    if has_photo and len(image_urls) >= 2:
+        photo_dicts = _build_event_photo_dicts_for_emotion(user_id)
+        events = group_photos_by_event(photo_dicts)
+        if len(events) >= 2:
+            pending_photo.pop(user_id, None)
+            pending_event_groups[user_id] = {
+                "mode": "emotion",
+                "events": events,
+                "current_index": 0,
+                "shared_text": None,
+            }
+            first_label = _build_event_label(events[0], 0, len(events))
+            return JSONResponse(kakao_response(
+                f"오늘 {len(events)}개의 이벤트로 나뉘었어요. ✨\n\n"
+                f"{first_label}\n이때 어떤 느낌이었나요?",
+                hide_buttons=True,
+            ))
+
+    # 단일 이벤트(또는 사진 1장): 추가 사진은 단순기록으로 저장하고 기존 흐름 유지
     for _extra_url in image_urls[1:]:
         background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None)
 
