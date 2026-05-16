@@ -12,6 +12,7 @@ import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 import psycopg2
+import asyncio
 
 load_dotenv()
 
@@ -57,6 +58,10 @@ pending_emotion_selection: dict = {}
 user_last_active: dict = {}  # {user_id: date(KST)}
 pending_simple_record: dict = {}  # {user_id: True} 단순기록 모드 여부
 pending_reflection: dict = {}  # {user_id: {question_id, question_text, stage, linked_date}}
+SIMPLE_RECORD_DEBOUNCE_S = 3.5
+pending_simple_buffer: dict[str, list[dict]] = {}  # {user_id: [{text,has_photo,image_url}]}
+pending_simple_callback: dict[str, str] = {}        # {user_id: callback_url}
+pending_simple_timer: dict[str, asyncio.Task] = {}  # {user_id: debounce task}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
 reflection_schema_ready = False
