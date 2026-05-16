@@ -12,7 +12,6 @@ import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 import psycopg2
-from exif_grouping import parse_photo_exif, group_photos_by_event
 
 load_dotenv()
 
@@ -58,19 +57,6 @@ pending_emotion_selection: dict = {}
 user_last_active: dict = {}  # {user_id: date(KST)}
 pending_simple_record: dict = {}  # {user_id: True} 단순기록 모드 여부
 pending_reflection: dict = {}  # {user_id: {question_id, question_text, stage, linked_date}}
-
-# 단순기록 모드 사진 누적 버퍼 (텍스트 트리거 시까지 모음)
-# {user_id: [{"url": str, "received_time": datetime}]}
-pending_simple_photo_buffer: dict[str, list[dict]] = {}
-
-# 다중 이벤트로 그룹화된 후 순차 처리 상태
-# {user_id: {
-#     "mode": "emotion" | "simple",
-#     "events": [{"start_time": datetime, "photo_urls": [str]}],
-#     "current_index": int,
-#     "shared_text": str | None,
-# }}
-pending_event_groups: dict[str, dict] = {}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
 reflection_schema_ready = False
@@ -583,60 +569,6 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
         conn.close()
     except Exception as e:
         print(f"[save_gem railway error] {e}")
-
-
-def _clear_event_state(user_id: str) -> None:
-    """다중 이벤트 진행 상태를 클리어. 사용자가 흐름을 이탈할 때 호출."""
-    pending_event_groups.pop(user_id, None)
-    pending_simple_photo_buffer.pop(user_id, None)
-
-
-def _build_event_label(event: dict, index: int, total: int) -> str:
-    """이벤트 라벨 문자열 빌드. 예: '이벤트 1/2 (오전 11:00 · 사진 3장)'."""
-    start = event["start_time"]
-    hour = start.hour
-    if hour < 12:
-        period = "오전"
-        display_hour = hour if hour != 0 else 12
-    elif hour == 12:
-        period = "오후"
-        display_hour = 12
-    else:
-        period = "오후"
-        display_hour = hour - 12
-    time_str = f"{period} {display_hour}:{start.minute:02d}"
-    count = len(event["photo_urls"])
-    return f"이벤트 {index + 1}/{total} ({time_str} · 사진 {count}장)"
-
-
-def _build_event_photo_dicts_for_emotion(user_id: str) -> list[dict]:
-    """감정분류 모드 - pending_photo에서 EXIF 분석용 dict 리스트 생성."""
-    data = pending_photo.get(user_id) or {}
-    urls = data.get("urls") or []
-    received_times = data.get("received_times") or [data.get("time") or datetime.now()] * len(urls)
-    if len(received_times) != len(urls):
-        received_times = [data.get("time") or datetime.now()] * len(urls)
-    out = []
-    for url, rt in zip(urls, received_times):
-        out.append({
-            "url": url,
-            "exif_time": parse_photo_exif(url),
-            "received_time": rt,
-        })
-    return out
-
-
-def _build_event_photo_dicts_for_simple(user_id: str) -> list[dict]:
-    """단순기록 모드 - pending_simple_photo_buffer에서 EXIF 분석용 dict 리스트 생성."""
-    buf = pending_simple_photo_buffer.get(user_id) or []
-    return [
-        {
-            "url": item["url"],
-            "exif_time": parse_photo_exif(item["url"]),
-            "received_time": item["received_time"],
-        }
-        for item in buf
-    ]
 
 
 def _ensure_reflection_schema() -> bool:
@@ -1351,11 +1283,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     user_id, utterance, callback_url = _extract_kakao_request(body)
 
-    # 다중 이벤트 흐름 중에 특정 명령어가 들어오면 상태 클리어
-    _exit_commands = {"모드", "내 원석", "도감", "감정분석", "채집 안내", "감정분류 모드", "단순기록 모드"}
-    if utterance in _exit_commands and (user_id in pending_event_groups or user_id in pending_simple_photo_buffer):
-        _clear_event_state(user_id)
-
     if any(kw in utterance for kw in DANGER_KEYWORDS):
         background_tasks.add_task(send_alert_email, "[닥토공방] 위험 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
         return JSONResponse(kakao_response(DANGER_MESSAGE))
@@ -1474,32 +1401,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         gem_to_save = data["gem"]
         today_count = _db_get_today_count(user_id) + 1
         background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"))
-        was_event_flow = bool(data.get("event_flow"))
         pending_gem.pop(user_id, None)
-
-        # 다중 이벤트 흐름이면 다음 이벤트로 진행
-        if was_event_flow and user_id in pending_event_groups:
-            ev_state = pending_event_groups[user_id]
-            ev_state["current_index"] += 1
-            idx = ev_state["current_index"]
-            events = ev_state["events"]
-            if idx < len(events):
-                next_label = _build_event_label(events[idx], idx, len(events))
-                return JSONResponse(kakao_response(
-                    f"✨ 저장됐어요!\n\n{next_label}\n이때는 어떤 느낌이었나요?",
-                    hide_buttons=True,
-                ))
-            # 모든 이벤트 완료
-            total = len(events)
-            pending_event_groups.pop(user_id, None)
-            alert_msg = check_negative_accumulation(user_id)
-            extra = f"\n{alert_msg}" if alert_msg else ""
-            return JSONResponse(kakao_response(
-                f"오늘 {total}개의 이벤트가 모두 저장됐어요! ✨\n"
-                f"오늘 {today_count}번째 원석이에요! 🪨{extra}",
-                custom_replies=BASE_QUICK_REPLIES,
-            ))
-
         alert_msg = check_negative_accumulation(user_id)
         response = kakao_save_complete(gem_to_save, today_count, user_id, alert_msg or "")
         response = _maybe_attach_reflection_invite(response, user_id, gem_to_save, data["text"])
@@ -1752,28 +1654,22 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 사진 전송
     if is_image_url(utterance):
-        # 단순기록 모드에서 사진 수신 시 버퍼에 누적
+        # 단순기록 모드에서 사진 수신 시 바로 저장
         if pending_simple_record.get(user_id):
-            pending_simple_photo_buffer.setdefault(user_id, []).append({
-                "url": utterance,
-                "received_time": datetime.now(),
-            })
-            count = len(pending_simple_photo_buffer[user_id])
+            background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None)
             return JSONResponse(kakao_response(
-                f"사진 {count}장 모였어요! 📷\n텍스트나 다른 사진을 더 보내주세요.",
+                "사진이 바로 저장됐어요! ",
                 custom_replies=BASE_QUICK_REPLIES
             ))
         print(f"[image detected] user={user_id}, utterance={utterance}")
-        now = datetime.now()
         existing = pending_photo.get(user_id, {})
         if (
             isinstance(existing.get("urls"), list)
             and isinstance(existing.get("time"), datetime)
-            and now - existing["time"] <= PHOTO_TIMEOUT
+            and datetime.now() - existing["time"] <= PHOTO_TIMEOUT
         ):
             existing["urls"].append(utterance)
-            existing.setdefault("received_times", []).append(now)
-            existing["time"] = now
+            existing["time"] = datetime.now()
             pending_photo[user_id] = existing
             count = len(existing["urls"])
             return JSONResponse(kakao_response(
@@ -1782,11 +1678,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 custom_replies=PHOTO_QUICK_REPLIES
             ))
         else:
-            pending_photo[user_id] = {
-                "time": now,
-                "urls": [utterance],
-                "received_times": [now],
-            }
+            pending_photo[user_id] = {"time": datetime.now(), "urls": [utterance]}
             return JSONResponse(kakao_response(
                 "사진으로 오늘을 담아주셨네요.\n\n"
                 "이 순간, 어떤 마음이었나요?\n"
@@ -1796,64 +1688,16 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 custom_replies=PHOTO_QUICK_REPLIES
             ))
 
-    # 다중 이벤트 흐름 진행 중인 경우 (감정분류 모드)
-    ev_state = pending_event_groups.get(user_id)
-    if ev_state and ev_state.get("mode") == "emotion" and utterance:
-        idx = ev_state["current_index"]
-        events = ev_state["events"]
-        if 0 <= idx < len(events):
-            current_event = events[idx]
-            event_urls = current_event["photo_urls"]
-            event_image_url = event_urls[0] if event_urls else None
-            # 추가 사진은 단순기록으로 즉시 저장
-            for _extra_url in event_urls[1:]:
-                background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None)
-            # 현재 이벤트 분류 시도
-            result = classify_emotion_with_supervisor(utterance)
-            response = _build_ai_response(
-                user_id, utterance, bool(event_image_url), event_image_url, result,
-            )
-            # pending_gem이 세팅되어 있으면 이벤트 진행 메타데이터를 추가로 저장
-            if user_id in pending_gem:
-                pending_gem[user_id]["event_flow"] = True
-            return JSONResponse(response)
-
     if not utterance:
         return JSONResponse(kakao_response("조금 더 자세히 감정을 알려주실 수 있나요?"))
 
-    # 단순기록 모드 텍스트 처리 (버퍼된 사진들과 함께 이벤트 그룹화)
+    # 단순기록 모드 텍스트 처리
     if pending_simple_record.get(user_id):
-        photo_dicts = _build_event_photo_dicts_for_simple(user_id)
-        if not photo_dicts:
-            # 사진 없이 텍스트만 → 기존 동작 (즉시 저장)
-            background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None)
-            return JSONResponse(kakao_response(
-                "기록됐어요! ",
-                custom_replies=BASE_QUICK_REPLIES
-            ))
-
-        events = group_photos_by_event(photo_dicts)
-        pending_simple_photo_buffer.pop(user_id, None)
-
-        # 각 이벤트의 주 사진+텍스트를 1개의 단순기록으로, 추가 사진은 별도 단순기록으로 저장
-        for event in events:
-            urls = event["photo_urls"]
-            if not urls:
-                continue
-            background_tasks.add_task(save_gem, user_id, "단순기록", utterance, True, urls[0], None)
-            for extra in urls[1:]:
-                background_tasks.add_task(save_gem, user_id, "단순기록", "", True, extra, None)
-
-        if len(events) == 1:
-            msg = "기록이 저장됐어요! 📝"
-        else:
-            lines = []
-            for i, ev in enumerate(events):
-                label = _build_event_label(ev, i, len(events))
-                lines.append(f"- {label}")
-            msg = f"{len(events)}개의 이벤트로 정리해서 저장했어요!\n" + "\n".join(lines)
-
-        return JSONResponse(kakao_response(msg, custom_replies=BASE_QUICK_REPLIES))
+        background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None)
+        return JSONResponse(kakao_response(
+            "기록됐어요! ",
+            custom_replies=BASE_QUICK_REPLIES
+        ))
 
     daily_data = _safe_pending_gem(user_id, require_text=True)
     if daily_data and daily_data.get("daily") and daily_data.get("awaiting_emotion_add"):
@@ -1879,27 +1723,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     has_photo, image_urls, photo_time = _safe_pending_photo(user_id)
     image_url = image_urls[0] if image_urls else None
-
-    # 사진 2장 이상이면 EXIF 그룹화 시도 → 다중 이벤트면 순차 모드 진입
-    if has_photo and len(image_urls) >= 2:
-        photo_dicts = _build_event_photo_dicts_for_emotion(user_id)
-        events = group_photos_by_event(photo_dicts)
-        if len(events) >= 2:
-            pending_photo.pop(user_id, None)
-            pending_event_groups[user_id] = {
-                "mode": "emotion",
-                "events": events,
-                "current_index": 0,
-                "shared_text": None,
-            }
-            first_label = _build_event_label(events[0], 0, len(events))
-            return JSONResponse(kakao_response(
-                f"오늘 {len(events)}개의 이벤트로 나뉘었어요. ✨\n\n"
-                f"{first_label}\n이때 어떤 느낌이었나요?",
-                hide_buttons=True,
-            ))
-
-    # 단일 이벤트(또는 사진 1장): 추가 사진은 단순기록으로 저장하고 기존 흐름 유지
     for _extra_url in image_urls[1:]:
         background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None)
 
