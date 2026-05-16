@@ -276,6 +276,22 @@ def is_image_url(text: str) -> bool:
     )
 
 
+def is_video_url(text: str) -> bool:
+    if not text or " " in text or "\n" in text:
+        return False
+    if not text.startswith("http"):
+        return False
+    lowered = text.lower()
+    video_exts = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp")
+    if any(ext in lowered for ext in video_exts):
+        return True
+    if "talk.kakaocdn.net" in lowered and "/video" in lowered:
+        return True
+    if "kakaocdn.net" in lowered and "videoplay" in lowered:
+        return True
+    return False
+
+
 EMOTION_TO_GEM = {
     "우울함": "우울함 조각", "외로움": "외로움 조각", "상실감": "상실감 조각",
     "서러움": "서러움 조각", "실망감": "실망감 조각",
@@ -365,6 +381,12 @@ DANGER_MESSAGE = (
     "당신의 이야기를 들어줄 사람이 있어요. 꼭 전화해보세요."
 )
 HARMFUL_MESSAGE = "해당 기록은 서비스 정책에 따라 채집이 어려워요. 일상 속 소중한 순간을 담아 다시 보내주세요."
+VIDEO_NOT_SUPPORTED_MESSAGE = (
+    "영상으로 마음을 담아주셨네요. \n\n"
+    "아직은 영상을 함께 들여다보지는 못해요. \n"
+    "대신 한 줄 글이나 사진으로 적어주시면\n"
+    "오늘의 감정 원석을 같이 찾아드릴게요. ✨"
+)
 
 WEB_URL = "https://frontend-production-09f81.up.railway.app/login"
 _IMG_BASE = f"{ASSET_BASE_URL}/gems/"
@@ -1782,6 +1804,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             )
         pending_reflection.pop(user_id, None)
         return JSONResponse(kakao_response("잘 담아뒀어요 ✎", custom_replies=BASE_QUICK_REPLIES))
+
+    # 영상 전송 (현재는 분석 미지원 → 안내만 응답)
+    if is_video_url(utterance):
+        print(f"[video detected] user={user_id}, utterance={utterance}")
+        return JSONResponse(kakao_response(
+            VIDEO_NOT_SUPPORTED_MESSAGE,
+            custom_replies=BASE_QUICK_REPLIES,
+        ))
 
     # 사진 전송
     if is_image_url(utterance):
