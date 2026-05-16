@@ -1722,11 +1722,15 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 사진 전송
     if is_image_url(utterance):
-        # 단순기록 모드에서 사진 수신 시 바로 저장
+        # 단순기록 모드에서 사진 수신 시 버퍼에 누적
         if pending_simple_record.get(user_id):
-            background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None)
+            pending_simple_photo_buffer.setdefault(user_id, []).append({
+                "url": utterance,
+                "received_time": datetime.now(),
+            })
+            count = len(pending_simple_photo_buffer[user_id])
             return JSONResponse(kakao_response(
-                "사진이 바로 저장됐어요! ",
+                f"사진 {count}장 모였어요! 📷\n텍스트나 다른 사진을 더 보내주세요.",
                 custom_replies=BASE_QUICK_REPLIES
             ))
         print(f"[image detected] user={user_id}, utterance={utterance}")
