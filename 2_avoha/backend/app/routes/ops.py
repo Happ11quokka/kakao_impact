@@ -6,11 +6,10 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, desc, func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CollectionTicket, Event, Gem, KakaoMessage, User
+from app.db.models import Event, Gem, KakaoMessage, User
 from app.deps import get_db, require_ops
 from app.services import sse_bus
 from app.services.tickets import today_kst
@@ -110,31 +109,6 @@ async def ops_confirm(
             detail={"error": {"message": "USER_NOT_FOUND", "code": "USER_NOT_FOUND"}},
         )
 
-    today = today_kst()
-
-    await session.execute(
-        pg_insert(CollectionTicket)
-        .values(user_id=body.userId, date=today, remaining=5)
-        .on_conflict_do_nothing(index_elements=["user_id", "date"])
-    )
-
-    decrement = (
-        await session.execute(
-            update(CollectionTicket)
-            .where(CollectionTicket.user_id == body.userId)
-            .where(CollectionTicket.date == today)
-            .where(CollectionTicket.remaining > 0)
-            .values(remaining=CollectionTicket.remaining - 1)
-            .returning(CollectionTicket.remaining)
-        )
-    ).scalar_one_or_none()
-    if decrement is None:
-        raise HTTPException(
-            status_code=409,
-            detail={"error": {"message": "NO_TICKETS", "code": "NO_TICKETS"}},
-        )
-    remaining = int(decrement)
-
     inferred_source = body.source or (
         "photo" if msg.content_type in ("image", "mixed") else "text"
     )
@@ -198,7 +172,6 @@ async def ops_confirm(
             "tier": new_gem.tier,
             "source": new_gem.source,
         },
-        "remaining": remaining,
     }
 
 
