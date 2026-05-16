@@ -1351,6 +1351,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     user_id, utterance, callback_url = _extract_kakao_request(body)
 
+    # 다중 이벤트 흐름 중에 특정 명령어가 들어오면 상태 클리어
+    _exit_commands = {"모드", "내 원석", "도감", "감정분석", "채집 안내", "감정분류 모드", "단순기록 모드"}
+    if utterance in _exit_commands and (user_id in pending_event_groups or user_id in pending_simple_photo_buffer):
+        _clear_event_state(user_id)
+
     if any(kw in utterance for kw in DANGER_KEYWORDS):
         background_tasks.add_task(send_alert_email, "[닥토공방] 위험 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
         return JSONResponse(kakao_response(DANGER_MESSAGE))
