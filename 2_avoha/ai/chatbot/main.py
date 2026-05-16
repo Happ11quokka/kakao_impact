@@ -1662,14 +1662,16 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 custom_replies=BASE_QUICK_REPLIES
             ))
         print(f"[image detected] user={user_id}, utterance={utterance}")
+        now = datetime.now()
         existing = pending_photo.get(user_id, {})
         if (
             isinstance(existing.get("urls"), list)
             and isinstance(existing.get("time"), datetime)
-            and datetime.now() - existing["time"] <= PHOTO_TIMEOUT
+            and now - existing["time"] <= PHOTO_TIMEOUT
         ):
             existing["urls"].append(utterance)
-            existing["time"] = datetime.now()
+            existing.setdefault("received_times", []).append(now)
+            existing["time"] = now
             pending_photo[user_id] = existing
             count = len(existing["urls"])
             return JSONResponse(kakao_response(
@@ -1678,7 +1680,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 custom_replies=PHOTO_QUICK_REPLIES
             ))
         else:
-            pending_photo[user_id] = {"time": datetime.now(), "urls": [utterance]}
+            pending_photo[user_id] = {
+                "time": now,
+                "urls": [utterance],
+                "received_times": [now],
+            }
             return JSONResponse(kakao_response(
                 "사진으로 오늘을 담아주셨네요.\n\n"
                 "이 순간, 어떤 마음이었나요?\n"
