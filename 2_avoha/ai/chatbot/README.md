@@ -1,52 +1,97 @@
 # 닥토 공방 카카오톡 챗봇
 
-일상 기록을 감정 조각으로 저장해주는 카카오톡 채널 챗봇.
+일상 기록을 감정 원석으로 분류하고 저장하는 카카오톡 채널 챗봇입니다. 카카오 i 오픈빌더 스킬 서버로 동작하며, 텍스트와 사진 기록을 받아 OpenAI로 감정을 분류한 뒤 Railway PostgreSQL에 저장합니다.
 
-## 서비스 흐름
+## 현재 구조
 
+```text
+카카오톡 사용자
+  -> 카카오 i 오픈빌더
+  -> FastAPI POST /webhook
+  -> 입력/상태 안전 검증
+  -> OpenAI 1차 감정 분류
+  -> Supervisor 검증 노드
+  -> 카카오 응답 생성
+  -> Railway PostgreSQL 저장
 ```
-사용자 → 카카오톡 → 오픈빌더 → FastAPI 서버
-                                      ↓ (즉시 useCallback:true 반환)
-                               BackgroundTask → OpenAI API
-                                      ↓                ↓
-                              Supabase DB ←────── 조각 결정
-                              Railway DB ←────── (동시 저장)
-                                      ↓
-                              callbackUrl → 카카오톡 응답
+
+콜백 모드에서는 카카오 5초 제한을 피하기 위해 즉시 `{"version": "2.0", "useCallback": true}`를 반환하고, `BackgroundTasks`에서 분류를 끝낸 뒤 `callbackUrl`로 최종 응답을 보냅니다.
+
+## 핵심 로직
+
+| 단계 | 설명 |
+|---|---|
+| 요청 파싱 | `_extract_kakao_request()`가 `userRequest`, `user`, `utterance`, `callbackUrl` 타입을 안전하게 정리 |
+| 위험/유해 감지 | 자해/유해 키워드는 LLM 호출 전 즉시 응답하고 이메일 알림 발송 |
+| 사진 대기 | 이미지 URL 입력 시 `pending_photo`에 10분 동안 사진 URL 저장 |
+| 1차 분류 | `classify_emotion()`이 기록아님, 일상기록, 감정 원석 후보를 OpenAI로 분류 |
+| Supervisor 검증 | `supervisor_check_classification()`이 1차 분류가 시나리오 goal을 충족했는지 검증하고 필요 시 보정 |
+| 응답 생성 | `_build_ai_response()`가 카카오 `simpleText`/`basicCard`/`quickReplies` 응답 생성 |
+| 저장 | 사용자가 저장을 확정하면 `save_gem()`이 Railway `chatbot` 테이블에 저장하고, 매핑 가능한 경우 `gems` 테이블에도 동기화 |
+
+## Supervisor 노드
+
+이 프로젝트는 봇빌더식 엔티티/시나리오 매핑 대신 LLM API를 사용하므로, 정확도를 높이기 위해 분류 뒤에 Supervisor 검증 단계를 둡니다.
+
+```text
+사용자 발화
+  -> classify_emotion(): 1차 분류
+  -> supervisor_check_classification(): goal 충족 여부 검증
+  -> classify_emotion_with_supervisor(): 최종 분류 결과 반환
+```
+
+Supervisor는 다음 기준으로 검증합니다.
+
+- 감정 맥락이 있는데 `기록아님` 또는 `일상기록`으로 빠졌는지 확인
+- 단순 사실 나열인데 감정 원석으로 과잉 분류됐는지 확인
+- 허용된 감정/원석 목록 밖의 값인지 확인
+- 애매하면 사용자가 감정을 더 말할 수 있도록 `일상기록`으로 보정
+
+환경변수로 끌 수 있습니다.
+
+```env
+SUPERVISOR_ENABLED=false
 ```
 
 ## 주요 기능
 
 | 기능 | 설명 |
 |---|---|
-| 텍스트 기록 | 일상 텍스트 → AI 감정 분류 → 조각 확인 → 저장하기 버튼으로 최종 저장 |
-| 사진 기록 | 사진 전송 → 텍스트 유도 (10분 타임아웃) → 사진+텍스트 분류 |
-| 복수 감정 | 여러 감정 감지 시 감지된 감정만 퀵버튼으로 제시 → 사용자 최종 선택 |
-| 다른 감정 선택 | 계열 선택 → 세부 감정 선택 2단계 재분류, 이전 단계로 버튼으로 뒤로 가기 가능 |
-| 재분류 일상 저장 | 재분류 각 단계에서 원하는 감정 없으면 일상 기록으로 저장하는 카드 버튼 노출 |
-| 기록 여부 판단 | AI가 인사말/의미없는 입력 감지 → 마스코트 카드로 안내 + 대기 상태 초기화 |
-| 감정 퀵 버튼 | 분류 실패 시 20가지 감정 버튼으로 직접 선택 |
-| 하루 5회 제한 | 저장하기 클릭 시 채집권 차감, 소진 후에도 기록 허용 |
-| 채집권 DB 동기화 | OAuth 로그인 유저는 Railway `collection_tickets` 테이블 우선 차감, 미로그인 시 인메모리 fallback |
-| 원석 조회 | "내 원석" / "원석 보기" / "가방" / "인벤토리" 입력 시 basicCard로 표시 |
-| 도감 | "도감" 입력 시 20가지 감정 목록 안내 |
-| 채집 완료 카드 | basicCard로 해당 감정 원석 이미지 + 채집 완료 메시지 + 웹사이트 링크 버튼 |
-| 마스코트 카드 | NOT_RECORD 응답·채집 안내에 마스코트 이미지 basicCard로 노출 |
-| AI 판단 기록 | gem(최종) + ai_gems(AI 초기 판단) 별도 저장으로 분류 추적 가능 |
-| gems 테이블 동기화 | 저장 시 Railway `gems` 테이블에도 INSERT → 웹 인벤토리 연동 |
-| 위험 기록 감지 | 자살/자해 키워드 → 자살예방 문구 + 운영자 이메일 알림 |
-| 유해 기록 감지 | 유해 키워드 → 채집 거부 + 운영자 이메일 알림 |
-| 분류 2회 실패 | 운영자 이메일 알림 + 운영자 연결 안내 |
-| 콜백 비동기 처리 | 오픈빌더 콜백 토큰으로 5초 제한 회피 → AI 분류 후 callbackUrl로 응답 전달 |
-| 타임아웃 재시도 | AI 분류 타임아웃 시 "다시 시도 🔄" 버튼으로 원본 텍스트 재분류 |
-| 상태 맥락 유지 | 인벤토리/도감 조회 시 pending 상태에 따라 퀵버튼 자동 분기 |
-| 부정감정 누적 알림 | 주간 70% 이상 부정감정 또는 3일 연속 부정감정 시 채집 완료 카드에 안내 추가 |
-| 재방문 인사 | 역대 첫 접속·당일 첫 접속 시 인사말 prepend |
-| 웰컴 메시지 | 오픈빌더 웰컴 블록에서 설정 |
+| 텍스트 기록 | 사용자의 일상 문장을 감정 원석으로 분류 |
+| 사진 기록 | 사진 입력 후 10분 안에 감정 텍스트를 받으면 사진과 함께 저장 |
+| 기록아님 판단 | 인사말, 명령, 의미 없는 입력은 기록 안내 카드로 응답 |
+| 일상기록 판단 | 감정이 약한 일상은 감정 추가 또는 일상 저장 선택지 제공 |
+| 복수 감정 | 최대 3개 감정 후보를 제시하고 모두 저장 또는 골라 저장 가능 |
+| 재분류 | `다시 찾을게요`로 카테고리 선택, 세부 감정 선택, 이전 단계 이동 지원 |
+| 타임아웃 재시도 | OpenAI 호출 실패/타임아웃 시 원본 텍스트를 `pending_gem`에 보관하고 `다시 시도` 제공 |
+| 하루 5회 채집권 | 저장 확정 시점에 차감, OAuth 매핑 유저는 DB 기준, 그 외 인메모리 fallback |
+| 도감/내 원석 | 감정 원석 목록과 보유 현황을 basicCard로 안내 |
+| 부정감정 누적 알림 | 최근 기록에서 부정 감정 비율이 높으면 저장 완료 카드에 안내 추가 |
+| 재방문 인사 | 첫 방문/당일 첫 방문 시 AI 응답 앞에 인사말 추가 |
+| 안전 fallback | 잘못된 요청 body나 깨진 pending 상태를 전역 오류 대신 안내 응답으로 처리 |
 
-## 감정-조각 매핑 (20개)
+## 인메모리 상태
 
-| 카테고리 | 감정 | 조각명 | 이미지 파일 |
+서버 재시작 시 초기화됩니다.
+
+| 변수 | 용도 |
+|---|---|
+| `user_count` | DB 매핑이 없는 사용자의 일일 채집권 fallback |
+| `pending_photo` | 사진 전송 후 텍스트 대기 상태. 형식: `{"time": datetime, "url": str}` |
+| `pending_gem` | 저장/재시도/일상기록/재분류 대기 상태 |
+| `pending_emotion_selection` | 복수 감정 후보 선택 대기 상태 |
+| `user_last_active` | 재방문 인사용 마지막 접속일 |
+
+상태 접근은 직접 인덱싱 대신 다음 헬퍼를 사용합니다.
+
+- `_safe_pending_gem()`
+- `_safe_pending_emotion_selection()`
+- `_safe_pending_photo()`
+- `_safe_count()`
+
+## 감정-원석 매핑
+
+| 카테고리 | 감정 | 원석 | 이미지 |
 |---|---|---|---|
 | 슬픔 계열 | 우울함 | 우울함 조각 | depression.png |
 | 슬픔 계열 | 외로움 | 외로움 조각 | loneliness.png |
@@ -69,30 +114,23 @@
 | 복잡/모호 계열 | 공허함 | 공허함 조각 | emptiness.png |
 | 복잡/모호 계열 | 후회 | 후회 조각 | regret.png |
 
-## 기술 스택
+`CHATBOT_GEM_TO_EMOTION_CODE`는 챗봇의 20개 원석을 웹 인벤토리의 emotion code로 매핑합니다.
 
-| 항목 | 선택 |
-|---|---|
-| 백엔드 | FastAPI + uvicorn |
-| AI | OpenAI API — gpt-4.1-mini |
-| DB | Supabase (PostgreSQL) + Railway PostgreSQL |
-| 배포 | Railway |
-| 챗봇 플랫폼 | 카카오 i 오픈빌더 |
-| 알림 | Gmail SMTP |
+## 환경 변수
 
-## 환경 변수 (.env)
-
-```
+```env
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1-mini
-SUPABASE_URL=
-SUPABASE_KEY=
+SUPERVISOR_ENABLED=true
 ALERT_EMAIL=
 GMAIL_APP_PASSWORD=
 RAILWAY_DATABASE_URL=
+ASSET_BASE_URL=
 ```
 
-## 실행 방법
+`ASSET_BASE_URL`이 없으면 `RAILWAY_PUBLIC_DOMAIN`을 사용하고, 둘 다 없으면 운영 Railway 도메인을 기본값으로 사용합니다. `gems/` 디렉터리가 있으면 `/gems` 정적 경로로 마운트됩니다.
+
+## 실행
 
 ```bash
 venv\Scripts\activate
@@ -100,30 +138,22 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
+개발 중 카카오 오픈빌더와 연결하려면 로컬 서버를 외부로 노출합니다.
+
+```bash
+ngrok http 8000
+```
+
 ## 배포
 
-- **운영**: Railway (`https://sentiment-chatbot-production.up.railway.app/webhook`)
-- **개발**: ngrok → 오픈빌더 스킬 URL 임시 교체
-
-## Supabase 스키마
-
-```sql
-create table gems (
-  id bigint generated always as identity primary key,
-  user_id text not null,
-  gem text not null,
-  record_text text,
-  has_photo boolean default false,
-  image_url text,
-  ai_gems text,
-  created_at timestamptz default now()
-);
-```
+- 운영 서버: Railway
+- 웹훅 엔드포인트: `POST /webhook`
+- 오픈빌더 스킬 URL 예시: `https://sentiment-chatbot-production.up.railway.app/webhook`
 
 ## Railway DB 스키마
 
 ```sql
--- 채집 기록
+-- 챗봇 저장 원본
 create table chatbot (
   id bigint generated always as identity primary key,
   user_id text not null,
@@ -135,18 +165,17 @@ create table chatbot (
   created_at timestamptz default now()
 );
 
--- 웹 인벤토리 연동 (chatbot 저장 시 동시 INSERT)
+-- 웹 인벤토리 연동
 create table gems (
-  id bigint generated always as identity primary key,
+  id uuid primary key default gen_random_uuid(),
   user_id uuid references users(id),
   emotion_code text not null,
-  gem_name text not null,
-  record_text text,
-  image_url text,
+  tier int default 1,
+  source text default 'chatbot',
   created_at timestamptz default now()
 );
 
--- 채집권 (OAuth 로그인 유저 전용, 일 5회)
+-- 채집권
 create table collection_tickets (
   user_id uuid references users(id),
   date date not null,
@@ -154,13 +183,17 @@ create table collection_tickets (
   primary key (user_id, date)
 );
 
--- 카카오 provider_user_key → users.id 조회용
+-- 카카오 provider_user_key 매핑
 create table users (
   id uuid primary key default gen_random_uuid(),
   provider_user_key text unique not null
 );
 ```
 
-## 웹훅 엔드포인트
+## 검증
 
-`POST /webhook` — 카카오 오픈빌더 스킬 URL로 등록
+문법 검사는 다음 명령으로 수행합니다.
+
+```bash
+venv\Scripts\python.exe -m py_compile main.py
+```
