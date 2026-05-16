@@ -954,23 +954,24 @@ def _safe_pending_emotion_selection(user_id: str) -> dict | None:
     return data
 
 
-def _safe_pending_photo(user_id: str) -> tuple[bool, str | None, datetime | None]:
+def _safe_pending_photo(user_id: str) -> tuple[bool, list[str], datetime | None]:
     data = pending_photo.get(user_id)
     if not isinstance(data, dict):
         pending_photo.pop(user_id, None)
-        return False, None, None
+        return False, [], None
 
     photo_time = data.get("time")
-    photo_url = data.get("url")
-    if not isinstance(photo_time, datetime) or not photo_url:
+    # "urls" 필드(신규) 또는 "url" 필드(하위 호환)
+    urls: list[str] = data.get("urls") or ([data["url"]] if data.get("url") else [])
+    if not isinstance(photo_time, datetime) or not urls:
         pending_photo.pop(user_id, None)
-        return False, None, None
+        return False, [], None
 
     if datetime.now() - photo_time > PHOTO_TIMEOUT:
         pending_photo.pop(user_id, None)
-        return False, None, None
+        return False, [], None
 
-    return True, str(photo_url), photo_time
+    return True, [str(u) for u in urls], photo_time
 
 
 def kakao_save_complete(gem: str, today_count: int, user_id: str = "", alert_msg: str = "") -> dict:
@@ -1481,9 +1482,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 일상으로 저장 (사진 → 일상 기록, 채집권 미사용)
     if utterance == "일상으로 저장":
-        has_photo, photo_url, _ = _safe_pending_photo(user_id)
-        if has_photo and photo_url:
-            background_tasks.add_task(save_gem, user_id, "일상기록", "", True, photo_url, None)
+        has_photo, photo_urls, _ = _safe_pending_photo(user_id)
+        if has_photo and photo_urls:
+            image_url_joined = "\n".join(photo_urls)
+            background_tasks.add_task(save_gem, user_id, "일상기록", "", True, image_url_joined, None)
             pending_photo.pop(user_id, None)
             return JSONResponse(kakao_response("사진이 일상 기록으로 저장됐어요! 📝"))
         return JSONResponse(kakao_response("저장할 사진이 없어요. 사진을 먼저 보내주세요!"))
@@ -1689,15 +1691,31 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None)
             return JSONResponse(kakao_response("사진이 바로 저장됐어요! ", custom_replies=BASE_QUICK_REPLIES))
         print(f"[image detected] user={user_id}, utterance={utterance}")
-        pending_photo[user_id] = {"time": datetime.now(), "url": utterance}
-        return JSONResponse(kakao_response(
-            "사진으로 오늘을 담아주셨네요.\n\n"
-            "이 순간, 어떤 마음이었나요?\n"
-            "한 줄만 더 적어주시면 감정 원석을 찾아드려요.\n"
-            "10분 안에 적어주시면 사진과 함께 저장돼요! ⏰\n\n"
-            "그냥 일상으로 남겨도 괜찮아요.",
-            custom_replies=PHOTO_QUICK_REPLIES
-        ))
+        existing = pending_photo.get(user_id, {})
+        if (
+            isinstance(existing.get("urls"), list)
+            and isinstance(existing.get("time"), datetime)
+            and datetime.now() - existing["time"] <= PHOTO_TIMEOUT
+        ):
+            existing["urls"].append(utterance)
+            existing["time"] = datetime.now()
+            pending_photo[user_id] = existing
+            count = len(existing["urls"])
+            return JSONResponse(kakao_response(
+                f"사진 {count}장이 모였어요! ✨\n"
+                "텍스트도 함께 보내주시면 감정 원석을 찾아드려요.",
+                custom_replies=PHOTO_QUICK_REPLIES
+            ))
+        else:
+            pending_photo[user_id] = {"time": datetime.now(), "urls": [utterance]}
+            return JSONResponse(kakao_response(
+                "사진으로 오늘을 담아주셨네요.\n\n"
+                "이 순간, 어떤 마음이었나요?\n"
+                "한 줄만 더 적어주시면 감정 원석을 찾아드려요.\n"
+                "10분 안에 적어주시면 사진과 함께 저장돼요! ⏰\n\n"
+                "그냥 일상으로 남겨도 괜찮아요.",
+                custom_replies=PHOTO_QUICK_REPLIES
+            ))
 
     if not utterance:
         return JSONResponse(kakao_response("조금 더 자세히 감정을 알려주실 수 있나요?"))
@@ -1740,7 +1758,8 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     greeting = _check_and_update_visit(user_id)
 
-    has_photo, image_url, photo_time = _safe_pending_photo(user_id)
+    has_photo, image_urls, photo_time = _safe_pending_photo(user_id)
+    image_url = "\n".join(image_urls) if image_urls else None
 
     if callback_url:
         background_tasks.add_task(
