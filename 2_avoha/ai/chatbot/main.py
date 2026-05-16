@@ -1469,7 +1469,32 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         gem_to_save = data["gem"]
         today_count = _db_get_today_count(user_id) + 1
         background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"))
+        was_event_flow = bool(data.get("event_flow"))
         pending_gem.pop(user_id, None)
+
+        # 다중 이벤트 흐름이면 다음 이벤트로 진행
+        if was_event_flow and user_id in pending_event_groups:
+            ev_state = pending_event_groups[user_id]
+            ev_state["current_index"] += 1
+            idx = ev_state["current_index"]
+            events = ev_state["events"]
+            if idx < len(events):
+                next_label = _build_event_label(events[idx], idx, len(events))
+                return JSONResponse(kakao_response(
+                    f"✨ 저장됐어요!\n\n{next_label}\n이때는 어떤 느낌이었나요?",
+                    hide_buttons=True,
+                ))
+            # 모든 이벤트 완료
+            total = len(events)
+            pending_event_groups.pop(user_id, None)
+            alert_msg = check_negative_accumulation(user_id)
+            extra = f"\n{alert_msg}" if alert_msg else ""
+            return JSONResponse(kakao_response(
+                f"오늘 {total}개의 이벤트가 모두 저장됐어요! ✨\n"
+                f"오늘 {today_count}번째 원석이에요! 🪨{extra}",
+                custom_replies=BASE_QUICK_REPLIES,
+            ))
+
         alert_msg = check_negative_accumulation(user_id)
         response = kakao_save_complete(gem_to_save, today_count, user_id, alert_msg or "")
         response = _maybe_attach_reflection_invite(response, user_id, gem_to_save, data["text"])
