@@ -12,6 +12,7 @@ import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 import psycopg2
+from exif_grouping import parse_photo_exif, group_photos_by_event
 
 load_dotenv()
 
@@ -57,6 +58,19 @@ pending_emotion_selection: dict = {}
 user_last_active: dict = {}  # {user_id: date(KST)}
 pending_simple_record: dict = {}  # {user_id: True} 단순기록 모드 여부
 pending_reflection: dict = {}  # {user_id: {question_id, question_text, stage, linked_date}}
+
+# 단순기록 모드 사진 누적 버퍼 (텍스트 트리거 시까지 모음)
+# {user_id: [{"url": str, "received_time": datetime}]}
+pending_simple_photo_buffer: dict[str, list[dict]] = {}
+
+# 다중 이벤트로 그룹화된 후 순차 처리 상태
+# {user_id: {
+#     "mode": "emotion" | "simple",
+#     "events": [{"start_time": datetime, "photo_urls": [str]}],
+#     "current_index": int,
+#     "shared_text": str | None,
+# }}
+pending_event_groups: dict[str, dict] = {}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
 reflection_schema_ready = False
@@ -569,6 +583,60 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
         conn.close()
     except Exception as e:
         print(f"[save_gem railway error] {e}")
+
+
+def _clear_event_state(user_id: str) -> None:
+    """다중 이벤트 진행 상태를 클리어. 사용자가 흐름을 이탈할 때 호출."""
+    pending_event_groups.pop(user_id, None)
+    pending_simple_photo_buffer.pop(user_id, None)
+
+
+def _build_event_label(event: dict, index: int, total: int) -> str:
+    """이벤트 라벨 문자열 빌드. 예: '이벤트 1/2 (오전 11:00 · 사진 3장)'."""
+    start = event["start_time"]
+    hour = start.hour
+    if hour < 12:
+        period = "오전"
+        display_hour = hour if hour != 0 else 12
+    elif hour == 12:
+        period = "오후"
+        display_hour = 12
+    else:
+        period = "오후"
+        display_hour = hour - 12
+    time_str = f"{period} {display_hour}:{start.minute:02d}"
+    count = len(event["photo_urls"])
+    return f"이벤트 {index + 1}/{total} ({time_str} · 사진 {count}장)"
+
+
+def _build_event_photo_dicts_for_emotion(user_id: str) -> list[dict]:
+    """감정분류 모드 - pending_photo에서 EXIF 분석용 dict 리스트 생성."""
+    data = pending_photo.get(user_id) or {}
+    urls = data.get("urls") or []
+    received_times = data.get("received_times") or [data.get("time") or datetime.now()] * len(urls)
+    if len(received_times) != len(urls):
+        received_times = [data.get("time") or datetime.now()] * len(urls)
+    out = []
+    for url, rt in zip(urls, received_times):
+        out.append({
+            "url": url,
+            "exif_time": parse_photo_exif(url),
+            "received_time": rt,
+        })
+    return out
+
+
+def _build_event_photo_dicts_for_simple(user_id: str) -> list[dict]:
+    """단순기록 모드 - pending_simple_photo_buffer에서 EXIF 분석용 dict 리스트 생성."""
+    buf = pending_simple_photo_buffer.get(user_id) or []
+    return [
+        {
+            "url": item["url"],
+            "exif_time": parse_photo_exif(item["url"]),
+            "received_time": item["received_time"],
+        }
+        for item in buf
+    ]
 
 
 def _ensure_reflection_schema() -> bool:
