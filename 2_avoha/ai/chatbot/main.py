@@ -12,7 +12,6 @@ import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 import psycopg2
-import asyncio
 
 load_dotenv()
 
@@ -58,10 +57,6 @@ pending_emotion_selection: dict = {}
 user_last_active: dict = {}  # {user_id: date(KST)}
 pending_simple_record: dict = {}  # {user_id: True} 단순기록 모드 여부
 pending_reflection: dict = {}  # {user_id: {question_id, question_text, stage, linked_date}}
-SIMPLE_RECORD_DEBOUNCE_S = 3.5
-pending_simple_buffer: dict[str, list[dict]] = {}  # {user_id: [{text,has_photo,image_url}]}
-pending_simple_callback: dict[str, str] = {}        # {user_id: callback_url}
-pending_simple_timer: dict[str, asyncio.Task] = {}  # {user_id: debounce task}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
 reflection_schema_ready = False
@@ -574,23 +569,6 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
         conn.close()
     except Exception as e:
         print(f"[save_gem railway error] {e}")
-
-
-async def _flush_simple_records(user_id: str) -> None:
-    await asyncio.sleep(SIMPLE_RECORD_DEBOUNCE_S)
-    entries = pending_simple_buffer.pop(user_id, [])
-    cb_url = pending_simple_callback.pop(user_id, None)
-    pending_simple_timer.pop(user_id, None)
-    if not entries:
-        return
-    for entry in entries:
-        save_gem(user_id, "단순기록", entry["text"], entry["has_photo"], entry.get("image_url"), None)
-    if cb_url:
-        response = kakao_response("기록이 저장됐어요 ", custom_replies=BASE_QUICK_REPLIES)
-        try:
-            requests.post(cb_url, json=response, timeout=5)
-        except Exception as e:
-            print(f"[simple_flush error] {e}")
 
 
 def _ensure_reflection_schema() -> bool:
@@ -1678,19 +1656,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if is_image_url(utterance):
         # 단순기록 모드에서 사진 수신 시 바로 저장
         if pending_simple_record.get(user_id):
-            pending_simple_buffer.setdefault(user_id, []).append(
-                {"text": "", "has_photo": True, "image_url": utterance}
-            )
-            if callback_url:
-                pending_simple_callback[user_id] = callback_url
-            existing = pending_simple_timer.pop(user_id, None)
-            if existing and not existing.done():
-                existing.cancel()
-            pending_simple_timer[user_id] = asyncio.create_task(_flush_simple_records(user_id))
-            if callback_url:
-                return JSONResponse({"version": "2.0", "useCallback": True})
             background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None)
-            return JSONResponse(kakao_response("사진이 바로 저장됐어요! ", custom_replies=BASE_QUICK_REPLIES))
+            return JSONResponse(kakao_response(
+                "사진이 바로 저장됐어요! ",
+                custom_replies=BASE_QUICK_REPLIES
+            ))
         print(f"[image detected] user={user_id}, utterance={utterance}")
         existing = pending_photo.get(user_id, {})
         if (
@@ -1723,19 +1693,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 단순기록 모드 텍스트 처리
     if pending_simple_record.get(user_id):
-        pending_simple_buffer.setdefault(user_id, []).append(
-            {"text": utterance, "has_photo": False, "image_url": None}
-        )
-        if callback_url:
-            pending_simple_callback[user_id] = callback_url
-        existing = pending_simple_timer.pop(user_id, None)
-        if existing and not existing.done():
-            existing.cancel()
-        pending_simple_timer[user_id] = asyncio.create_task(_flush_simple_records(user_id))
-        if callback_url:
-            return JSONResponse({"version": "2.0", "useCallback": True})
         background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None)
-        return JSONResponse(kakao_response("기록됐어요! ", custom_replies=BASE_QUICK_REPLIES))
+        return JSONResponse(kakao_response(
+            "기록됐어요! ",
+            custom_replies=BASE_QUICK_REPLIES
+        ))
 
     daily_data = _safe_pending_gem(user_id, require_text=True)
     if daily_data and daily_data.get("daily") and daily_data.get("awaiting_emotion_add"):
