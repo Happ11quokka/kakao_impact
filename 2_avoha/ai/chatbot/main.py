@@ -23,7 +23,7 @@ RAILWAY_DATABASE_URL = os.getenv("RAILWAY_DATABASE_URL")
 ASSET_BASE_URL = (
     os.getenv("ASSET_BASE_URL")
     or os.getenv("RAILWAY_PUBLIC_DOMAIN")
-    or "https://sentiment-chatbot-production.up.railway.app"
+    or "https://chatbot-production-367e8.up.railway.app"
 ).rstrip("/")
 if not ASSET_BASE_URL.startswith(("http://", "https://")):
     ASSET_BASE_URL = f"https://{ASSET_BASE_URL}"
