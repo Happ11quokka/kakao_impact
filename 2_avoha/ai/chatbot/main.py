@@ -56,6 +56,7 @@ pending_photo: dict = {}
 pending_gem: dict = {}
 pending_emotion_selection: dict = {}
 user_last_active: dict = {}  # {user_id: date(KST)}
+pending_simple_record: dict = {}  # {user_id: True} 단순기록 모드 여부
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
 
@@ -384,6 +385,7 @@ BASE_QUICK_REPLIES = [
     {"label": "원석 도감", "action": "message", "messageText": "도감"},
     {"label": "내 원석 보기", "action": "message", "messageText": "내 원석"},
     {"label": "채집 안내", "action": "message", "messageText": "채집 안내"},
+    {"label": "모드 전환", "action": "message", "messageText": "모드"},
 ]
 
 SAVE_QUICK_REPLIES = [
@@ -985,6 +987,53 @@ def _callback_task_retry(user_id: str, utterance: str, callback_url: str, has_ph
         print(f"[callback post error] {e}")
 
 
+def _run_emotion_analysis(user_id: str) -> str:
+    """최근 30개 기록 기반 감정 패턴 분석 텍스트 반환."""
+    if not RAILWAY_DATABASE_URL:
+        return "분석 기능을 사용할 수 없어요."
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT gem, record_text FROM chatbot "
+            "WHERE user_id = %s AND gem != '일상기록' AND gem != '단순기록' "
+            "ORDER BY created_at DESC LIMIT 30",
+            (user_id,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[_run_emotion_analysis db error] {e}")
+        return "분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요."
+
+    if len(rows) < 3:
+        return "아직 기록이 부족해요. 최소 3개 이상의 감정 기록이 있어야 분석할 수 있어요!"
+
+    records_text = "\n".join([f"- {gem}: {record_text}" for gem, record_text in rows])
+    prompt = (
+        "다음은 사용자의 최근 감정 기록들이야. 아래 기준으로 짧고 따뜻하게 분석해줘.\n\n"
+        "1. 자주 느끼는 감정 패턴 한 줄\n"
+        "2. 긍정/부정 비율 언급\n"
+        "3. 따뜻한 마무리 한 줄\n\n"
+        "총 200자 내외로, 말투는 친근하게. 다른 말 없이 분석 내용만 답해.\n\n"
+        f"기록:\n{records_text}"
+    )
+    data = _call_openai_chat(prompt, max_tokens=300, log_prefix="emotion_analysis")
+    if not data:
+        return "분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요."
+    return data["choices"][0]["message"]["content"].strip()
+
+
+def _callback_task_analysis(user_id: str, callback_url: str):
+    result = _run_emotion_analysis(user_id)
+    response = kakao_response(result, custom_replies=BASE_QUICK_REPLIES)
+    try:
+        requests.post(callback_url, json=response, timeout=5)
+    except Exception as e:
+        print(f"[_callback_task_analysis error] {e}")
+
+
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -1002,6 +1051,45 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if any(kw in utterance for kw in HARMFUL_KEYWORDS):
         background_tasks.add_task(send_alert_email, "[닥토공방] 유해 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
         return JSONResponse(kakao_response(HARMFUL_MESSAGE))
+
+    # 모드 선택 메뉴
+    if utterance == "모드":
+        pending_simple_record.pop(user_id, None)
+        return JSONResponse({
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": "어떤 방식으로 기록할까요?\n\n 감정분류: AI가 감정 원석을 찾아드려요.\n 단순기록: 응답 없이 바로 저장돼요.\n 감정분석: 지금까지의 기록을 분석해드려요."}}],
+                "quickReplies": [
+                    {"label": " 감정분류", "action": "message", "messageText": "감정분류 모드"},
+                    {"label": " 단순기록", "action": "message", "messageText": "단순기록 모드"},
+                    {"label": " 감정분석", "action": "message", "messageText": "감정분석"},
+                ],
+            }
+        })
+
+    # 감정분류 모드 선택
+    if utterance == "감정분류 모드":
+        pending_simple_record.pop(user_id, None)
+        return JSONResponse(kakao_response(
+            " 감정분류 모드예요.\n일상을 보내주시면 AI가 감정 원석을 찾아드려요!",
+            custom_replies=BASE_QUICK_REPLIES
+        ))
+
+    # 단순기록 모드 선택
+    if utterance == "단순기록 모드":
+        pending_simple_record[user_id] = True
+        return JSONResponse(kakao_response(
+            " 단순기록 모드예요.\n기록을 보내주시면 바로 저장해드릴게요!",
+            custom_replies=BASE_QUICK_REPLIES
+        ))
+
+    # 감정분석
+    if utterance == "감정분석":
+        if callback_url:
+            background_tasks.add_task(_callback_task_analysis, user_id, callback_url)
+            return JSONResponse({"version": "2.0", "useCallback": True})
+        result = _run_emotion_analysis(user_id)
+        return JSONResponse(kakao_response(result, custom_replies=BASE_QUICK_REPLIES))
 
     # 다시 시도 (타임아웃 후 재분류)
     if utterance == "다시 시도":
@@ -1296,6 +1384,13 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 사진 전송
     if is_image_url(utterance):
+        # 단순기록 모드에서 사진 수신 시 바로 저장
+        if pending_simple_record.get(user_id):
+            background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None)
+            return JSONResponse(kakao_response(
+                "사진이 바로 저장됐어요! ",
+                custom_replies=BASE_QUICK_REPLIES
+            ))
         print(f"[image detected] user={user_id}, utterance={utterance}")
         pending_photo[user_id] = {"time": datetime.now(), "url": utterance}
         return JSONResponse(kakao_response(
@@ -1309,6 +1404,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     if not utterance:
         return JSONResponse(kakao_response("조금 더 자세히 감정을 알려주실 수 있나요?"))
+
+    # 단순기록 모드 텍스트 처리
+    if pending_simple_record.get(user_id):
+        background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None)
+        return JSONResponse(kakao_response(
+            "기록됐어요! ",
+            custom_replies=BASE_QUICK_REPLIES
+        ))
 
     greeting = _check_and_update_visit(user_id)
 
