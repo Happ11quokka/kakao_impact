@@ -1769,13 +1769,39 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if not utterance:
         return JSONResponse(kakao_response("조금 더 자세히 감정을 알려주실 수 있나요?"))
 
-    # 단순기록 모드 텍스트 처리
+    # 단순기록 모드 텍스트 처리 (버퍼된 사진들과 함께 이벤트 그룹화)
     if pending_simple_record.get(user_id):
-        background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None)
-        return JSONResponse(kakao_response(
-            "기록됐어요! ",
-            custom_replies=BASE_QUICK_REPLIES
-        ))
+        photo_dicts = _build_event_photo_dicts_for_simple(user_id)
+        if not photo_dicts:
+            # 사진 없이 텍스트만 → 기존 동작 (즉시 저장)
+            background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None)
+            return JSONResponse(kakao_response(
+                "기록됐어요! ",
+                custom_replies=BASE_QUICK_REPLIES
+            ))
+
+        events = group_photos_by_event(photo_dicts)
+        pending_simple_photo_buffer.pop(user_id, None)
+
+        # 각 이벤트의 주 사진+텍스트를 1개의 단순기록으로, 추가 사진은 별도 단순기록으로 저장
+        for event in events:
+            urls = event["photo_urls"]
+            if not urls:
+                continue
+            background_tasks.add_task(save_gem, user_id, "단순기록", utterance, True, urls[0], None)
+            for extra in urls[1:]:
+                background_tasks.add_task(save_gem, user_id, "단순기록", "", True, extra, None)
+
+        if len(events) == 1:
+            msg = "기록이 저장됐어요! 📝"
+        else:
+            lines = []
+            for i, ev in enumerate(events):
+                label = _build_event_label(ev, i, len(events))
+                lines.append(f"- {label}")
+            msg = f"{len(events)}개의 이벤트로 정리해서 저장했어요!\n" + "\n".join(lines)
+
+        return JSONResponse(kakao_response(msg, custom_replies=BASE_QUICK_REPLIES))
 
     daily_data = _safe_pending_gem(user_id, require_text=True)
     if daily_data and daily_data.get("daily") and daily_data.get("awaiting_emotion_add"):
