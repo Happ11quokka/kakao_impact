@@ -1579,14 +1579,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         data = _safe_pending_gem(user_id, require_text=True)
         if not data or not data.get("daily"):
             return JSONResponse(kakao_response("먼저 일상을 기록해주세요!"))
-        stored_text = data["text"]
-        stored_has_photo = bool(data.get("has_photo", False))
-        stored_image_url = data.get("image_url")
-        if callback_url:
-            background_tasks.add_task(_callback_task_retry, user_id, stored_text, callback_url, stored_has_photo, stored_image_url)
-            return JSONResponse({"version": "2.0", "useCallback": True})
-        result = classify_emotion_with_supervisor(stored_text)
-        return JSONResponse(_build_ai_response(user_id, stored_text, stored_has_photo, stored_image_url, result))
+        data["awaiting_emotion_add"] = True
+        return JSONResponse(kakao_response(
+            "그 순간 어떤 마음이었는지 한 문장으로 더 적어주세요.\n"
+            "예: 사실 조금 서운했어 / 그래도 뿌듯했어",
+            custom_replies=[{"label": "이대로 저장", "action": "message", "messageText": "이대로 저장"}],
+        ))
 
     # 이대로 저장 (일상 기록만 저장, 채집권 미사용)
     if utterance == "이대로 저장":
@@ -1815,6 +1813,26 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             "기록됐어요! ",
             custom_replies=BASE_QUICK_REPLIES
         ))
+
+    daily_data = _safe_pending_gem(user_id, require_text=True)
+    if daily_data and daily_data.get("daily") and daily_data.get("awaiting_emotion_add"):
+        stored_text = daily_data["text"]
+        stored_has_photo = bool(daily_data.get("has_photo", False))
+        stored_image_url = daily_data.get("image_url")
+        combined_utterance = f"{stored_text}\n추가 감정: {utterance}"
+        pending_gem.pop(user_id, None)
+        if callback_url:
+            background_tasks.add_task(
+                _callback_task_retry,
+                user_id,
+                combined_utterance,
+                callback_url,
+                stored_has_photo,
+                stored_image_url,
+            )
+            return JSONResponse({"version": "2.0", "useCallback": True})
+        result = classify_emotion_with_supervisor(combined_utterance)
+        return JSONResponse(_build_ai_response(user_id, combined_utterance, stored_has_photo, stored_image_url, result))
 
     greeting = _check_and_update_visit(user_id)
 
