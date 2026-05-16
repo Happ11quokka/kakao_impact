@@ -576,6 +576,23 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
         print(f"[save_gem railway error] {e}")
 
 
+async def _flush_simple_records(user_id: str) -> None:
+    await asyncio.sleep(SIMPLE_RECORD_DEBOUNCE_S)
+    entries = pending_simple_buffer.pop(user_id, [])
+    cb_url = pending_simple_callback.pop(user_id, None)
+    pending_simple_timer.pop(user_id, None)
+    if not entries:
+        return
+    for entry in entries:
+        save_gem(user_id, "단순기록", entry["text"], entry["has_photo"], entry.get("image_url"), None)
+    if cb_url:
+        response = kakao_response("기록이 저장됐어요 ", custom_replies=BASE_QUICK_REPLIES)
+        try:
+            requests.post(cb_url, json=response, timeout=5)
+        except Exception as e:
+            print(f"[simple_flush error] {e}")
+
+
 def _ensure_reflection_schema() -> bool:
     global reflection_schema_ready
     if reflection_schema_ready:
