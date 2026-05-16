@@ -1675,11 +1675,19 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if is_image_url(utterance):
         # 단순기록 모드에서 사진 수신 시 바로 저장
         if pending_simple_record.get(user_id):
+            pending_simple_buffer.setdefault(user_id, []).append(
+                {"text": "", "has_photo": True, "image_url": utterance}
+            )
+            if callback_url:
+                pending_simple_callback[user_id] = callback_url
+            existing = pending_simple_timer.pop(user_id, None)
+            if existing and not existing.done():
+                existing.cancel()
+            pending_simple_timer[user_id] = asyncio.create_task(_flush_simple_records(user_id))
+            if callback_url:
+                return JSONResponse({"version": "2.0", "useCallback": True})
             background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None)
-            return JSONResponse(kakao_response(
-                "사진이 바로 저장됐어요! ",
-                custom_replies=BASE_QUICK_REPLIES
-            ))
+            return JSONResponse(kakao_response("사진이 바로 저장됐어요! ", custom_replies=BASE_QUICK_REPLIES))
         print(f"[image detected] user={user_id}, utterance={utterance}")
         pending_photo[user_id] = {"time": datetime.now(), "url": utterance}
         return JSONResponse(kakao_response(
