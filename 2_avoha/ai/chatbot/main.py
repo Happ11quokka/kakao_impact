@@ -1484,8 +1484,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if utterance == "일상으로 저장":
         has_photo, photo_urls, _ = _safe_pending_photo(user_id)
         if has_photo and photo_urls:
-            image_url_joined = "\n".join(photo_urls)
-            background_tasks.add_task(save_gem, user_id, "일상기록", "", True, image_url_joined, None)
+            background_tasks.add_task(save_gem, user_id, "일상기록", "", True, photo_urls[0], None)
+            for _extra_url in photo_urls[1:]:
+                background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None)
             pending_photo.pop(user_id, None)
             return JSONResponse(kakao_response("사진이 일상 기록으로 저장됐어요! 📝"))
         return JSONResponse(kakao_response("저장할 사진이 없어요. 사진을 먼저 보내주세요!"))
@@ -1759,7 +1760,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     greeting = _check_and_update_visit(user_id)
 
     has_photo, image_urls, photo_time = _safe_pending_photo(user_id)
-    image_url = "\n".join(image_urls) if image_urls else None
+    image_url = image_urls[0] if image_urls else None
+    for _extra_url in image_urls[1:]:
+        background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None)
 
     if callback_url:
         background_tasks.add_task(
