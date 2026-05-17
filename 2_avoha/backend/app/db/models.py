@@ -189,10 +189,16 @@ class CraftingEvent(Base):
 
 class ChatbotRecord(Base):
     """챗봇(`2_avoha/ai/chatbot`) 이 직접 INSERT 하는 테이블. user_id 는 오픈빌더 해시
-    (= users.provider_user_key) 이며 앱의 users/gems 와는 JOIN 으로 이어진다."""
+    (= users.provider_user_key) 이며 앱의 users/gems 와는 JOIN 으로 이어진다.
+
+    image_url: S3 영구 URL. 카카오 CDN URL 은 kakao_image_url 에 백업.
+    trace_id: chatbot_messages.trace_id 와 매핑."""
 
     __tablename__ = "chatbot"
-    __table_args__ = (Index("chatbot_user_id_idx", "user_id"),)
+    __table_args__ = (
+        Index("chatbot_user_id_idx", "user_id"),
+        Index("chatbot_trace_idx", "trace_id"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -203,6 +209,89 @@ class ChatbotRecord(Base):
     )
     image_url: Mapped[str | None] = mapped_column(Text)
     ai_gems: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+    kakao_image_url: Mapped[str | None] = mapped_column(Text)
+    trace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+
+class ChatbotMessage(Base):
+    """챗봇 webhook 진입 단위 영구 로그. 사용자 발화·봇 응답을 빠짐없이 저장.
+
+    trace_id: webhook 1회 = 1 trace_id. 같은 trace 안에서 llm_calls / errors 와 join.
+    direction: 'inbound' | 'outbound'."""
+
+    __tablename__ = "chatbot_messages"
+    __table_args__ = (
+        Index("chatbot_messages_user_created_idx", "user_id", "created_at"),
+        Index("chatbot_messages_trace_idx", "trace_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    trace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        server_default=text("gen_random_uuid()"),
+    )
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    utterance: Mapped[str | None] = mapped_column(Text)
+    raw_body: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    callback_url: Mapped[str | None] = mapped_column(Text)
+    mode: Mapped[str | None] = mapped_column(Text)
+    pending_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class ChatbotLLMCall(Base):
+    """챗봇이 OpenAI 를 호출한 모든 기록. prompt + raw + parsed + status/latency."""
+
+    __tablename__ = "chatbot_llm_calls"
+    __table_args__ = (
+        Index("chatbot_llm_calls_trace_idx", "trace_id"),
+        Index("chatbot_llm_calls_type_created_idx", "call_type", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    trace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(Text)
+    call_type: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    parsed_result: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    error_text: Mapped[str | None] = mapped_column(Text)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    attempt: Mapped[int | None] = mapped_column(SmallInteger, server_default=text("1"))
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class ChatbotError(Base):
+    """챗봇에서 잡힌 모든 예외 영구 보존."""
+
+    __tablename__ = "chatbot_errors"
+    __table_args__ = (
+        Index("chatbot_errors_created_idx", "created_at"),
+        Index("chatbot_errors_source_created_idx", "source", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    trace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    traceback: Mapped[str | None] = mapped_column(Text)
+    context: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(),
         nullable=False,

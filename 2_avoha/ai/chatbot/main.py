@@ -8,12 +8,21 @@ import requests
 import os
 import json
 import time
+import uuid as _uuid
 import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 import psycopg2
 
 load_dotenv()
+
+from persist import (
+    log_message,
+    log_llm_call,
+    log_error,
+    new_trace_id,
+)
+from volume_uploader import upload_kakao_photo, volume_enabled, PHOTO_VOLUME_PATH
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
@@ -30,12 +39,74 @@ if not ASSET_BASE_URL.startswith(("http://", "https://")):
 
 app = FastAPI()
 
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as _StarRequest
+from starlette.responses import Response as _StarResponse
+from contextvars import ContextVar
+
+# 현재 webhook 요청의 trace_id / user_id 컨텍스트.
+# webhook 진입부에서 set 하고 미들웨어가 outbound 로그에 쓴다.
+_current_trace_id: ContextVar[str | None] = ContextVar("chatbot_trace_id", default=None)
+_current_user_id: ContextVar[str | None] = ContextVar("chatbot_user_id", default=None)
+
+
+class OutboundLogMiddleware(BaseHTTPMiddleware):
+    """webhook 응답 body 를 chatbot_messages 에 outbound 로 1건 저장."""
+
+    async def dispatch(self, request: _StarRequest, call_next):
+        response = await call_next(request)
+        if request.url.path != "/webhook":
+            return response
+        try:
+            body_chunks: list[bytes] = []
+            async for chunk in response.body_iterator:
+                body_chunks.append(chunk)
+            body = b"".join(body_chunks)
+            try:
+                parsed = json.loads(body.decode("utf-8")) if body else None
+            except Exception:
+                parsed = None
+            tid = _current_trace_id.get()
+            uid = _current_user_id.get() or "unknown"
+            log_message(
+                trace_id=_uuid.UUID(tid) if tid else new_trace_id(),
+                user_id=uid,
+                direction="outbound",
+                raw_body=parsed,
+                mode="webhook_sync",
+            )
+            return _StarResponse(
+                content=body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[outbound log middleware error] {e}")
+            return response
+
+
+app.add_middleware(OutboundLogMiddleware)
+
+
 if os.path.isdir("gems"):
     app.mount("/gems", StaticFiles(directory="gems"), name="gems")
+
+# Volume 마운트 디렉터리가 있으면 /photos 로 서빙. 카카오 webhook 에서 받은 사진을
+# 여기 저장하고 chatbot 도메인 + /photos/<key> URL 로 다시 노출.
+if PHOTO_VOLUME_PATH:
+    try:
+        os.makedirs(PHOTO_VOLUME_PATH, exist_ok=True)
+        app.mount("/photos", StaticFiles(directory=PHOTO_VOLUME_PATH), name="photos")
+    except Exception as e:  # noqa: BLE001
+        print(f"[photo volume mount error] {e}")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     print(f"[unhandled error] {exc}")
+    log_error(source="global_handler", message=str(exc), exc=exc,
+              context={"path": str(request.url.path)})
     return JSONResponse(
         status_code=200,
         content={
@@ -351,8 +422,20 @@ INITIAL_REFLECTION_QUESTIONS = [
 ]
 
 
-def _call_openai_chat(prompt: str, max_tokens: int = 50, log_prefix: str = "classify_emotion") -> dict | None:
+def _call_openai_chat(
+    prompt: str,
+    max_tokens: int = 50,
+    log_prefix: str = "classify_emotion",
+    *,
+    trace_id: _uuid.UUID | None = None,
+    user_id: str | None = None,
+    call_type: str | None = None,
+) -> dict | None:
+    """OpenAI chat 호출. trace_id 가 있으면 매 시도마다 chatbot_llm_calls 기록."""
+    effective_trace_id = trace_id or new_trace_id()
+    effective_call_type = call_type or log_prefix
     for attempt in range(1, 3):
+        started = time.monotonic()
         try:
             response = requests.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -368,28 +451,61 @@ def _call_openai_chat(prompt: str, max_tokens: int = 50, log_prefix: str = "clas
                 },
                 timeout=30.0,
             )
+            latency_ms = int((time.monotonic() - started) * 1000)
             try:
                 data = response.json()
             except ValueError:
                 data = None
 
             if response.status_code == 200 and data and "choices" in data:
+                log_llm_call(
+                    trace_id=effective_trace_id, user_id=user_id,
+                    call_type=effective_call_type, model=OPENAI_MODEL, prompt=prompt,
+                    raw_response=data,
+                    parsed_result=(data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()[:2000],
+                    status="ok", status_code=response.status_code,
+                    latency_ms=latency_ms, attempt=attempt,
+                )
                 return data
 
             print(f"[{log_prefix} status] attempt={attempt} status={response.status_code}")
             print(f"[{log_prefix} body] {response.text[:1000]}")
+            log_llm_call(
+                trace_id=effective_trace_id, user_id=user_id,
+                call_type=effective_call_type, model=OPENAI_MODEL, prompt=prompt,
+                raw_response=data, parsed_result=None,
+                status="http_error", status_code=response.status_code,
+                error_text=response.text[:2000],
+                latency_ms=latency_ms, attempt=attempt,
+            )
             if attempt < 2 and response.status_code in {408, 409, 429, 500, 502, 503, 504}:
                 time.sleep(attempt)
                 continue
             return None
-        except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout as e:
+            latency_ms = int((time.monotonic() - started) * 1000)
             print(f"[{log_prefix} timeout] attempt={attempt}")
+            log_llm_call(
+                trace_id=effective_trace_id, user_id=user_id,
+                call_type=effective_call_type, model=OPENAI_MODEL, prompt=prompt,
+                raw_response=None, parsed_result=None,
+                status="timeout", error_text=str(e),
+                latency_ms=latency_ms, attempt=attempt,
+            )
             if attempt < 2:
                 time.sleep(attempt)
                 continue
             return None
         except requests.exceptions.RequestException as e:
+            latency_ms = int((time.monotonic() - started) * 1000)
             print(f"[{log_prefix} request error] attempt={attempt} error={e}")
+            log_llm_call(
+                trace_id=effective_trace_id, user_id=user_id,
+                call_type=effective_call_type, model=OPENAI_MODEL, prompt=prompt,
+                raw_response=None, parsed_result=None,
+                status="request_error", error_text=str(e),
+                latency_ms=latency_ms, attempt=attempt,
+            )
             if attempt < 2:
                 time.sleep(attempt)
                 continue
@@ -398,7 +514,12 @@ def _call_openai_chat(prompt: str, max_tokens: int = 50, log_prefix: str = "clas
     return None
 
 
-def classify_emotion(text: str) -> list[str] | str | None:
+def classify_emotion(
+    text: str,
+    *,
+    trace_id: _uuid.UUID | None = None,
+    user_id: str | None = None,
+) -> list[str] | str | None:
     emotion_list = ", ".join(EMOTION_TO_GEM.keys())
     prompt = (
         "다음 입력을 세 가지로 분류해줘.\n"
@@ -414,10 +535,13 @@ def classify_emotion(text: str) -> list[str] | str | None:
     )
     if not OPENAI_API_KEY:
         print("[classify_emotion config error] OPENAI_API_KEY is not configured")
+        log_error(source="classify_emotion", message="OPENAI_API_KEY not configured",
+                  trace_id=trace_id, user_id=user_id)
         return "TIMEOUT"
 
     try:
-        data = _call_openai_chat(prompt)
+        data = _call_openai_chat(prompt, trace_id=trace_id, user_id=user_id,
+                                 call_type="classify")
         if not data:
             return "TIMEOUT"
         raw = data["choices"][0]["message"]["content"].strip()
@@ -433,6 +557,8 @@ def classify_emotion(text: str) -> list[str] | str | None:
         return found if found else None
     except Exception as e:
         print(f"[classify_emotion error] {e}")
+        log_error(source="classify_emotion", message=str(e), exc=e,
+                  trace_id=trace_id, user_id=user_id)
         return None
 
 
@@ -467,7 +593,13 @@ def _parse_supervisor_corrected_result(raw: str) -> list[str] | str | None:
     return emotion_found[:3] if emotion_found else None
 
 
-def supervisor_check_classification(text: str, initial_result: list[str] | str | None) -> list[str] | str | None:
+def supervisor_check_classification(
+    text: str,
+    initial_result: list[str] | str | None,
+    *,
+    trace_id: _uuid.UUID | None = None,
+    user_id: str | None = None,
+) -> list[str] | str | None:
     if initial_result == "TIMEOUT" or initial_result is None:
         return initial_result
     if os.getenv("SUPERVISOR_ENABLED", "true").lower() in {"0", "false", "no", "off"}:
@@ -499,7 +631,9 @@ def supervisor_check_classification(text: str, initial_result: list[str] | str |
     )
 
     try:
-        data = _call_openai_chat(prompt, max_tokens=180, log_prefix="supervisor")
+        data = _call_openai_chat(prompt, max_tokens=180, log_prefix="supervisor",
+                                 trace_id=trace_id, user_id=user_id,
+                                 call_type="supervisor")
         if not data:
             return initial_result
 
@@ -524,26 +658,74 @@ def supervisor_check_classification(text: str, initial_result: list[str] | str |
         return initial_result
     except Exception as e:
         print(f"[supervisor error] {e}")
+        log_error(source="supervisor", message=str(e), exc=e,
+                  trace_id=trace_id, user_id=user_id)
         return initial_result
 
 
-def classify_emotion_with_supervisor(text: str) -> list[str] | str | None:
-    initial_result = classify_emotion(text)
-    return supervisor_check_classification(text, initial_result)
+def classify_emotion_with_supervisor(
+    text: str,
+    *,
+    trace_id: _uuid.UUID | None = None,
+    user_id: str | None = None,
+) -> list[str] | str | None:
+    initial_result = classify_emotion(text, trace_id=trace_id, user_id=user_id)
+    return supervisor_check_classification(text, initial_result,
+                                           trace_id=trace_id, user_id=user_id)
 
 
-def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_url: str = None, ai_gems: str = None):
+def save_gem(
+    user_id: str,
+    gem: str,
+    record_text: str,
+    has_photo: bool,
+    image_url: str = None,
+    ai_gems: str = None,
+    *,
+    trace_id: _uuid.UUID | None = None,
+):
+    """chatbot 행 1건 INSERT + (가능하면) gems 동기화 + S3 사진 업로드.
+
+    image_url 인자는 호출자가 갖고 있는 '현재 가장 최신' URL.
+    pending_photo 단계에서 이미 S3 로 올라간 경우 → 이미 S3 URL.
+    아직 안 올라간 경우 → 카카오 CDN URL → 여기서 업로드 시도.
+    """
     if not RAILWAY_DATABASE_URL:
         print("[save_gem railway error] RAILWAY_DATABASE_URL is not configured")
+        log_error(source="save_gem", message="RAILWAY_DATABASE_URL not configured",
+                  trace_id=trace_id, user_id=user_id)
         return
 
+    kakao_image_url: str | None = None
+    persisted_image_url = image_url
+    if has_photo and image_url and not _is_persisted_url(image_url):
+        kakao_image_url = image_url
+        public_url, err = upload_kakao_photo(
+            kakao_url=image_url,
+            provider_user_key=user_id,
+            message_id=None,
+        )
+        if public_url:
+            persisted_image_url = public_url
+        else:
+            log_error(source="save_gem.photo_upload",
+                      message=err or "unknown photo upload error",
+                      trace_id=trace_id, user_id=user_id,
+                      context={"kakao_url": image_url})
+
+    conn = None
+    cur = None
+    inserted_id: int | None = None
     try:
         conn = psycopg2.connect(RAILWAY_DATABASE_URL)
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO chatbot (user_id, gem, record_text, has_photo, image_url, ai_gems) VALUES (%s, %s, %s, %s, %s, %s)",
-            (user_id, gem, record_text, has_photo, image_url, ai_gems),
+            "INSERT INTO chatbot (user_id, gem, record_text, has_photo, image_url, ai_gems, kakao_image_url, trace_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, gem, record_text, has_photo, persisted_image_url, ai_gems,
+             kakao_image_url, str(trace_id) if trace_id else None),
         )
+        inserted_id = cur.fetchone()[0]
 
         # gems 테이블에도 INSERT → 인벤토리 "광물" 탭에 표시
         emotion_code = CHATBOT_GEM_TO_EMOTION_CODE.get(gem)
@@ -569,6 +751,27 @@ def save_gem(user_id: str, gem: str, record_text: str, has_photo: bool, image_ur
         conn.close()
     except Exception as e:
         print(f"[save_gem railway error] {e}")
+        log_error(source="save_gem", message=str(e), exc=e,
+                  trace_id=trace_id, user_id=user_id,
+                  context={"gem": gem, "has_photo": has_photo})
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _is_persisted_url(url: str | None) -> bool:
+    """이미 PHOTO_PUBLIC_BASE_URL prefix 인 경우 True (재업로드 방지)."""
+    if not url:
+        return False
+    from volume_uploader import PHOTO_PUBLIC_BASE_URL
+    return bool(PHOTO_PUBLIC_BASE_URL) and url.startswith(PHOTO_PUBLIC_BASE_URL)
 
 
 def _ensure_reflection_schema() -> bool:
@@ -1167,29 +1370,52 @@ def _gem_save_quick_replies(gem: str, include_nav: bool = False) -> list:
     return replies
 
 
-def _callback_task(user_id: str, utterance: str, callback_url: str, photo_time, photo_url: str | None, greeting: str | None = None):
+def _callback_task(
+    user_id: str, utterance: str, callback_url: str, photo_time, photo_url: str | None,
+    greeting: str | None = None,
+    *,
+    trace_id: _uuid.UUID | None = None,
+):
     has_photo = bool(isinstance(photo_time, datetime) and photo_url and datetime.now() - photo_time <= PHOTO_TIMEOUT)
     image_url = str(photo_url) if has_photo else None
-    result = classify_emotion_with_supervisor(utterance)
+    result = classify_emotion_with_supervisor(utterance, trace_id=trace_id, user_id=user_id)
     response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
     if greeting:
         response = _prepend_greeting(response, greeting)
+    log_message(trace_id=trace_id or new_trace_id(), user_id=user_id,
+                direction="outbound", raw_body=response,
+                callback_url=callback_url, mode="callback")
     try:
         requests.post(callback_url, json=response, timeout=5)
     except Exception as e:
         print(f"[callback post error] {e}")
+        log_error(source="callback_post", message=str(e), exc=e,
+                  trace_id=trace_id, user_id=user_id)
 
 
-def _callback_task_retry(user_id: str, utterance: str, callback_url: str, has_photo: bool, image_url: str | None):
-    result = classify_emotion_with_supervisor(utterance)
+def _callback_task_retry(
+    user_id: str, utterance: str, callback_url: str, has_photo: bool, image_url: str | None,
+    *,
+    trace_id: _uuid.UUID | None = None,
+):
+    result = classify_emotion_with_supervisor(utterance, trace_id=trace_id, user_id=user_id)
     response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
+    log_message(trace_id=trace_id or new_trace_id(), user_id=user_id,
+                direction="outbound", raw_body=response,
+                callback_url=callback_url, mode="callback_retry")
     try:
         requests.post(callback_url, json=response, timeout=5)
     except Exception as e:
         print(f"[callback post error] {e}")
+        log_error(source="callback_post_retry", message=str(e), exc=e,
+                  trace_id=trace_id, user_id=user_id)
 
 
-def _run_emotion_analysis(user_id: str) -> str:
+def _run_emotion_analysis(
+    user_id: str,
+    *,
+    trace_id: _uuid.UUID | None = None,
+) -> str:
     """최근 30개 기록 기반 감정 패턴 분석 텍스트 반환."""
     if not RAILWAY_DATABASE_URL:
         return "분석 기능을 사용할 수 없어요."
@@ -1207,6 +1433,8 @@ def _run_emotion_analysis(user_id: str) -> str:
         conn.close()
     except Exception as e:
         print(f"[_run_emotion_analysis db error] {e}")
+        log_error(source="emotion_analysis_db", message=str(e), exc=e,
+                  trace_id=trace_id, user_id=user_id)
         return "분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요."
 
     if len(rows) < 3:
@@ -1221,19 +1449,30 @@ def _run_emotion_analysis(user_id: str) -> str:
         "총 200자 내외로, 말투는 친근하게. 다른 말 없이 분석 내용만 답해.\n\n"
         f"기록:\n{records_text}"
     )
-    data = _call_openai_chat(prompt, max_tokens=300, log_prefix="emotion_analysis")
+    data = _call_openai_chat(prompt, max_tokens=300, log_prefix="emotion_analysis",
+                             trace_id=trace_id, user_id=user_id,
+                             call_type="emotion_analysis")
     if not data:
         return "분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요."
     return data["choices"][0]["message"]["content"].strip()
 
 
-def _callback_task_analysis(user_id: str, callback_url: str):
-    result = _run_emotion_analysis(user_id)
+def _callback_task_analysis(
+    user_id: str, callback_url: str,
+    *,
+    trace_id: _uuid.UUID | None = None,
+):
+    result = _run_emotion_analysis(user_id, trace_id=trace_id)
     response = kakao_response(result, custom_replies=BASE_QUICK_REPLIES)
+    log_message(trace_id=trace_id or new_trace_id(), user_id=user_id,
+                direction="outbound", utterance=result, raw_body=response,
+                callback_url=callback_url, mode="analysis")
     try:
         requests.post(callback_url, json=response, timeout=5)
     except Exception as e:
         print(f"[_callback_task_analysis error] {e}")
+        log_error(source="callback_post_analysis", message=str(e), exc=e,
+                  trace_id=trace_id, user_id=user_id)
 
 
 @app.post("/skill/check-question")
@@ -1275,13 +1514,26 @@ async def skill_save_reflection(request: Request):
 
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
+    trace_id = new_trace_id()
+    _current_trace_id.set(str(trace_id))
     try:
         body = await request.json()
     except Exception as e:
         print(f"[webhook json error] {e}")
+        log_error(source="webhook.json", message=str(e), exc=e, trace_id=trace_id)
         return JSONResponse(kakao_response("요청을 읽지 못했어요. 메시지를 다시 보내주세요."))
 
     user_id, utterance, callback_url = _extract_kakao_request(body)
+    _current_user_id.set(user_id or "unknown")
+    log_message(
+        trace_id=trace_id, user_id=user_id or "unknown", direction="inbound",
+        utterance=utterance, raw_body=body, callback_url=callback_url,
+        pending_state={
+            "pending_photo_keys": [k for k in pending_photo.keys() if k == user_id],
+            "pending_gem_keys": [k for k in pending_gem.keys() if k == user_id],
+            "pending_simple_record": bool(pending_simple_record.get(user_id)),
+        },
+    )
 
     if any(kw in utterance for kw in DANGER_KEYWORDS):
         background_tasks.add_task(send_alert_email, "[닥토공방] 위험 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
@@ -1344,9 +1596,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     # 감정분석
     if utterance == "감정분석":
         if callback_url:
-            background_tasks.add_task(_callback_task_analysis, user_id, callback_url)
+            background_tasks.add_task(_callback_task_analysis, user_id, callback_url, trace_id=trace_id)
             return JSONResponse({"version": "2.0", "useCallback": True})
-        result = _run_emotion_analysis(user_id)
+        result = _run_emotion_analysis(user_id, trace_id=trace_id)
         return JSONResponse(kakao_response(result, custom_replies=BASE_QUICK_REPLIES))
 
     # 다시 시도 (타임아웃 후 재분류)
@@ -1359,9 +1611,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         saved_image_url = data.get("image_url")
         pending_gem.pop(user_id, None)
         if callback_url:
-            background_tasks.add_task(_callback_task_retry, user_id, saved_utterance, callback_url, saved_has_photo, saved_image_url)
+            background_tasks.add_task(_callback_task_retry, user_id, saved_utterance, callback_url, saved_has_photo, saved_image_url, trace_id=trace_id)
             return JSONResponse({"version": "2.0", "useCallback": True})
-        result = classify_emotion_with_supervisor(saved_utterance)
+        result = classify_emotion_with_supervisor(saved_utterance, trace_id=trace_id, user_id=user_id)
         return JSONResponse(_build_ai_response(user_id, saved_utterance, saved_has_photo, saved_image_url, result))
 
     # 다시 찾을게요 — 1회차: 카테고리, 2회차: 전체 20개
@@ -1400,7 +1652,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return JSONResponse(kakao_response("감정을 먼저 선택해주세요!", show_emotion_buttons=True))
         gem_to_save = data["gem"]
         today_count = _db_get_today_count(user_id) + 1
-        background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"))
+        background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"), trace_id=trace_id)
         pending_gem.pop(user_id, None)
         alert_msg = check_negative_accumulation(user_id)
         response = kakao_save_complete(gem_to_save, today_count, user_id, alert_msg or "")
@@ -1414,7 +1666,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return JSONResponse(kakao_response("저장할 원석이 없어요."))
         gems_to_save = [EMOTION_TO_GEM[e] for e in sel["emotions"] if e in EMOTION_TO_GEM]
         for gem in gems_to_save:
-            background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"))
+            background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
         pending_emotion_selection.pop(user_id, None)
         saved_names = ", ".join(gems_to_save)
         today_count = _db_get_today_count(user_id) + len(gems_to_save)
@@ -1454,7 +1706,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         data = _safe_pending_gem(user_id, require_text=True)
         if not data:
             return JSONResponse(kakao_response("저장할 기록이 없어요. 일상을 먼저 보내주세요!"))
-        background_tasks.add_task(save_gem, user_id, "일상기록", data["text"], bool(data.get("has_photo", False)), data.get("image_url"), None)
+        background_tasks.add_task(save_gem, user_id, "일상기록", data["text"], bool(data.get("has_photo", False)), data.get("image_url"), None, trace_id=trace_id)
         pending_gem.pop(user_id, None)
         return JSONResponse(kakao_response("일상 기록이 저장됐어요! 📝\n오늘도 소중한 순간을 담아주셨네요."))
 
@@ -1462,9 +1714,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if utterance == "일상으로 저장":
         has_photo, photo_urls, _ = _safe_pending_photo(user_id)
         if has_photo and photo_urls:
-            background_tasks.add_task(save_gem, user_id, "일상기록", "", True, photo_urls[0], None)
+            background_tasks.add_task(save_gem, user_id, "일상기록", "", True, photo_urls[0], None, trace_id=trace_id)
             for _extra_url in photo_urls[1:]:
-                background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None)
+                background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None, trace_id=trace_id)
             pending_photo.pop(user_id, None)
             return JSONResponse(kakao_response("사진이 일상 기록으로 저장됐어요! 📝"))
         return JSONResponse(kakao_response("저장할 사진이 없어요. 사진을 먼저 보내주세요!"))
@@ -1656,7 +1908,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if is_image_url(utterance):
         # 단순기록 모드에서 사진 수신 시 바로 저장
         if pending_simple_record.get(user_id):
-            background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None)
+            background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None, trace_id=trace_id)
             return JSONResponse(kakao_response(
                 "사진이 바로 저장됐어요! ",
                 custom_replies=BASE_QUICK_REPLIES
@@ -1693,7 +1945,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 단순기록 모드 텍스트 처리
     if pending_simple_record.get(user_id):
-        background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None)
+        background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None, trace_id=trace_id)
         return JSONResponse(kakao_response(
             "기록됐어요! ",
             custom_replies=BASE_QUICK_REPLIES
@@ -1714,9 +1966,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 callback_url,
                 stored_has_photo,
                 stored_image_url,
+                trace_id=trace_id,
             )
             return JSONResponse({"version": "2.0", "useCallback": True})
-        result = classify_emotion_with_supervisor(combined_utterance)
+        result = classify_emotion_with_supervisor(combined_utterance, trace_id=trace_id, user_id=user_id)
         return JSONResponse(_build_ai_response(user_id, combined_utterance, stored_has_photo, stored_image_url, result))
 
     greeting = _check_and_update_visit(user_id)
@@ -1724,7 +1977,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     has_photo, image_urls, photo_time = _safe_pending_photo(user_id)
     image_url = image_urls[0] if image_urls else None
     for _extra_url in image_urls[1:]:
-        background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None)
+        background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None, trace_id=trace_id)
 
     if callback_url:
         background_tasks.add_task(
@@ -1732,10 +1985,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             photo_time,
             image_url,
             greeting,
+            trace_id=trace_id,
         )
         return JSONResponse({"version": "2.0", "useCallback": True})
 
-    result = classify_emotion_with_supervisor(utterance)
+    result = classify_emotion_with_supervisor(utterance, trace_id=trace_id, user_id=user_id)
     response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
     if greeting:
         response = _prepend_greeting(response, greeting)
