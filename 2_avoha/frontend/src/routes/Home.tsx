@@ -37,7 +37,7 @@ const CATEGORY_REPRESENTATIVE_VARIANT: Record<string, string> = {
 
 export default function Home() {
   const { todayDrops, fetchToday, error: fieldError } = useFieldStore();
-  const { ticketsRemaining, gems, fetchInventory, consumeGem } = useInventoryStore();
+  const { gems, fetchInventory, consumeGem } = useInventoryStore();
   const feedGem = usePetStore((s) => s.feedGem);
   const [showBook, setShowBook] = useState(false);
   const [mascotMood, setMascotMood] = useState<'idle' | 'eating'>('idle');
@@ -176,24 +176,8 @@ export default function Home() {
         overflowX: 'hidden',
       }}
     >
-      {/* ── 상단 헤더: 채집권 & 도감 ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div
-          style={{
-            background: 'var(--color-point-green)',
-            borderRadius: 999,
-            padding: '6px 14px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#FFF' }} />
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#FFF' }}>
-            채집권 {ticketsRemaining}/5
-          </span>
-        </div>
-        
+      {/* ── 상단 헤더: 도감 ── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 20 }}>
         <button
           onClick={() => setShowBook(true)}
           style={{
