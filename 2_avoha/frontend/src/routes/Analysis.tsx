@@ -275,21 +275,6 @@ export default function Analysis() {
           </div>
         </section>
 
-        <section style={styles.section}>
-          <SectionHeader title="시간대별 감정원석 분포" caption="기록이 자주 쌓이는 시간" />
-          <div style={styles.timeGrid}>
-            {timeStats.map((bucket) => (
-              <div key={bucket.label} style={styles.timeColumn}>
-                <div style={styles.timeBarWrap}>
-                  <div style={{ ...styles.timeBar, height: `${Math.max(bucket.pct, 8)}%` }} />
-                </div>
-                <span style={styles.timeLabel}>{bucket.label}</span>
-                <span style={styles.timeCount}>{bucket.count}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
         <section style={styles.detailBand}>
           <SectionHeader title="계열별 세부 감정 분석" caption={`${selectedCategoryMeta.label} 안에서 더 자세히 보기`} />
           <div style={styles.detailList}>
@@ -314,6 +299,21 @@ export default function Analysis() {
               ? '아직 분석할 원석이 없어요. 기록이 쌓이면 세부 패턴이 보여요.'
               : `${selectedCategoryMeta.label} 중에서도 ${selectedDetails.slice().sort((a, b) => b.count - a.count)[0]?.label ?? selectedCategoryMeta.details[0]}을 가장 자주 마주했어요.`}
           </p>
+        </section>
+
+        <section style={styles.section}>
+          <SectionHeader title="시간대별 감정원석 분포" caption="기록이 자주 쌓이는 시간" />
+          <div style={styles.timeGrid}>
+            {timeStats.map((bucket) => (
+              <div key={bucket.label} style={styles.timeColumn}>
+                <div style={styles.timeBarWrap}>
+                  <div style={{ ...styles.timeBar, height: `${Math.max(bucket.pct, 8)}%` }} />
+                </div>
+                <span style={styles.timeLabel}>{bucket.label}</span>
+                <span style={styles.timeCount}>{bucket.count}</span>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section style={styles.questionBand}>

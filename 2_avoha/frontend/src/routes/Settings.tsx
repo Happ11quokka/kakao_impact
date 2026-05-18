@@ -1,8 +1,6 @@
 // === Settings 화면 — 간소화된 설정 (기존 MyPage 축소) ===
-import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/auth-store';
-import { useInventoryStore } from '../stores/inventory-store';
 import { FIELD_SKY, fieldPageChrome, useFieldTimePhase } from '../lib/field-time';
 
 export default function Settings() {
@@ -10,13 +8,7 @@ export default function Settings() {
   const chrome = fieldPageChrome(phase);
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const tickets = useAuthStore((s) => s.tickets);
   const logout = useAuthStore((s) => s.logout);
-  const { fetchInventory } = useInventoryStore();
-
-  useEffect(() => {
-    void fetchInventory();
-  }, [fetchInventory]);
 
   const handleLogout = async () => {
     await logout();
@@ -115,43 +107,6 @@ export default function Settings() {
             </div>
           </div>
         </div>
-
-        {/* 채집권 */}
-        <div
-          style={{
-            margin: '0 16px 20px',
-            padding: 20,
-            borderRadius: 'var(--radius-lg)',
-            background: chrome.card,
-            boxShadow: 'var(--elevation-1)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-ink)' }}>
-                🎟️ 오늘의 채집권
-              </h2>
-              <p style={{ fontSize: 11, color: 'var(--color-ink-muted)', marginTop: 4 }}>
-                하루 5개 · 자정(KST) 에 충전
-              </p>
-            </div>
-            <span
-              style={{
-                fontSize: 28,
-                fontWeight: 700,
-                color:
-                  (tickets?.remaining ?? 0) > 2 ? 'var(--color-mint)' : 'var(--color-coral)',
-              }}
-            >
-              {tickets?.remaining ?? 0}
-              <span style={{ fontSize: 14, color: 'var(--color-ink-muted)', fontWeight: 400 }}>
-                {' '}
-                / 5
-              </span>
-            </span>
-          </div>
-        </div>
-
         {/* 액션 */}
         <div style={{ padding: '0 16px 40px' }}>
           <button
