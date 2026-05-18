@@ -2,9 +2,10 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
 import type { Gem } from '../types/gem';
-import { api, type ChatbotRecordDto } from '../lib/api';
-import { getEmotion } from '../data/emotions';
+import type { RecordDto } from '../lib/api';
+import { EMOTIONS, getEmotion } from '../data/emotions';
 import GemStone from '../components/pixel/GemStone';
+import { useRecordsStore } from '../stores/records-store';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const CALENDAR_BG = '#F9F4EA';
@@ -57,6 +58,14 @@ function formatKoreanDate(dateKey: string): string {
   return `${date.getMonth() + 1}월 ${date.getDate()}일 ${WEEKDAYS[date.getDay()]}요일`;
 }
 
+export function calendarRecordEmotionCode(record: RecordDto): string | null {
+  return record.confirmedEmotionCode ?? record.gemEmotionCode ?? record.aiEmotionCode ?? null;
+}
+
+export function calendarRecordNeedsReclassification(record: RecordDto): boolean {
+  return record.classificationStatus === 'needs_confirmation' || !calendarRecordEmotionCode(record);
+}
+
 export default function Calendar() {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
@@ -65,12 +74,13 @@ export default function Calendar() {
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
 
   const { gems, fetchInventory } = useInventoryStore();
-  const [chatbotRecords, setChatbotRecords] = useState<ChatbotRecordDto[]>([]);
+  const { records, fetchRecords, confirmEmotion, savingId } = useRecordsStore();
+  const [recordToast, setRecordToast] = useState<string | null>(null);
 
   useEffect(() => {
     fetchInventory();
-    api.chatbotRecords(200).then((r) => setChatbotRecords(r.records)).catch(() => {});
-  }, [fetchInventory]);
+    fetchRecords();
+  }, [fetchInventory, fetchRecords]);
 
   const gemsByDate = useMemo(() => {
     const map: Record<string, Gem[]> = {};
@@ -83,14 +93,14 @@ export default function Calendar() {
   }, [gems]);
 
   const recordsByDate = useMemo(() => {
-    const map: Record<string, ChatbotRecordDto[]> = {};
-    chatbotRecords.forEach((record) => {
+    const map: Record<string, RecordDto[]> = {};
+    records.forEach((record) => {
       const key = toDateKey(new Date(record.createdAt));
       if (!map[key]) map[key] = [];
       map[key].push(record);
     });
     return map;
-  }, [chatbotRecords]);
+  }, [records]);
 
   const cells = useMemo(() => buildCalendarCells(viewYear, viewMonth), [viewMonth, viewYear]);
   const selectedRecords = selectedDate ? recordsByDate[selectedDate] ?? [] : [];
@@ -152,12 +162,37 @@ export default function Calendar() {
       </section>
 
       {selectedDate && (
-        <DatePanel
-          dateKey={selectedDate}
-          gems={selectedGems}
-          records={selectedRecords}
-          onClose={() => setSelectedDate(null)}
-        />
+        <div style={styles.modalLayer} onClick={() => setSelectedDate(null)}>
+          <DatePanel
+            dateKey={selectedDate}
+            gems={selectedGems}
+            records={selectedRecords}
+            savingId={savingId}
+            onClose={() => setSelectedDate(null)}
+            onConfirmEmotion={async (record, emotionCode) => {
+              const wasCandidate = calendarRecordNeedsReclassification(record);
+              const result = await confirmEmotion(record.id, emotionCode, {
+                interaction: wasCandidate ? 'confirm' : 'reclassify',
+                reflectionType: 'none',
+              });
+              const emotion = getEmotion(emotionCode);
+              setRecordToast(
+                result.ok
+                  ? wasCandidate
+                    ? `${emotion?.nameKo ?? '감정'} 원석으로 저장했어요`
+                    : `${emotion?.nameKo ?? '감정'} 원석으로 업데이트했어요`
+                  : result.error ?? '감정 저장에 실패했어요',
+              );
+              window.setTimeout(() => setRecordToast(null), 2400);
+            }}
+          />
+        </div>
+      )}
+
+      {recordToast && (
+        <div role="status" style={styles.toast}>
+          {recordToast}
+        </div>
       )}
 
       {monthPickerOpen && (
@@ -173,6 +208,13 @@ export default function Calendar() {
           }}
         />
       )}
+
+      <style>{`
+        @keyframes calendarCandidatePulse {
+          0%, 100% { transform: scale(1); opacity: 0.78; }
+          50% { transform: scale(1.08); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -204,24 +246,35 @@ function DatePanel({
   dateKey,
   gems,
   records,
+  savingId,
   onClose,
+  onConfirmEmotion,
 }: {
   dateKey: string;
   gems: Gem[];
-  records: ChatbotRecordDto[];
+  records: RecordDto[];
+  savingId: number | null;
   onClose: () => void;
+  onConfirmEmotion: (record: RecordDto, emotionCode: string) => Promise<void>;
 }) {
   const [openedRecordId, setOpenedRecordId] = useState<number | null>(records[0]?.id ?? null);
+  const [pickerRecordId, setPickerRecordId] = useState<number | null>(null);
   const primaryRecord = records.find((record) => record.id === openedRecordId) ?? records[0];
+  const pickerRecord = records.find((record) => record.id === pickerRecordId) ?? null;
   const hasContent = gems.length > 0 || records.length > 0;
 
   useEffect(() => {
     setOpenedRecordId(records[0]?.id ?? null);
+    setPickerRecordId(null);
   }, [dateKey, records]);
 
   return (
-    <section aria-label={`${formatKoreanDate(dateKey)} 기록`} style={styles.panel}>
-      <button type="button" onClick={onClose} aria-label="캘린더 메인 화면으로 돌아가기" style={styles.panelHandle} />
+    <section
+      aria-label={`${formatKoreanDate(dateKey)} 기록`}
+      style={styles.panel}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <button type="button" onClick={onClose} aria-label="팝업 닫기" style={styles.panelClose}>×</button>
 
       <div style={styles.panelTitle}>{formatKoreanDate(dateKey)}</div>
 
@@ -230,7 +283,44 @@ function DatePanel({
       ) : (
         <>
           <div style={styles.gemSummary}>
-            {gems.slice(0, 4).map((gem) => {
+            {records.map((record) => {
+              const needsReclassification = calendarRecordNeedsReclassification(record);
+              const emotionCode = calendarRecordEmotionCode(record) ?? 'regret';
+              const emotion = getEmotion(emotionCode);
+              return (
+                <button
+                  key={`record-gem-${record.id}`}
+                  type="button"
+                  onClick={() => {
+                    setOpenedRecordId(record.id);
+                    if (needsReclassification) setPickerRecordId(record.id);
+                  }}
+                  style={{
+                    ...styles.summaryGemButton,
+                    ...(needsReclassification ? styles.unclassifiedGemButton : {}),
+                  }}
+                  aria-label={needsReclassification ? '미분류 원석 재분류하기' : `${emotion?.nameKo ?? '감정'} 원석 기록 보기`}
+                >
+                  <span style={styles.summaryGemStone}>
+                    <GemStone
+                      gem={{
+                        id: `calendar-record-${record.id}`,
+                        emotionCode,
+                        tier: 1,
+                        createdAt: record.createdAt,
+                        consumedAt: null,
+                      }}
+                      size={needsReclassification ? 30 : 26}
+                      variant={emotion?.nameKo}
+                    />
+                  </span>
+                  <span style={styles.summaryGemLabel}>
+                    {needsReclassification ? '미분류' : emotion?.nameKo ?? emotionCode}
+                  </span>
+                </button>
+              );
+            })}
+            {records.length === 0 && gems.slice(0, 4).map((gem) => {
               const emotion = getEmotion(gem.emotionCode);
               return (
                 <button
@@ -272,9 +362,37 @@ function DatePanel({
           )}
 
           {primaryRecord ? (
-            <RecordDetail record={primaryRecord} />
+            <RecordDetail
+              record={primaryRecord}
+              onOpenPicker={() => setPickerRecordId(primaryRecord.id)}
+            />
           ) : (
             <p style={styles.recordText}>채집한 원석을 캘린더에 담아두었어요.</p>
+          )}
+
+          {pickerRecord && (
+            <div style={styles.reclassifyBox}>
+              <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
+              <p style={styles.reclassifyHint}>오늘이 지나도 미분류 원석은 캘린더에서 다시 분류할 수 있어요.</p>
+              <div style={styles.emotionGrid}>
+                {EMOTIONS.map((emotion) => (
+                  <button
+                    key={emotion.code}
+                    type="button"
+                    disabled={savingId === pickerRecord.id}
+                    onClick={() => void onConfirmEmotion(pickerRecord, emotion.code).then(() => setPickerRecordId(null))}
+                    style={{
+                      ...styles.emotionButton,
+                      border: `1px solid ${emotion.hexColor}66`,
+                      background: `${emotion.hexColor}18`,
+                      cursor: savingId === pickerRecord.id ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {emotion.nameKo}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </>
       )}
@@ -282,7 +400,11 @@ function DatePanel({
   );
 }
 
-function RecordDetail({ record }: { record: ChatbotRecordDto }) {
+function RecordDetail({ record, onOpenPicker }: { record: RecordDto; onOpenPicker: () => void }) {
+  const needsReclassification = calendarRecordNeedsReclassification(record);
+  const emotionCode = calendarRecordEmotionCode(record);
+  const emotion = emotionCode ? getEmotion(emotionCode) : undefined;
+
   return (
     <div>
       {record.hasPhoto && (
@@ -294,6 +416,17 @@ function RecordDetail({ record }: { record: ChatbotRecordDto }) {
           )}
         </div>
       )}
+
+      <div style={styles.recordMetaRow}>
+        <span style={styles.recordMetaPill}>
+          {needsReclassification ? '미분류 원석' : emotion?.nameKo ?? '감정 원석'}
+        </span>
+        {needsReclassification && (
+          <button type="button" onClick={onOpenPicker} style={styles.reclassifyOpenButton}>
+            감정 분류하기
+          </button>
+        )}
+      </div>
 
       {record.recordText && (
         <>
@@ -390,7 +523,9 @@ const styles: Record<string, CSSProperties> = {
     background: CALENDAR_BG,
     color: TEXT_MAIN,
     fontFamily: 'var(--font-sans)',
-    padding: '52px 20px 0',
+    padding: 'calc(42px + env(safe-area-inset-top)) 18px calc(90px + env(safe-area-inset-bottom))',
+    display: 'flex',
+    flexDirection: 'column',
   },
   monthButton: {
     display: 'block',
@@ -413,6 +548,10 @@ const styles: Record<string, CSSProperties> = {
   calendarArea: {
     position: 'relative',
     zIndex: 1,
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
   },
   weekHeader: {
     display: 'grid',
@@ -426,17 +565,21 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 600,
   },
   grid: {
+    flex: 1,
+    minHeight: 0,
     display: 'grid',
     gridTemplateColumns: 'repeat(7, 1fr)',
+    gridTemplateRows: 'repeat(6, 1fr)',
     rowGap: 8,
-    columnGap: 5,
+    columnGap: 6,
   },
   dayButton: {
-    height: 34,
+    minHeight: 0,
+    height: 'auto',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     gap: 3,
     border: 0,
     background: 'transparent',
@@ -445,9 +588,9 @@ const styles: Record<string, CSSProperties> = {
     outline: 'none',
   },
   dayTile: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
+    width: 'min(42px, 10.5vw)',
+    height: 'min(42px, 10.5vw)',
+    borderRadius: 12,
     background: DAY_TILE,
     display: 'flex',
     alignItems: 'center',
@@ -455,12 +598,12 @@ const styles: Record<string, CSSProperties> = {
   },
   tileGemRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(2, 8px)',
-    gap: 1,
+    gridTemplateColumns: 'repeat(2, 11px)',
+    gap: 2,
   },
   tileGemStone: {
-    width: 8,
-    height: 8,
+    width: 11,
+    height: 11,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -471,37 +614,50 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 9,
     lineHeight: 1,
   },
-  panel: {
+  modalLayer: {
     position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 78,
-    minHeight: 132,
-    maxHeight: 238,
-    zIndex: 5,
+    inset: 0,
+    zIndex: 30,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '20px 18px calc(90px + env(safe-area-inset-bottom))',
+    background: 'rgba(30, 51, 40, 0.18)',
+    backdropFilter: 'blur(2px)',
+  },
+  panel: {
+    position: 'relative',
+    width: 'min(330px, 100%)',
+    maxHeight: 'min(72vh, 520px)',
+    zIndex: 31,
     overflow: 'auto',
     background: DETAIL_PANEL,
-    borderRadius: 12,
-    padding: '9px 16px 16px',
+    borderRadius: 22,
+    padding: '18px 18px 18px',
     color: TEXT_MAIN,
-    boxShadow: '0 10px 22px rgba(86, 71, 48, 0.08)',
+    boxShadow: '0 18px 42px rgba(30, 51, 40, 0.22)',
   },
-  panelHandle: {
-    display: 'block',
-    width: 42,
-    height: 8,
-    margin: '0 auto 7px',
+  panelClose: {
+    position: 'absolute',
+    top: 10,
+    right: 12,
+    width: 28,
+    height: 28,
     border: 0,
     borderRadius: 99,
-    background: 'rgba(255, 255, 255, 0.24)',
+    background: 'rgba(255, 255, 255, 0.28)',
+    color: TEXT_MAIN,
+    fontSize: 18,
+    fontWeight: 800,
     cursor: 'pointer',
     outline: 'none',
   },
   panelTitle: {
     color: TEXT_MAIN,
-    fontSize: 11,
-    fontWeight: 700,
-    marginBottom: 8,
+    fontSize: 13,
+    fontWeight: 800,
+    marginBottom: 12,
+    paddingRight: 28,
   },
   emptyText: {
     color: TEXT_SUB,
@@ -586,9 +742,86 @@ const styles: Record<string, CSSProperties> = {
     color: TEXT_MAIN,
     fontSize: 11,
     lineHeight: 1.55,
-    margin: 0,
+    margin: '0 0 10px',
     wordBreak: 'keep-all',
     overflowWrap: 'anywhere',
+  },
+  emotionPicker: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: 5,
+    marginTop: 8,
+  },
+  unclassifiedGemButton: {
+    animation: 'calendarCandidatePulse 1.8s ease-in-out infinite',
+  },
+  recordMetaRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 10,
+  },
+  recordMetaPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    minHeight: 24,
+    padding: '0 9px',
+    borderRadius: 99,
+    background: 'rgba(255, 255, 255, 0.2)',
+    color: TEXT_SUB,
+    fontSize: 10,
+    fontWeight: 800,
+  },
+  reclassifyOpenButton: {
+    border: 0,
+    borderRadius: 99,
+    background: '#F4E8CD',
+    color: TEXT_MAIN,
+    fontSize: 10,
+    fontWeight: 800,
+    padding: '6px 10px',
+    cursor: 'pointer',
+  },
+  reclassifyBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    background: 'rgba(255, 255, 255, 0.2)',
+    border: '1px solid rgba(255, 255, 255, 0.18)',
+  },
+  reclassifyHint: {
+    color: TEXT_SUB,
+    fontSize: 10,
+    lineHeight: 1.45,
+    margin: '0 0 10px',
+  },
+  emotionGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: 6,
+  },
+  emotionButton: {
+    minHeight: 36,
+    borderRadius: 10,
+    color: TEXT_MAIN,
+    fontSize: 10,
+    fontWeight: 800,
+    padding: '0 4px',
+  },
+  toast: {
+    position: 'absolute',
+    left: '50%',
+    bottom: 104,
+    transform: 'translateX(-50%)',
+    zIndex: 60,
+    padding: '9px 14px',
+    borderRadius: 999,
+    background: 'rgba(61, 107, 80, 0.94)',
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 800,
+    boxShadow: '0 10px 24px rgba(30, 51, 40, 0.18)',
   },
   pickerLayer: {
     position: 'absolute',
