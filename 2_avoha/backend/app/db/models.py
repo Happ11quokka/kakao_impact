@@ -125,6 +125,7 @@ class Gem(Base):
         ForeignKey("kakao_messages.id"),
     )
     source: Mapped[str | None] = mapped_column(Text)
+    source_chatbot_id: Mapped[int | None] = mapped_column(BigInteger)
     crafted_from: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(),
@@ -209,7 +210,21 @@ class ChatbotRecord(Base):
     )
     image_url: Mapped[str | None] = mapped_column(Text)
     ai_gems: Mapped[str | None] = mapped_column(Text)
+    entry_mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'emotion_classification'")
+    )
+    classification_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'user_confirmed'")
+    )
+    ai_emotion_code: Mapped[str | None] = mapped_column(Text)
+    confirmed_emotion_code: Mapped[str | None] = mapped_column(Text)
+    confirmed_at: Mapped[datetime | None]
+    web_reviewed_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         server_default=func.now(),
         nullable=False,
     )

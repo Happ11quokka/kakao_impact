@@ -1,13 +1,17 @@
 // === App — 라우팅 + 레이아웃 + AuthGate (3탭: 캘린더/홈/설정) ===
+import { useEffect, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import AuthGate from './components/AuthGate';
 import BottomNav from './components/pixel/BottomNav';
+import { subscribeInventory } from './lib/sse';
 import Home from './routes/Home';
 import Calendar from './routes/Calendar';
 import Analysis from './routes/Analysis';
 import Settings from './routes/Settings';
 import Login from './routes/Login';
 import LoginCallback from './routes/LoginCallback';
+import { useInventoryStore } from './stores/inventory-store';
+import { useRecordsStore } from './stores/records-store';
 
 export default function App() {
   return (
@@ -67,13 +71,33 @@ export default function App() {
 }
 
 /** 공통 레이아웃: 콘텐츠 + 하단 네비 */
-function PageLayout({ children }: { children: React.ReactNode }) {
+function PageLayout({ children }: { children: ReactNode }) {
   return (
     <div
       style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}
     >
+      <DataSync />
       {children}
       <BottomNav />
     </div>
   );
+}
+
+function DataSync() {
+  useEffect(() => {
+    return subscribeInventory({
+      onEvent: (ev) => {
+        if (ev.type === 'ping') return;
+        if (ev.type === 'gem_added' || ev.type === 'sticker_added') {
+          void useInventoryStore.getState().fetchInventory();
+        }
+        if (ev.type === 'record_updated') {
+          void useRecordsStore.getState().fetchRecords();
+          void useInventoryStore.getState().fetchInventory();
+        }
+      },
+    });
+  }, []);
+
+  return null;
 }

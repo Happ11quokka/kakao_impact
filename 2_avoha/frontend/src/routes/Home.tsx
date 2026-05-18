@@ -1,192 +1,365 @@
-// === Home 화면 — 모던 UI 버전 ===
-import { useEffect, useState, useMemo } from 'react';
-import { useFieldStore } from '../stores/field-store';
+// === Home 화면 — 오늘의 감정 호수 ===
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
-import { usePetStore } from '../stores/pet-store';
-import { emotionToCategory } from '../lib/emotion-category';
-import { UNCLASSIFIED_EMOTION_CODE } from '../data/unclassified-gem';
-import { getEmotion } from '../data/emotions';
+import { useRecordsStore } from '../stores/records-store';
+import { EMOTIONS, getEmotion } from '../data/emotions';
 import CollectionBook from './CollectionBook';
 import ChibiAvatar from '../components/field/ChibiAvatar';
 import GemStone from '../components/pixel/GemStone';
-import type { Gem } from '../types/gem';
+import type { RecordDto } from '../lib/api';
 
-// 피그마 기준 5대 감정 카테고리
-const EMOTION_CATEGORIES = [
-  { code: 'sadness', label: '슬픔', theme: 'sadness' },
-  { code: 'anxiety', label: '불안', theme: 'anxiety' },
-  { code: 'anger', label: '분노', theme: 'anger' },
-  { code: 'joy', label: '기쁨', theme: 'joy' },
-  { code: 'complex', label: '복잡', theme: 'complex' },
+const CANDIDATE_SLOTS = [
+  { x: 30, y: 48 },
+  { x: 70, y: 42 },
+  { x: 50, y: 24 },
 ];
 
-const CATEGORY_REPRESENTATIVE_EMOTION: Record<string, string> = {
-  sadness: 'sadness',
-  anxiety: 'solace',
-  anger: 'annoyance',
-  joy: 'satisfaction',
-  complex: 'regret',
+const CONFIRMED_SLOTS = [
+  { x: 73, y: 62 },
+  { x: 26, y: 66 },
+  { x: 50, y: 32 },
+  { x: 76, y: 36 },
+  { x: 25, y: 34 },
+  { x: 62, y: 78 },
+];
+
+const MASCOT_START = { x: 50, y: 66 };
+const LAKE_MOVE_RADIUS = 38;
+const PROXIMITY_PROMPT_RADIUS = 18;
+const JOYSTICK_KNOB_LIMIT = 24;
+const JOYSTICK_SPEED = 0.036;
+const MASCOT_SIZE = 66;
+const GEM_BOX_SLOT_COUNT = 5;
+
+type FieldPosition = { x: number; y: number };
+type ReflectionType = 'question' | 'meditation' | 'none';
+type ReflectionMode = 'idle' | 'choice' | 'question' | 'meditation' | 'picker';
+type LakeStone = {
+  record: RecordDto;
+  position: FieldPosition;
+  emotionCode: string;
+  status: 'candidate' | 'confirmed';
 };
 
-const CATEGORY_REPRESENTATIVE_VARIANT: Record<string, string> = {
-  sadness: '우울',
-  anxiety: '걱정',
-  anger: '화남',
-  joy: '즐거움',
-  complex: '공허',
-};
+function clampToLake(position: FieldPosition): FieldPosition {
+  const dx = position.x - 50;
+  const dy = position.y - 50;
+  const d = Math.hypot(dx, dy);
+  if (d <= LAKE_MOVE_RADIUS) {
+    return {
+      x: Math.max(12, Math.min(88, position.x)),
+      y: Math.max(12, Math.min(88, position.y)),
+    };
+  }
+  const scale = LAKE_MOVE_RADIUS / d;
+  return {
+    x: 50 + dx * scale,
+    y: 50 + dy * scale,
+  };
+}
+
+function distance(a: FieldPosition, b: FieldPosition): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function isSameLocalDate(iso: string, base = new Date()): boolean {
+  const d = new Date(iso);
+  return (
+    d.getFullYear() === base.getFullYear() &&
+    d.getMonth() === base.getMonth() &&
+    d.getDate() === base.getDate()
+  );
+}
+
+function recordEmotionCode(record: RecordDto): string | null {
+  return (
+    record.confirmedEmotionCode ??
+    record.gemEmotionCode ??
+    record.aiEmotionCode ??
+    null
+  );
+}
+
+function formatRecordTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('ko-KR', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function stonePromptText(stone: LakeStone, emotionName?: string): string {
+  if (stone.status === 'candidate' && stone.record.entryMode === 'plain_record') {
+    return '기록의 원석을 알아볼까요?';
+  }
+  if (stone.status === 'candidate') {
+    return '감정 원석을 확인할까요?';
+  }
+  if (stone.record.entryMode === 'emotion_classification') {
+    return '저장한 감정을 살펴볼까요?';
+  }
+  return `${emotionName ?? '감정'} 기록을 열어볼까요?`;
+}
+
+function stonePromptLabel(stone: LakeStone, emotionName?: string): string {
+  if (stone.status === 'candidate' && stone.record.entryMode === 'plain_record') {
+    return '기록의 원석 열어보기';
+  }
+  if (stone.status === 'candidate') {
+    return '감정 원석 열어보기';
+  }
+  return `${emotionName ?? '감정'} 원석 기록 열어보기`;
+}
 
 export default function Home() {
-  const { todayDrops, fetchToday, error: fieldError } = useFieldStore();
-  const { gems, fetchInventory, consumeGem } = useInventoryStore();
-  const feedGem = usePetStore((s) => s.feedGem);
+  const { fetchInventory } = useInventoryStore();
+  const { records, fetchRecords, confirmEmotion, savingId } = useRecordsStore();
   const [showBook, setShowBook] = useState(false);
-  const [mascotMood, setMascotMood] = useState<'idle' | 'eating'>('idle');
-
-  // 먹이기 애니메이션 트리거. 카드를 탭할 때마다 +1 → 마스코트 wrapper 리마운트로 munch 재생.
-  const [eatNonce, setEatNonce] = useState(0);
-  // 어떤 카테고리 카드가 방금 탭됐는지 (cardPop 애니 + 키 리셋용 nonce 포함).
-  const [poppedCard, setPoppedCard] = useState<{ code: string; nonce: number } | null>(null);
+  const [recordToast, setRecordToast] = useState<string | null>(null);
+  const [emotionPickerOpen, setEmotionPickerOpen] = useState(false);
+  const [reflectionMode, setReflectionMode] = useState<ReflectionMode>('idle');
+  const [selectedReflectionType, setSelectedReflectionType] = useState<ReflectionType>('none');
+  const [meditationRemaining, setMeditationRemaining] = useState(5);
+  const [activeRecordId, setActiveRecordId] = useState<number | null>(null);
+  const [mascotPosition, setMascotPosition] = useState<FieldPosition>(MASCOT_START);
+  const [joystick, setJoystick] = useState({ active: false, x: 0, y: 0 });
+  const joystickVectorRef = useRef({ x: 0, y: 0 });
+  const lastFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    fetchToday();
     fetchInventory();
-  }, [fetchToday, fetchInventory]);
+    fetchRecords();
+  }, [fetchInventory, fetchRecords]);
 
-  // 카드 팝 애니 끝나면 상태 클리어 → 다음 탭에서 다시 트리거 가능.
   useEffect(() => {
-    if (!poppedCard) return;
-    const t = setTimeout(() => setPoppedCard(null), 500);
-    return () => clearTimeout(t);
-  }, [poppedCard]);
+    if (!activeRecordId) return;
+    if (!records.some((record) => record.id === activeRecordId)) {
+      setActiveRecordId(null);
+    }
+  }, [activeRecordId, records]);
 
-  // 카테고리 카드 탭 = 해당 카테고리에서 가장 오래된 미소비 보석을 1개 먹임.
-  // 마스코트 직접 탭이 아닌 카드 탭만 허용해서 의도치 않은 보석 소비 방지(이전 커밋 정책 유지).
-  const handleFeed = (categoryCode: string) => {
-    // 클로저 stale 방지: 가장 최신 store 상태에서 후보 선정 → 빠른 연타도 정확히 1개씩 소비.
-    const allGems = useInventoryStore.getState().gems;
-    const now = new Date();
-    const target = allGems
-      .filter((g) => !g.consumedAt)
-      .filter((g) => {
-        const d = new Date(g.createdAt);
-        return (
-          d.getFullYear() === now.getFullYear() &&
-          d.getMonth() === now.getMonth() &&
-          d.getDate() === now.getDate()
-        );
-      })
-      .filter((g) => emotionToCategory(g.emotionCode) === categoryCode)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
-    if (!target) return;
+  useEffect(() => {
+    if (reflectionMode !== 'meditation' || meditationRemaining <= 0) return undefined;
+    const timeout = window.setTimeout(() => {
+      setMeditationRemaining((remaining) => Math.max(0, remaining - 1));
+    }, 1000);
+    return () => window.clearTimeout(timeout);
+  }, [meditationRemaining, reflectionMode]);
 
-    consumeGem(target.id);
-    feedGem(target.emotionCode);
-    setEatNonce((n) => n + 1);
-    setMascotMood('eating');
-    setPoppedCard({ code: categoryCode, nonce: Date.now() });
+  useEffect(() => {
+    if (!joystick.active) {
+      lastFrameRef.current = null;
+      return undefined;
+    }
+
+    let raf = 0;
+    const tick = (now: number) => {
+      const last = lastFrameRef.current ?? now;
+      const dt = Math.min(now - last, 32);
+      lastFrameRef.current = now;
+      const vector = joystickVectorRef.current;
+      setMascotPosition((position) =>
+        clampToLake({
+          x: position.x + vector.x * dt * JOYSTICK_SPEED,
+          y: position.y + vector.y * dt * JOYSTICK_SPEED,
+        }),
+      );
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [joystick.active]);
+
+  const todayRecords = useMemo(
+    () => records.filter((record) => isSameLocalDate(record.createdAt)),
+    [records],
+  );
+
+  const lakeStones = useMemo<LakeStone[]>(() => {
+    let candidateIndex = 0;
+    let confirmedIndex = 0;
+
+    return todayRecords
+      .filter((record) => record.classificationStatus === 'needs_confirmation' || Boolean(recordEmotionCode(record)))
+      .slice(0, CANDIDATE_SLOTS.length + CONFIRMED_SLOTS.length)
+      .map((record) => {
+        const isCandidate = record.classificationStatus === 'needs_confirmation';
+        const slot = isCandidate
+          ? CANDIDATE_SLOTS[candidateIndex++ % CANDIDATE_SLOTS.length]
+          : CONFIRMED_SLOTS[confirmedIndex++ % CONFIRMED_SLOTS.length];
+        return {
+          record,
+          position: slot,
+          emotionCode: isCandidate
+            ? record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret'
+            : recordEmotionCode(record) ?? 'regret',
+          status: isCandidate ? 'candidate' : 'confirmed',
+        };
+      });
+  }, [todayRecords]);
+
+  const todayGemBoxRecords = useMemo(
+    () =>
+      todayRecords
+        .filter(
+          (record) =>
+            record.classificationStatus !== 'needs_confirmation' &&
+            Boolean(recordEmotionCode(record)),
+        )
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+    [todayRecords],
+  );
+
+  const activeRecord = activeRecordId
+    ? todayRecords.find((record) => record.id === activeRecordId) ?? null
+    : null;
+  const activeStatus =
+    activeRecord?.classificationStatus === 'needs_confirmation' ? 'candidate' : 'confirmed';
+  const activeEmotionCode = activeRecord ? recordEmotionCode(activeRecord) : null;
+  const activeEmotion = activeEmotionCode ? getEmotion(activeEmotionCode) : undefined;
+  const suggestedEmotion =
+    activeRecord?.classificationStatus === 'needs_confirmation'
+      ? getEmotion(activeRecord.aiEmotionCode ?? activeRecord.gemEmotionCode ?? 'regret')
+      : activeEmotion;
+  const activeNeedsWebReview = Boolean(
+    activeRecord &&
+      activeRecord.entryMode === 'emotion_classification' &&
+      activeStatus === 'confirmed' &&
+      !activeRecord.webReviewedAt,
+  );
+  const showEmotionGrid =
+    (activeStatus === 'candidate' && (!suggestedEmotion || emotionPickerOpen)) ||
+    (activeNeedsWebReview && reflectionMode === 'picker');
+
+  const candidateCount = lakeStones.filter((stone) => stone.status === 'candidate').length;
+  const confirmedCount = lakeStones.filter((stone) => stone.status === 'confirmed').length;
+  const nearbyStone = useMemo(() => {
+    if (activeRecord || showBook) return null;
+    return (
+      lakeStones
+        .map((stone) => ({
+          stone,
+          distance: distance(mascotPosition, stone.position),
+        }))
+        .filter((item) => item.distance <= PROXIMITY_PROMPT_RADIUS)
+        .sort((a, b) => a.distance - b.distance)[0]?.stone ?? null
+    );
+  }, [activeRecord, lakeStones, mascotPosition, showBook]);
+  const nearbyEmotion = nearbyStone ? getEmotion(nearbyStone.emotionCode) : undefined;
+
+  const resetReviewControls = () => {
+    setEmotionPickerOpen(false);
+    setReflectionMode('idle');
+    setSelectedReflectionType('none');
+    setMeditationRemaining(5);
   };
 
-  useEffect(() => {
-    if (mascotMood !== 'eating') return;
-    const t = window.setTimeout(() => setMascotMood('idle'), 520);
-    return () => window.clearTimeout(t);
-  }, [mascotMood]);
+  const openRecordSheet = (recordId: number) => {
+    resetReviewControls();
+    setRecordToast(null);
+    setActiveRecordId(recordId);
+  };
 
-  // 오늘 수집한 보석 (BE 기준 consumed_at 미설정만)
-  // NOTE: 마스코트 직접 탭이 아닌 "오늘 채집할 원석" 카드 탭으로 먹이기 트리거.
-  //       소비는 현재 프론트 로컬(`consumeGem`)만 수행. BE 동기화는 추후.
-  const todayGems = useMemo(() => {
-    return gems.filter((g) => {
-      if (g.consumedAt) return false;
-      const d = new Date(g.createdAt);
-      const now = new Date();
-      return (
-        d.getFullYear() === now.getFullYear() &&
-        d.getMonth() === now.getMonth() &&
-        d.getDate() === now.getDate()
-      );
+  const closeRecordSheet = () => {
+    setActiveRecordId(null);
+    resetReviewControls();
+    setMascotPosition(MASCOT_START);
+    stopJoystick();
+  };
+
+  const handleConfirmRecord = async (
+    emotionCode: string,
+    opts: { interaction?: 'confirm' | 'reclassify'; reflectionType?: ReflectionType } = {},
+  ) => {
+    if (!activeRecord) return;
+    const wasCandidate = activeRecord.classificationStatus === 'needs_confirmation';
+    const interaction = opts.interaction ?? (wasCandidate ? 'confirm' : 'reclassify');
+    const result = await confirmEmotion(activeRecord.id, emotionCode, {
+      interaction,
+      reflectionType: opts.reflectionType ?? 'none',
     });
-  }, [gems]);
+    resetReviewControls();
+    if (result.ok) {
+      closeRecordSheet();
+    }
+    const emotion = getEmotion(emotionCode);
+    setRecordToast(
+      result.ok
+        ? interaction === 'confirm' && wasCandidate
+          ? `${emotion?.nameKo ?? '감정'} 원석으로 저장했어요`
+          : interaction === 'confirm'
+            ? `${emotion?.nameKo ?? '감정'} 원석으로 확정했어요`
+          : `${emotion?.nameKo ?? '감정'} 원석으로 업데이트했어요`
+        : result.error ?? '저장에 실패했어요',
+    );
+    window.setTimeout(() => setRecordToast(null), 2400);
+  };
 
-  // 마스코트 주위 필드에 떠있는 원석 중, 로컬에서 소비된 건 즉시 숨김.
-  // field-store는 consumedAt를 추적 안 함 → inventory의 consumedAt와 cross-ref.
-  const consumedGemIds = useMemo(
-    () => new Set(gems.filter((g) => g.consumedAt).map((g) => g.id)),
-    [gems],
-  );
-  const visibleDrops = useMemo(
-    () => todayDrops.filter((d) => !consumedGemIds.has(d.gem.id)),
-    [todayDrops, consumedGemIds],
-  );
+  const updateJoystick = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = event.clientX - centerX;
+    const dy = event.clientY - centerY;
+    const rawDistance = Math.hypot(dx, dy);
+    const scale = rawDistance > JOYSTICK_KNOB_LIMIT ? JOYSTICK_KNOB_LIMIT / rawDistance : 1;
+    const x = dx * scale;
+    const y = dy * scale;
+    setJoystick({ active: true, x, y });
+    joystickVectorRef.current = {
+      x: rawDistance === 0 ? 0 : dx / rawDistance,
+      y: rawDistance === 0 ? 0 : dy / rawDistance,
+    };
+  };
 
-  // 카테고리별 개수 집계 (피그마처럼 화면에 렌더링용)
-  const gemCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    todayGems.forEach((gem) => {
-      if (gem.emotionCode === UNCLASSIFIED_EMOTION_CODE) return;
-      const cat = emotionToCategory(gem.emotionCode);
-      counts[cat] = (counts[cat] || 0) + 1;
-    });
-    return counts;
-  }, [todayGems]);
+  function stopJoystick() {
+    joystickVectorRef.current = { x: 0, y: 0 };
+    setJoystick({ active: false, x: 0, y: 0 });
+  }
 
-  const cardGemByCategory = useMemo<Record<string, Gem>>(() => {
-    const nowIso = new Date().toISOString();
-    const grouped: Record<string, Gem | undefined> = {};
-    todayGems.forEach((gem) => {
-      if (gem.emotionCode === UNCLASSIFIED_EMOTION_CODE) return;
-      const cat = emotionToCategory(gem.emotionCode);
-      if (!grouped[cat]) grouped[cat] = gem;
-    });
-
-    const result: Record<string, Gem> = {};
-    EMOTION_CATEGORIES.forEach((cat, idx) => {
-      result[cat.code] =
-        grouped[cat.code] ??
-        ({
-          id: `card-${cat.code}-${idx}`,
-          emotionCode: CATEGORY_REPRESENTATIVE_EMOTION[cat.code] ?? 'untroubled',
-          tier: 2,
-          createdAt: nowIso,
-          consumedAt: null,
-        } as Gem);
-    });
-    return result;
-  }, [todayGems]);
+  const handleJoystickPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateJoystick(event);
+  };
 
   const todayDateString = useMemo(() => {
     const now = new Date();
     const month = now.getMonth() + 1;
     const date = now.getDate();
     const days = ['일', '월', '화', '수', '목', '금', '토'];
-    const dayName = days[now.getDay()];
-    return `${month}월 ${date}일 ${dayName}요일`;
+    return `${month}월 ${date}일 ${days[now.getDay()]}요일`;
   }, []);
+
+  const lakeHelper =
+    lakeStones.length > 0
+      ? '아보하를 움직여 오늘의 감정을 찾아보세요.'
+      : '카카오톡 챗봇에서 오늘 마음을 남기면 호수에 원석이 생겨요.';
 
   return (
     <div
       style={{
         flex: 1,
+        minHeight: 0,
+        height: '100%',
         position: 'relative',
         background: 'var(--color-base)',
         display: 'flex',
         flexDirection: 'column',
-        padding: '24px 20px',
-        paddingTop: 'calc(24px + env(safe-area-inset-top))',
-        paddingBottom: 'calc(24px + env(safe-area-inset-bottom))',
-        overflowY: 'auto',
+        padding: '16px 20px 10px',
+        paddingTop: 'calc(16px + env(safe-area-inset-top))',
+        paddingBottom: 10,
+        overflowY: 'hidden',
         overflowX: 'hidden',
       }}
     >
-      {/* ── 상단 헤더: 도감 ── */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
         <button
+          type="button"
           onClick={() => setShowBook(true)}
           style={{
             background: 'var(--color-point-yellow)',
             borderRadius: 14,
-            padding: '8px 18px',
+            padding: '8px 17px',
             fontSize: 14,
             fontWeight: 700,
             color: 'var(--color-text-main)',
@@ -198,122 +371,252 @@ export default function Home() {
         </button>
       </div>
 
-      {/* ── 상단 영역 (날짜 + 펫) 배경 원 포함 ── */}
       {!showBook ? (
-        <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: 287, justifyContent: 'center', marginBottom: 20 }}>
-          {/* 마스코트 배경 원 (Figma Ellipse 21) */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: 287,
-              height: 287,
-              borderRadius: '50%',
-              background: '#F0E7D3',
-              zIndex: 0,
-            }}
-          />
-
-          {/* 보석 layer — 배경 원과 동일한 287x287 영역에 한정. 백엔드 좌표(0..100%)는 이 영역 기준 */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: 287,
-              height: 287,
-              pointerEvents: 'none',
-              zIndex: 1,
-            }}
-          >
-            {visibleDrops.map((drop) => {
-              const emotion = getEmotion(drop.gem.emotionCode);
-              return (
-                <div
-                  key={drop.gem.id}
-                  title={emotion?.nameKo ?? drop.gem.emotionCode}
-                  style={{
-                    position: 'absolute',
-                    left: `${drop.position.x}%`,
-                    top: `${drop.position.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    animation: 'gemDropIn 0.4s ease-out',
-                  }}
-                >
-                  <GemStone gem={drop.gem} size={40} />
-                </div>
-              );
-            })}
-            
-          </div>
-
-          {fieldError && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                fontSize: 11,
-                color: 'var(--color-text-sub)',
-                background: 'rgba(255,255,255,0.7)',
-                padding: '2px 8px',
-                borderRadius: 999,
-                zIndex: 3,
-              }}
-            >
-              오늘의 원석을 못 불러왔어요
-            </div>
-          )}
-
-          {/* ── 날짜 ── */}
-          <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+        <section
+          aria-label="오늘의 마음 호수"
+          style={{
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            height: 450,
+            flexShrink: 0,
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
             <div
               style={{
                 background: 'var(--color-point-yellow)',
                 borderRadius: 14,
-                padding: '8px 24px',
+                padding: '7px 22px',
               }}
             >
-              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-text-sub)' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-sub)' }}>
                 {todayDateString}
               </span>
             </div>
           </div>
 
-          {/* ── 펫 영역 (마스코트) ── */}
-          {/* 두 단계 wrapper:
-              - outer: 항상 mascotBreathe 무한 반복 (살짝의 미세 호흡감)
-              - inner: 먹일 때 mascotMunch 1회 재생. eatNonce가 바뀌면 리마운트되며 애니가 다시 처음부터 재생됨. */}
+          <div style={{ textAlign: 'center', marginBottom: 8 }}>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--color-text-main)' }}>
+              오늘의 마음 호수
+            </p>
+            <p style={{ margin: '3px 0 0', fontSize: 11, lineHeight: 1.35, color: 'var(--color-text-sub)' }}>
+              {lakeHelper}
+            </p>
+          </div>
+
           <div
             style={{
               position: 'relative',
-              zIndex: 2,
+              width: 286,
+              height: 286,
+              borderRadius: '50%',
+              background:
+                'radial-gradient(circle at 48% 42%, rgba(255,255,255,0.66) 0%, rgba(239,236,218,0.94) 49%, rgba(220,230,215,0.76) 78%, rgba(205,222,211,0.52) 100%)',
+              boxShadow:
+                'inset 0 0 0 1px rgba(61, 107, 80, 0.06), inset 0 -22px 60px rgba(126, 104, 66, 0.08)',
+              overflow: 'visible',
               display: 'flex',
-              flexDirection: 'column',
               alignItems: 'center',
-              animation: 'mascotBreathe 3.6s ease-in-out infinite',
+              justifyContent: 'center',
             }}
           >
+            {lakeStones.map((stone) => {
+              const emotion = getEmotion(stone.emotionCode);
+              const isCandidate = stone.status === 'candidate';
+              return (
+                <button
+                  key={`${stone.status}-${stone.record.id}`}
+                  type="button"
+                  onClick={() => openRecordSheet(stone.record.id)}
+                  aria-label={
+                    isCandidate && stone.record.entryMode === 'plain_record'
+                      ? '확인 필요한 기록 원석 열기'
+                      : isCandidate
+                      ? `${emotion?.nameKo ?? '감정'} 후보 원석 기록 확인하기`
+                      : `${emotion?.nameKo ?? stone.emotionCode} 원석 기록 열기`
+                  }
+                  title={
+                    isCandidate && stone.record.entryMode === 'plain_record'
+                      ? '기록의 원석'
+                      : isCandidate
+                        ? '확인 필요한 감정'
+                        : `${emotion?.nameKo ?? stone.emotionCode} 원석`
+                  }
+                  style={{
+                    position: 'absolute',
+                    left: `${stone.position.x}%`,
+                    top: `${stone.position.y}%`,
+                    transform: 'translate(-50%, -50%)',
+                    width: isCandidate ? 54 : 58,
+                    height: isCandidate ? 54 : 58,
+                    borderRadius: '50%',
+                    border: isCandidate
+                      ? '1px dashed rgba(61, 96, 80, 0.38)'
+                      : '1px solid rgba(86, 71, 48, 0.1)',
+                    background: isCandidate ? 'rgba(255, 255, 255, 0.46)' : 'rgba(255, 255, 255, 0.78)',
+                    boxShadow: isCandidate
+                      ? '0 10px 24px rgba(61, 96, 80, 0.08)'
+                      : '0 8px 20px rgba(86, 71, 48, 0.09)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    zIndex: 4,
+                    WebkitTapHighlightColor: 'transparent',
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: 'flex',
+                      animation: isCandidate
+                        ? 'candidateGemPulse 1.8s ease-in-out infinite'
+                        : 'gemFloat 3s ease-in-out infinite',
+                    }}
+                  >
+                    <GemStone
+                      gem={{
+                        id: `${stone.status}-${stone.record.id}`,
+                        emotionCode: stone.emotionCode,
+                        tier: 1,
+                        createdAt: stone.record.createdAt,
+                        consumedAt: null,
+                      }}
+                      size={isCandidate ? 34 : 38}
+                    />
+                  </span>
+                </button>
+              );
+            })}
+
+            {lakeStones.length === 0 && (
+              <div
+                style={{
+                  width: 148,
+                  padding: '14px 12px',
+                  borderRadius: 18,
+                  background: 'rgba(255,255,255,0.46)',
+                  border: '1px solid rgba(126,104,66,0.08)',
+                  textAlign: 'center',
+                  color: 'var(--color-text-sub)',
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  zIndex: 3,
+                }}
+              >
+                오늘 기록을 기다리는 중
+              </div>
+            )}
+
             <div
-              key={`mascot-${eatNonce}`}
               style={{
-                position: 'relative',
-                animation: eatNonce > 0 ? 'mascotMunch 0.6s ease' : undefined,
-                transformOrigin: '50% 80%',
-                filter: 'saturate(0.86) contrast(0.95)',
+                position: 'absolute',
+                left: `${mascotPosition.x}%`,
+                top: `${mascotPosition.y}%`,
+                transform: 'translate(-50%, -50%)',
+                zIndex: 5,
+                animation: 'mascotBreathe 3.6s ease-in-out infinite',
+                transition: joystick.active ? 'none' : 'left 0.18s ease, top 0.18s ease',
               }}
             >
-              <ChibiAvatar size={150} mood={mascotMood} />
+              <div style={{ filter: 'saturate(0.9) contrast(0.96)' }}>
+                <ChibiAvatar size={MASCOT_SIZE} mood="idle" />
+              </div>
+            </div>
 
+            <div
+              role="slider"
+              aria-label="아보하 이동 조이스틱"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(Math.hypot(joystick.x, joystick.y))}
+              onPointerDown={handleJoystickPointerDown}
+              onPointerMove={(event) => {
+                if (joystick.active) updateJoystick(event);
+              }}
+              onPointerUp={stopJoystick}
+              onPointerCancel={stopJoystick}
+              style={{
+                position: 'absolute',
+                right: 8,
+                bottom: -42,
+                width: 64,
+                height: 64,
+                borderRadius: '50%',
+                background: 'rgba(255, 255, 255, 0.56)',
+                border: '1px solid rgba(126, 104, 66, 0.12)',
+                boxShadow: '0 10px 24px rgba(86, 71, 48, 0.08)',
+                zIndex: 8,
+                touchAction: 'none',
+                cursor: 'grab',
+              }}
+            >
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  background: 'var(--color-point-green)',
+                  boxShadow: '0 4px 12px rgba(61, 107, 80, 0.18)',
+                  transform: `translate(calc(-50% + ${joystick.x}px), calc(-50% + ${joystick.y}px))`,
+                  transition: joystick.active ? 'none' : 'transform 0.16s ease',
+                }}
+              />
             </div>
           </div>
-        </div>
+
+          {nearbyStone && (
+            <button
+              type="button"
+              onClick={() => openRecordSheet(nearbyStone.record.id)}
+              style={{
+                position: 'absolute',
+                left: '50%',
+                bottom: 24,
+                transform: 'translateX(-50%)',
+                zIndex: 12,
+                minWidth: 196,
+                minHeight: 42,
+                padding: '8px 14px',
+                borderRadius: 999,
+                border: '1px solid rgba(61, 107, 80, 0.18)',
+                background: 'rgba(255, 255, 255, 0.92)',
+                boxShadow: '0 10px 26px rgba(61, 107, 80, 0.14)',
+                color: 'var(--color-text-main)',
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+              aria-label={stonePromptLabel(nearbyStone, nearbyEmotion?.nameKo)}
+            >
+              {stonePromptText(nearbyStone, nearbyEmotion?.nameKo)}
+            </button>
+          )}
+
+          {lakeStones.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                marginTop: 48,
+                fontSize: 11,
+                color: 'var(--color-text-sub)',
+              }}
+            >
+              {candidateCount > 0 && <span>확인 필요 {candidateCount}</span>}
+              {confirmedCount > 0 && <span>저장 완료 {confirmedCount}</span>}
+            </div>
+          )}
+        </section>
       ) : (
-        // Figma의 `메인화면_도감`처럼: 홈 레이아웃 안에서, 마스코트/원석 자리(y≈184)에 패널이 올라오는 형태
         <div
           style={{
             position: 'relative',
@@ -340,150 +643,612 @@ export default function Home() {
         </div>
       )}
 
-      {/* ── 오늘 채집할 원석 ── */}
       {!showBook && (
-      <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column' }}>
-        <h3 style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-text-main)', marginBottom: todayGems.length === 0 ? 6 : 16 }}>
-          오늘 채집할 원석
-        </h3>
-        {todayGems.length === 0 && (
-          <p style={{ fontSize: 12, color: 'var(--color-text-sub)', margin: '0 0 16px' }}>
-            아직 오늘 채집한 원석이 없어요. 카카오톡 챗봇에게 마음을 보내보세요.
-          </p>
-        )}
-
-        {/* 수평 카드 리스트 (스크롤 없이 꽉 차게) */}
-        <div
+        <section
+          aria-label="오늘의 원석함"
           style={{
+            position: 'relative',
+            zIndex: 10,
+            flex: 1,
+            minHeight: 0,
+            marginTop: 0,
+            paddingBottom: 0,
             display: 'flex',
-            gap: 8,
-            width: '100%',
-            paddingBottom: 20,
+            flexDirection: 'column',
           }}
         >
-          {EMOTION_CATEGORIES.map(cat => {
-            const count = gemCounts[cat.code] || 0;
-            const isPopping = poppedCard?.code === cat.code;
-            const disabled = count === 0;
-            return (
-              <button
-                type="button"
-                // poppedCard.nonce가 바뀌면 key가 바뀌어 리마운트 → cardPop이 매 탭마다 처음부터 재생.
-                key={isPopping ? `${cat.code}-${poppedCard.nonce}` : cat.code}
-                onClick={disabled ? undefined : () => handleFeed(cat.code)}
-                disabled={disabled}
-                aria-label={`${cat.label} 원석 ${count}개 — 마스코트에게 먹이기`}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 8,
+              flexShrink: 0,
+            }}
+          >
+            <div>
+              <h3
                 style={{
-                  position: 'relative',
-                  flex: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'flex-start',
-                  padding: '12px 0',
-                  borderRadius: 15,
-                  background: 'white',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
-                  border: 'none',
-                  font: 'inherit',
-                  cursor: disabled ? 'default' : 'pointer',
-                  opacity: disabled ? 0.45 : 1,
-                  transition: 'opacity 0.2s ease, transform 0.1s ease',
-                  animation: isPopping ? 'cardPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' : undefined,
-                  WebkitTapHighlightColor: 'transparent',
-                  touchAction: 'manipulation',
-                  overflow: 'visible',
+                  margin: 0,
+                  color: 'var(--color-text-main)',
+                  fontSize: 16,
+                  fontWeight: 800,
                 }}
               >
-                {/* 상단 컬러 네모 */}
-                <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <GemStone
-                    gem={cardGemByCategory[cat.code]}
-                    size={38}
-                    variant={CATEGORY_REPRESENTATIVE_VARIANT[cat.code]}
-                  />
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-main)', marginBottom: 2, letterSpacing: '-0.5px' }}>
-                  {cat.label}
-                </span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sub)' }}>
-                  x{count}
-                </span>
+                오늘의 원석함
+              </h3>
+              <p
+                style={{
+                  margin: '4px 0 0',
+                  color: 'var(--color-text-sub)',
+                  fontSize: 10,
+                  lineHeight: 1.3,
+                }}
+              >
+                기록한 순서대로 오늘의 감정을 담아둬요.
+              </p>
+            </div>
+            <span
+              style={{
+                flex: '0 0 auto',
+                color: 'var(--color-text-sub)',
+                fontSize: 11,
+                fontWeight: 800,
+              }}
+            >
+              {todayGemBoxRecords.length}개
+            </span>
+          </div>
 
-                {/* 탭 직후 카드 위에 -1 표시 살짝 띄움 */}
-                {isPopping && (
-                  <span
-                    aria-hidden="true"
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${GEM_BOX_SLOT_COUNT}, minmax(0, 1fr))`,
+              gap: 8,
+              flexShrink: 0,
+            }}
+          >
+            {Array.from({ length: GEM_BOX_SLOT_COUNT }).map((_, index) => {
+              const record = todayGemBoxRecords[index];
+              if (!record) {
+                return (
+                  <div
+                    key={`empty-slot-${index}`}
+                    aria-label={`비어있는 원석 슬롯 ${index + 1}`}
                     style={{
-                      position: 'absolute',
-                      top: 4,
-                      right: 6,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: 'var(--color-point-green, #4CAF50)',
-                      animation: 'minusFloat 0.6s ease-out forwards',
-                      pointerEvents: 'none',
+                      height: 76,
+                      borderRadius: 14,
+                      border: '1px dashed rgba(126, 104, 66, 0.2)',
+                      background: 'rgba(255,255,255,0.38)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'rgba(126, 104, 66, 0.38)',
+                      fontSize: 10,
+                      fontWeight: 800,
                     }}
                   >
-                    -1
+                    빈칸
+                  </div>
+                );
+              }
+              const emotionCode = recordEmotionCode(record) ?? 'regret';
+              const emotion = getEmotion(emotionCode);
+              return (
+                <button
+                  key={`gem-box-${record.id}`}
+                  type="button"
+                  onClick={() => openRecordSheet(record.id)}
+                  aria-label={`${formatRecordTime(record.createdAt)} ${emotion?.nameKo ?? emotionCode} 원석 기록 열기`}
+                  style={{
+                    height: 76,
+                    borderRadius: 14,
+                    border: '1px solid rgba(86, 71, 48, 0.1)',
+                    background: 'rgba(255,255,255,0.78)',
+                    boxShadow: '0 6px 18px rgba(86, 71, 48, 0.04)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 3,
+                    padding: '6px 4px',
+                    cursor: 'pointer',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}
+                >
+                  <GemStone
+                    gem={{
+                      id: `gem-box-${record.id}`,
+                      emotionCode,
+                      tier: 1,
+                      createdAt: record.createdAt,
+                      consumedAt: null,
+                    }}
+                    size={30}
+                  />
+                  <strong
+                    style={{
+                      maxWidth: '100%',
+                      color: 'var(--color-text-main)',
+                      fontSize: 10,
+                      fontWeight: 800,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {emotion?.nameKo ?? emotionCode}
+                  </strong>
+                  <span style={{ color: 'var(--color-text-sub)', fontSize: 9, fontWeight: 700 }}>
+                    {formatRecordTime(record.createdAt)}
                   </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {todayGemBoxRecords.length === 0 && (
+            <p
+              style={{
+                margin: '7px 0 0',
+                color: 'var(--color-text-sub)',
+                fontSize: 10,
+                lineHeight: 1.35,
+              }}
+            >
+              {candidateCount > 0
+                ? '확인 필요한 원석을 확정하면 이곳에 시간순으로 들어와요.'
+                : '오늘 확정한 감정 원석이 아직 없어요.'}
+            </p>
+          )}
+        </section>
       )}
+
+      {!showBook && activeRecord && (
+        <section
+          aria-label={activeStatus === 'candidate' ? '확인 필요한 기록' : '감정 기록'}
+          style={{
+            position: 'absolute',
+            left: 16,
+            right: 16,
+            bottom: 76,
+            zIndex: 30,
+            padding: 16,
+            borderRadius: 18,
+            background: '#FFFFFF',
+            border: '1px solid rgba(160, 188, 168, 0.45)',
+            boxShadow: '0 12px 30px rgba(61, 107, 80, 0.18)',
+            animation: 'sheetUp 0.24s ease-out',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <p style={{ margin: 0, color: 'var(--color-point-green)', fontSize: 12, fontWeight: 800 }}>
+                {activeStatus === 'candidate'
+                  ? 'AI가 감정을 읽어봤어요'
+                  : activeNeedsWebReview
+                    ? '저장된 감정을 살펴봐요'
+                    : '오늘의 감정 기록'}
+              </p>
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  background: '#FAF7F0',
+                  border: '1px solid rgba(86, 71, 48, 0.08)',
+                }}
+              >
+                <span style={{ display: 'block', color: 'var(--color-text-sub)', fontSize: 10, fontWeight: 800, marginBottom: 4 }}>
+                  오늘 남긴 기록
+                </span>
+                <p
+                  style={{
+                    margin: 0,
+                    color: 'var(--color-text-main)',
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {activeRecord.recordText || (activeRecord.hasPhoto ? '사진으로 남긴 일상 기록' : '짧은 일상 기록')}
+                </p>
+              </div>
+              <p
+                style={{
+                  margin: '8px 0 0',
+                  color: 'var(--color-text-sub)',
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                }}
+              >
+                {activeStatus === 'candidate'
+                  ? suggestedEmotion
+                    ? `AI가 이 감정을 ${suggestedEmotion.nameKo} 원석으로 읽었어요. 맞나요?`
+                    : '이 기록은 어떤 감정이었나요? 가장 가까운 감정을 골라주세요.'
+                  : activeNeedsWebReview
+                    ? `챗봇에서 ${activeEmotion?.nameKo ?? '감정'} 원석으로 저장한 감정이에요. 그대로 확정하거나, 잠깐 다시 생각해볼 수 있어요.`
+                    : `${activeEmotion?.nameKo ?? '감정'} 원석으로 저장되어 있어요.`}
+              </p>
+              {activeStatus === 'confirmed' && activeEmotionCode && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 12px',
+                    borderRadius: 12,
+                    background: 'rgba(247, 242, 234, 0.82)',
+                    border: '1px solid rgba(86, 71, 48, 0.08)',
+                  }}
+                >
+                  <GemStone
+                    gem={{
+                      id: `active-${activeRecord.id}`,
+                      emotionCode: activeEmotionCode,
+                      tier: 1,
+                      createdAt: activeRecord.createdAt,
+                      consumedAt: null,
+                    }}
+                    size={34}
+                  />
+                  <div>
+                    <span
+                      style={{
+                        display: 'block',
+                        fontSize: 10,
+                        color: 'var(--color-text-sub)',
+                        fontWeight: 800,
+                        marginBottom: 2,
+                      }}
+                    >
+                      저장된 원석
+                    </span>
+                    <strong style={{ fontSize: 13, color: 'var(--color-text-main)' }}>
+                      {activeEmotion?.nameKo ?? activeEmotionCode} 원석
+                    </strong>
+                  </div>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={closeRecordSheet}
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                border: '1px solid #EDE2CC',
+                background: '#F7F2EA',
+                color: 'var(--color-text-sub)',
+                cursor: 'pointer',
+                flex: '0 0 auto',
+              }}
+              aria-label="기록 닫기"
+            >
+              ×
+            </button>
+          </div>
+
+          {activeStatus === 'candidate' && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: suggestedEmotion ? '1fr 1fr' : '1fr',
+                gap: 8,
+                marginTop: 14,
+              }}
+            >
+              {suggestedEmotion && (
+                <button
+                  type="button"
+                  disabled={savingId === activeRecord.id}
+                  onClick={() => void handleConfirmRecord(suggestedEmotion.code)}
+                  style={{
+                    minHeight: 44,
+                    border: 'none',
+                    borderRadius: 12,
+                    background: 'var(--color-point-green)',
+                    color: '#FFFFFF',
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
+                  }}
+                >
+                  맞아요
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={savingId === activeRecord.id}
+                onClick={() => setEmotionPickerOpen((open) => !open)}
+                style={{
+                  minHeight: 44,
+                  border: '1px solid rgba(86, 71, 48, 0.16)',
+                  borderRadius: 12,
+                  background: '#F7F2EA',
+                  color: 'var(--color-text-main)',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
+                }}
+              >
+                다른 감정 선택
+              </button>
+            </div>
+          )}
+
+          {activeNeedsWebReview && reflectionMode === 'idle' && activeEmotionCode && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 8,
+                marginTop: 14,
+              }}
+            >
+              <button
+                type="button"
+                disabled={savingId === activeRecord.id}
+                onClick={() =>
+                  void handleConfirmRecord(activeEmotionCode, {
+                    interaction: 'confirm',
+                    reflectionType: 'none',
+                  })
+                }
+                style={{
+                  minHeight: 44,
+                  border: 'none',
+                  borderRadius: 12,
+                  background: 'var(--color-point-green)',
+                  color: '#FFFFFF',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
+                }}
+              >
+                이대로 확정
+              </button>
+              <button
+                type="button"
+                disabled={savingId === activeRecord.id}
+                onClick={() => {
+                  setReflectionMode('choice');
+                  setEmotionPickerOpen(false);
+                }}
+                style={{
+                  minHeight: 44,
+                  border: '1px solid rgba(86, 71, 48, 0.16)',
+                  borderRadius: 12,
+                  background: '#F7F2EA',
+                  color: 'var(--color-text-main)',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
+                }}
+              >
+                다시 생각해보기
+              </button>
+            </div>
+          )}
+
+          {activeNeedsWebReview && reflectionMode === 'choice' && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: 12,
+                borderRadius: 12,
+                background: '#FAF7F0',
+                border: '1px solid rgba(86, 71, 48, 0.08)',
+              }}
+            >
+              <p style={{ margin: '0 0 10px', color: 'var(--color-text-main)', fontSize: 12, lineHeight: 1.45, fontWeight: 700 }}>
+                감정을 바꾸기 전에 한 번만 마음을 확인해볼까요?
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedReflectionType('question');
+                    setReflectionMode('question');
+                  }}
+                  style={{
+                    minHeight: 42,
+                    border: '1px solid rgba(61, 107, 80, 0.18)',
+                    borderRadius: 12,
+                    background: '#FFFFFF',
+                    color: 'var(--color-text-main)',
+                    fontSize: 12,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  자기인지 질문
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedReflectionType('meditation');
+                    setMeditationRemaining(5);
+                    setReflectionMode('meditation');
+                  }}
+                  style={{
+                    minHeight: 42,
+                    border: '1px solid rgba(61, 107, 80, 0.18)',
+                    borderRadius: 12,
+                    background: '#FFFFFF',
+                    color: 'var(--color-text-main)',
+                    fontSize: 12,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  5초 명상
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeNeedsWebReview && reflectionMode === 'question' && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: 12,
+                borderRadius: 12,
+                background: '#FAF7F0',
+                border: '1px solid rgba(86, 71, 48, 0.08)',
+              }}
+            >
+              <span style={{ display: 'block', marginBottom: 4, color: 'var(--color-point-green)', fontSize: 10, fontWeight: 800 }}>
+                자기인지 질문
+              </span>
+              <p style={{ margin: '0 0 10px', color: 'var(--color-text-main)', fontSize: 12, lineHeight: 1.45 }}>
+                그 순간 가장 크게 남아 있던 느낌은 무엇에 가까웠나요?
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setReflectionMode('picker');
+                  setEmotionPickerOpen(true);
+                }}
+                style={{
+                  width: '100%',
+                  minHeight: 40,
+                  border: 'none',
+                  borderRadius: 12,
+                  background: 'var(--color-point-green)',
+                  color: '#FFFFFF',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                감정 다시 선택
+              </button>
+            </div>
+          )}
+
+          {activeNeedsWebReview && reflectionMode === 'meditation' && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: 12,
+                borderRadius: 12,
+                background: '#FAF7F0',
+                border: '1px solid rgba(86, 71, 48, 0.08)',
+              }}
+            >
+              <span style={{ display: 'block', marginBottom: 4, color: 'var(--color-point-green)', fontSize: 10, fontWeight: 800 }}>
+                5초 명상
+              </span>
+              <p style={{ margin: '0 0 10px', color: 'var(--color-text-main)', fontSize: 12, lineHeight: 1.45 }}>
+                천천히 숨을 고르고, 지금 남아 있는 감정에 가까운 원석을 골라주세요.
+              </p>
+              <button
+                type="button"
+                disabled={meditationRemaining > 0}
+                onClick={() => {
+                  setReflectionMode('picker');
+                  setEmotionPickerOpen(true);
+                }}
+                style={{
+                  width: '100%',
+                  minHeight: 40,
+                  border: 'none',
+                  borderRadius: 12,
+                  background: meditationRemaining > 0 ? '#D9CEB8' : 'var(--color-point-green)',
+                  color: '#FFFFFF',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: meditationRemaining > 0 ? 'wait' : 'pointer',
+                }}
+              >
+                {meditationRemaining > 0 ? `${meditationRemaining}초 후 선택` : '감정 다시 선택'}
+              </button>
+            </div>
+          )}
+
+          {showEmotionGrid && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, marginTop: 10 }}>
+              {EMOTIONS.map((emotion) => (
+                <button
+                  key={emotion.code}
+                  type="button"
+                  disabled={savingId === activeRecord.id}
+                  onClick={() =>
+                    void handleConfirmRecord(emotion.code, {
+                      interaction: activeStatus === 'candidate' ? 'confirm' : 'reclassify',
+                      reflectionType: activeStatus === 'candidate' ? 'none' : selectedReflectionType,
+                    })
+                  }
+                  style={{
+                    minHeight: 40,
+                    border: `1px solid ${emotion.hexColor}66`,
+                    borderRadius: 10,
+                    background: `${emotion.hexColor}18`,
+                    color: 'var(--color-text-main)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
+                  }}
+                >
+                  {emotion.nameKo}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <p style={{ margin: '10px 0 0', fontSize: 11, lineHeight: 1.5, color: 'var(--color-text-sub)' }}>
+            저장된 감정은 캘린더에서도 같은 상태로 보여요.
+          </p>
+        </section>
+      )}
+
+      {recordToast && (
+        <div
+          role="status"
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: 118,
+            transform: 'translateX(-50%)',
+            zIndex: 60,
+            padding: '9px 14px',
+            borderRadius: 999,
+            background: 'rgba(61, 107, 80, 0.92)',
+            color: '#FFFFFF',
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          {recordToast}
+        </div>
+      )}
+
       <style>{`
-        @keyframes scaleUp {
-          from { transform: scale(0.95); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
-        }
         @keyframes slideDown {
           from { transform: translateY(-8px); opacity: 0; }
           to { transform: translateY(0); opacity: 1; }
         }
-        /* 마스코트 항상 살짝 숨쉬듯 — 미세한 상하 이동 + 스케일 */
+        @keyframes sheetUp {
+          from { transform: translateY(16px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes candidateGemPulse {
+          0%, 100% { transform: scale(1); opacity: 0.78; }
+          50%      { transform: scale(1.07); opacity: 1; }
+        }
+        @keyframes gemFloat {
+          0%, 100% { transform: translateY(0); }
+          50%      { transform: translateY(-2px); }
+        }
         @keyframes mascotBreathe {
           0%, 100% { transform: translateY(0) scale(1); }
           50%      { transform: translateY(-3px) scale(1.015); }
         }
-        /* 카드 탭 시 마스코트가 한 번 통통 튀며 먹는 모션 */
-        @keyframes mascotMunch {
-          0%   { transform: translateY(0) scaleX(1) scaleY(1) rotate(0deg); }
-          18%  { transform: translateY(-10px) scaleX(0.92) scaleY(1.10) rotate(-3deg); }
-          38%  { transform: translateY(4px) scaleX(1.06) scaleY(0.92) rotate(2deg); }
-          60%  { transform: translateY(-4px) scaleX(0.98) scaleY(1.04) rotate(-1deg); }
-          82%  { transform: translateY(1px) scaleX(1.02) scaleY(0.98) rotate(0.5deg); }
-          100% { transform: translateY(0) scaleX(1) scaleY(1) rotate(0deg); }
-        }
-        /* 카드 탭 피드백 — 살짝 눌렸다가 통통 튀어오름 */
-        @keyframes cardPop {
-          0%   { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
-          25%  { transform: scale(0.93); box-shadow: 0 1px 4px  rgba(0,0,0,0.06); }
-          60%  { transform: scale(1.06); box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
-          100% { transform: scale(1);    box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
-        }
-        /* 마스코트 주변 반짝임 입자 */
-        @keyframes sparklePop {
-          0%   { transform: translateY(0) scale(0.4) rotate(0deg);   opacity: 0; }
-          25%  { transform: translateY(-4px) scale(1.1) rotate(20deg); opacity: 1; }
-          100% { transform: translateY(-22px) scale(0.5) rotate(80deg); opacity: 0; }
-        }
-        /* 카드에서 살짝 떠오르는 -1 인디케이터 */
-        @keyframes minusFloat {
-          0%   { transform: translateY(0) scale(0.6);  opacity: 0; }
-          25%  { transform: translateY(-2px) scale(1); opacity: 1; }
-          100% { transform: translateY(-22px) scale(0.95); opacity: 0; }
-        }
-        /* 새 원석이 마스코트 주변에 떨어질 때 사용 */
-        @keyframes gemDropIn {
-          0%   { transform: translate(-50%, -130%) scale(0.6); opacity: 0; }
-          70%  { transform: translate(-50%, -42%)  scale(1.08); opacity: 1; }
-          100% { transform: translate(-50%, -50%)  scale(1);    opacity: 1; }
-        }
         @media (prefers-reduced-motion: reduce) {
-          /* 모션 줄이기 환경에선 호흡/먹기 애니 끄고 색·텍스트만 갱신 */
           *, *::before, *::after {
             animation-duration: 0.01ms !important;
             animation-iteration-count: 1 !important;

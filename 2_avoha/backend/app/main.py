@@ -23,6 +23,7 @@ from app.routes import (
     inventory,
     me,
     ops,
+    records,
     sse,
     webhook,
 )
@@ -106,6 +107,7 @@ app.include_router(webhook.router)
 app.include_router(inventory.router)
 app.include_router(crafting.router)
 app.include_router(ops.router)
+app.include_router(records.router)
 app.include_router(sse.router)
 app.include_router(events.router)
 app.include_router(field.router)

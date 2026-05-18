@@ -5,7 +5,12 @@ import { api } from './api';
 export type InventoryEvent =
   | { type: 'gem_added'; gem: { id: string; emotionCode: string; tier: number; source: string | null } }
   | { type: 'sticker_added'; sticker: { id: string; imageUrl: string } }
-  | { type: 'gem_consumed'; ids: string[] }
+  | {
+      type: 'record_updated';
+      recordId: number;
+      emotionCode: string;
+      classificationStatus: string;
+    }
   | { type: 'ping' };
 
 export interface InventorySubscriptionOpts {
@@ -18,7 +23,10 @@ export interface InventorySubscriptionOpts {
  * Long-lived SSE 구독. browser EventSource 가 자동 재연결 처리. `.close()` 호출로 종료.
  */
 export function subscribeInventory(opts: InventorySubscriptionOpts): () => void {
-  const source = new EventSource(`${api.base}/sse/inventory`, { withCredentials: true });
+  const token = api.getToken();
+  const url = new URL(`${api.base}/sse/inventory`);
+  if (token) url.searchParams.set('token', token);
+  const source = new EventSource(url.toString(), { withCredentials: true });
 
   source.onopen = () => opts.onOpen?.();
   source.onmessage = (e) => {
