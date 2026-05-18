@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calendarRecordEmotionCode, calendarRecordNeedsReclassification } from './Calendar';
+import { buildRecordReflection, calendarRecordEmotionCode, calendarRecordNeedsReclassification } from './Calendar';
 import type { RecordDto } from '../lib/api';
 
 const baseRecord: RecordDto = {
@@ -38,5 +38,22 @@ describe('Calendar record reclassification helpers', () => {
 
     expect(calendarRecordNeedsReclassification(confirmed)).toBe(false);
     expect(calendarRecordEmotionCode(confirmed)).toBe('joy');
+  });
+
+  it('keeps chatbot self-awareness question and answer with the calendar record detail', () => {
+    const reflection = buildRecordReflection({
+      ...baseRecord,
+      questionText: '그 순간 가장 크게 남아 있던 느낌은 무엇에 가까웠나요?',
+      answerText: '회의 뒤에 긴장이 남아 있었어요.',
+    });
+
+    expect(reflection).toEqual({
+      question: '그 순간 가장 크게 남아 있던 느낌은 무엇에 가까웠나요?',
+      answer: '회의 뒤에 긴장이 남아 있었어요.',
+    });
+  });
+
+  it('does not render an empty reflection block when the record has no question', () => {
+    expect(buildRecordReflection(baseRecord)).toBeNull();
   });
 });

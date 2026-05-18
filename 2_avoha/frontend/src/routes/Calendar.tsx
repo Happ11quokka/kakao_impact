@@ -66,6 +66,19 @@ export function calendarRecordNeedsReclassification(record: RecordDto): boolean 
   return record.classificationStatus === 'needs_confirmation' || !calendarRecordEmotionCode(record);
 }
 
+export type RecordReflection = {
+  question: string;
+  answer: string | null;
+};
+
+export function buildRecordReflection(record: RecordDto): RecordReflection | null {
+  const question = record.questionText?.trim();
+  if (!question) return null;
+
+  const answer = record.answerText?.trim() || null;
+  return { question, answer };
+}
+
 export default function Calendar() {
   const today = new Date();
   const [viewYear, setViewYear] = useState(today.getFullYear());
@@ -404,6 +417,7 @@ function RecordDetail({ record, onOpenPicker }: { record: RecordDto; onOpenPicke
   const needsReclassification = calendarRecordNeedsReclassification(record);
   const emotionCode = calendarRecordEmotionCode(record);
   const emotion = emotionCode ? getEmotion(emotionCode) : undefined;
+  const reflection = buildRecordReflection(record);
 
   return (
     <div>
@@ -433,6 +447,19 @@ function RecordDetail({ record, onOpenPicker }: { record: RecordDto; onOpenPicke
           <div style={styles.recordLabel}>기록 내용</div>
           <p style={styles.recordText}>{record.recordText}</p>
         </>
+      )}
+
+      {reflection && (
+        <div style={styles.reflectionBox}>
+          <div style={styles.recordLabel}>자기인지 질문</div>
+          <p style={styles.reflectionQuestion}>{reflection.question}</p>
+          {reflection.answer && (
+            <>
+              <div style={styles.reflectionAnswerLabel}>답변</div>
+              <p style={styles.reflectionAnswer}>{reflection.answer}</p>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
@@ -743,6 +770,35 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 11,
     lineHeight: 1.55,
     margin: '0 0 10px',
+    wordBreak: 'keep-all',
+    overflowWrap: 'anywhere',
+  },
+  reflectionBox: {
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    background: 'rgba(255, 255, 255, 0.2)',
+    border: '1px solid rgba(255, 255, 255, 0.22)',
+  },
+  reflectionQuestion: {
+    margin: '0 0 8px',
+    color: TEXT_MAIN,
+    fontSize: 11,
+    lineHeight: 1.45,
+    fontWeight: 700,
+    wordBreak: 'keep-all',
+  },
+  reflectionAnswerLabel: {
+    margin: '8px 0 4px',
+    color: TEXT_SUB,
+    fontSize: 9,
+    fontWeight: 800,
+  },
+  reflectionAnswer: {
+    margin: 0,
+    color: TEXT_MAIN,
+    fontSize: 11,
+    lineHeight: 1.5,
     wordBreak: 'keep-all',
     overflowWrap: 'anywhere',
   },

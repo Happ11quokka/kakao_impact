@@ -121,6 +121,10 @@ export interface ChatbotRecordDto {
   hasPhoto: boolean;
   imageUrl: string | null;
   aiGems: string | null;
+  questionId?: string | null;
+  questionText?: string | null;
+  answerText?: string | null;
+  linkedDate?: string | null;
   createdAt: string;
 }
 
@@ -190,6 +194,10 @@ let mockRecords: RecordDto[] = [
     hasPhoto: false,
     imageUrl: null,
     aiGems: '기쁨',
+    questionId: 'q-joy-1',
+    questionText: '그 순간 마음에 가장 오래 남은 장면은 무엇이었나요?',
+    answerText: '햇빛이 좋았고 몸이 조금 가벼워졌어요.',
+    linkedDate: mockYesterday.slice(0, 10),
     createdAt: mockYesterday,
     entryMode: 'emotion_classification',
     classificationStatus: 'user_confirmed',
@@ -289,13 +297,17 @@ function mockRequest<T>(path: string, init: JsonInit): T | undefined {
   if (pathname === '/inventory/chatbot-records') {
     return {
       records: mockRecords.map(
-        ({ id, gem, recordText, hasPhoto, imageUrl, aiGems, createdAt }) => ({
+        ({ id, gem, recordText, hasPhoto, imageUrl, aiGems, questionId, questionText, answerText, linkedDate, createdAt }) => ({
           id,
           gem,
           recordText,
           hasPhoto,
           imageUrl,
           aiGems,
+          questionId,
+          questionText,
+          answerText,
+          linkedDate,
           createdAt,
         }),
       ),

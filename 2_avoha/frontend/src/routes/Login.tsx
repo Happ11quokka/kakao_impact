@@ -1,7 +1,8 @@
 // === Login — 카카오 로그인 진입 화면 + 챗봇 해시(kakao_hash) 캡처 ===
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, DEV_AUTH_ENABLED } from '../lib/api';
+import { useAuthStore } from '../stores/auth-store';
 import ChibiAvatar from '../components/field/ChibiAvatar';
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -25,6 +26,12 @@ export default function Login() {
     return new URLSearchParams(window.location.search).get('kakao_hash');
   });
   const [attaching, setAttaching] = useState(false);
+
+  const handleDevEnter = () => {
+    api.setToken('dev-token');
+    useAuthStore.setState({ status: 'idle' });
+    navigate('/', { replace: true });
+  };
 
   // ?kakao_hash= 도착 처리:
   //  - URL 에서 즉시 제거 (히스토리/북마크 노출 방지)
@@ -137,6 +144,26 @@ export default function Login() {
         <span style={{ fontSize: 18 }}>💬</span>
         카카오로 시작하기
       </a>
+
+      {DEV_AUTH_ENABLED && (
+        <button
+          type="button"
+          onClick={handleDevEnter}
+          style={{
+            border: '1px solid rgba(90, 75, 60, 0.18)',
+            background: 'rgba(255, 255, 255, 0.72)',
+            color: 'var(--color-ink)',
+            borderRadius: 'var(--radius-full)',
+            padding: '12px 24px',
+            minWidth: 240,
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          개발용으로 바로 입장
+        </button>
+      )}
 
       <p style={{ fontSize: 11, color: 'var(--color-ink-muted)', textAlign: 'center', lineHeight: 1.6 }}>
         로그인 시 프로필(닉네임 · 프로필 이미지) 정보만

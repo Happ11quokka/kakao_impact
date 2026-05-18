@@ -8,7 +8,12 @@ import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
 import { EMOTION_VARIANTS_BY_CATEGORY } from '../data/emotion-variants';
 import GemStone from '../components/pixel/GemStone';
 
-type Period = 'weekly' | 'monthly' | 'custom';
+export type Period = 'weekly' | 'monthly' | 'custom';
+
+export type CustomRange = {
+  start: string;
+  end: string;
+};
 
 type Category = {
   code: CategoryCode;
@@ -18,7 +23,7 @@ type Category = {
   details: string[];
 };
 
-type AnalysisItem = {
+export type AnalysisItem = {
   id: string;
   emotionCode: string;
   category: CategoryCode;
@@ -26,6 +31,29 @@ type AnalysisItem = {
   color: string;
   createdAt: string;
   recordText?: string | null;
+  imageUrl?: string | null;
+};
+
+export type RecapTheme = {
+  id: string;
+  title: string;
+  caption: string;
+  tone: string;
+  records: AnalysisItem[];
+};
+
+export type RecapDialogState = {
+  title: string;
+  caption: string;
+  records: AnalysisItem[];
+  emptyMessage: string;
+};
+
+export type PatternPanelState = {
+  expanded: true;
+  toggleLabel: null;
+  layoutRole: 'primary-fill';
+  minVisibleRows: number;
 };
 
 const CATEGORIES: Category[] = [
@@ -56,7 +84,7 @@ function detailForItem(code: string, index: number): string {
   return category.details[index % category.details.length];
 }
 
-function dateInPeriod(date: Date, period: Period, today: Date): boolean {
+export function dateInAnalysisPeriod(date: Date, period: Period, today: Date, customRange?: CustomRange): boolean {
   if (period === 'weekly') {
     const start = startOfWeek(today).getTime();
     const end = start + 7 * 24 * 60 * 60 * 1000;
@@ -64,6 +92,11 @@ function dateInPeriod(date: Date, period: Period, today: Date): boolean {
   }
   if (period === 'monthly') {
     return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth();
+  }
+  if (customRange?.start && customRange?.end) {
+    const start = new Date(`${customRange.start}T00:00:00.000Z`);
+    const end = new Date(`${customRange.end}T23:59:59.999Z`);
+    return date.getTime() >= start.getTime() && date.getTime() <= end.getTime();
   }
   const start = new Date(today);
   start.setHours(0, 0, 0, 0);
@@ -85,20 +118,123 @@ function gemToItem(gem: Gem, index: number): AnalysisItem {
   };
 }
 
-function recordToTextByDate(records: ChatbotRecordDto[]): Record<string, string> {
-  const byDate: Record<string, string> = {};
+function recordToDataByDate(records: ChatbotRecordDto[]): Record<string, Pick<ChatbotRecordDto, 'recordText' | 'imageUrl' | 'hasPhoto'>> {
+  const byDate: Record<string, Pick<ChatbotRecordDto, 'recordText' | 'imageUrl' | 'hasPhoto'>> = {};
   records.forEach((record) => {
-    if (!record.recordText) return;
+    if (!record.recordText && !record.imageUrl) return;
     const key = toDateKey(new Date(record.createdAt));
-    if (!byDate[key]) byDate[key] = record.recordText;
+    if (!byDate[key]) {
+      byDate[key] = {
+        recordText: record.recordText,
+        imageUrl: record.imageUrl,
+        hasPhoto: record.hasPhoto,
+      };
+    }
   });
   return byDate;
 }
 
+export function buildAnalysisItems(
+  gems: Gem[],
+  records: ChatbotRecordDto[],
+  period: Period,
+  today: Date,
+  customRange?: CustomRange,
+): AnalysisItem[] {
+  const recordDataByDate = recordToDataByDate(records);
+  return gems
+    .map(gemToItem)
+    .filter((item) => dateInAnalysisPeriod(new Date(item.createdAt), period, today, customRange))
+    .map((item) => {
+      const recordData = recordDataByDate[toDateKey(new Date(item.createdAt))];
+      return {
+        ...item,
+        recordText: item.recordText ?? recordData?.recordText,
+        imageUrl: recordData?.imageUrl ?? null,
+      };
+    });
+}
+
+export function buildRecapThemes(items: AnalysisItem[], periodLabel: string): RecapTheme[] {
+  const sorted = [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const counts = new Map<CategoryCode, number>();
+  sorted.forEach((item) => counts.set(item.category, (counts.get(item.category) ?? 0) + 1));
+  const topCategory = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'joy';
+  const topCategoryMeta = CATEGORY_BY_CODE[topCategory];
+  const topCategoryRecords = sorted.filter((item) => item.category === topCategory).slice(0, 5);
+  const photoRecords = sorted.filter((item) => item.imageUrl).slice(0, 5);
+  const reflectionRecords = sorted.filter((item) => item.recordText).slice(0, 5);
+  const careRecords = sorted.filter((item) => item.category !== 'joy').slice(0, 5);
+
+  const themes: RecapTheme[] = [
+    {
+      id: 'dominant',
+      title: `${periodLabel} 가장 또렷한 감정`,
+      caption: topCategoryRecords.length
+        ? `${topCategoryMeta.label} 계열 기록 ${topCategoryRecords.length}개를 다시 볼 수 있어요.`
+        : '아직 또렷한 감정 흐름이 쌓이지 않았어요.',
+      tone: topCategoryMeta.soft,
+      records: topCategoryRecords,
+    },
+    {
+      id: 'photos',
+      title: '사진이 있는 순간',
+      caption: photoRecords.length ? '이미지와 함께 남은 장면만 모았어요.' : '사진으로 남은 기록은 아직 없어요.',
+      tone: '#E7EDF2',
+      records: photoRecords,
+    },
+    {
+      id: 'reflection',
+      title: '돌아볼 기록',
+      caption: reflectionRecords.length ? '텍스트가 남아 있어 다시 읽기 좋은 기록이에요.' : '텍스트 기록이 쌓이면 이곳에서 회고할 수 있어요.',
+      tone: '#F1E8BD',
+      records: reflectionRecords,
+    },
+  ];
+
+  if (careRecords.length > 0) {
+    themes.push({
+      id: 'care',
+      title: '살펴볼 마음',
+      caption: '조금 묵직했던 감정들을 조심스럽게 모았어요.',
+      tone: '#EBDDD9',
+      records: careRecords,
+    });
+  }
+
+  return themes;
+}
+
+export function buildRecapDialogState(theme: RecapTheme | null | undefined): RecapDialogState | null {
+  if (!theme) return null;
+  return {
+    title: theme.title,
+    caption: theme.caption,
+    records: theme.records,
+    emptyMessage: '이 테마에 해당하는 기록은 아직 없어요.',
+  };
+}
+
+export function buildPatternPanelState(categoryCount: number): PatternPanelState {
+  return {
+    expanded: true,
+    toggleLabel: null,
+    layoutRole: 'primary-fill',
+    minVisibleRows: Math.max(categoryCount, CATEGORIES.length),
+  };
+}
+
 export default function Analysis() {
   const today = useMemo(() => new Date(), []);
+  const defaultCustomRange = useMemo(() => {
+    const start = new Date(today);
+    start.setDate(today.getDate() - 13);
+    return { start: toDateKey(start), end: toDateKey(today) };
+  }, [today]);
   const [period, setPeriod] = useState<Period>('weekly');
+  const [customRange, setCustomRange] = useState<CustomRange>(defaultCustomRange);
   const [selectedCategory, setSelectedCategory] = useState<CategoryCode>('sadness');
+  const [activeRecapThemeId, setActiveRecapThemeId] = useState<string | null>(null);
   const { gems, fetchInventory } = useInventoryStore();
   const [records, setRecords] = useState<ChatbotRecordDto[]>([]);
 
@@ -107,17 +243,9 @@ export default function Analysis() {
     api.chatbotRecords(200).then((res) => setRecords(res.records)).catch(() => {});
   }, [fetchInventory]);
 
-  const recordTextByDate = useMemo(() => recordToTextByDate(records), [records]);
-
   const items = useMemo(() => {
-    return gems
-      .map(gemToItem)
-      .filter((item) => dateInPeriod(new Date(item.createdAt), period, today))
-      .map((item) => ({
-        ...item,
-        recordText: item.recordText ?? recordTextByDate[toDateKey(new Date(item.createdAt))],
-      }));
-  }, [gems, period, recordTextByDate, today]);
+    return buildAnalysisItems(gems, records, period, today, period === 'custom' ? customRange : undefined);
+  }, [customRange, gems, period, records, today]);
 
   const categoryStats = useMemo(() => {
     const total = Math.max(items.length, 1);
@@ -136,45 +264,14 @@ export default function Analysis() {
     return [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 3);
   }, [items]);
 
-  const selectedDetails = useMemo(() => {
-    const category = CATEGORY_BY_CODE[selectedCategory];
-    const details = category.details.map((label) => ({
-      label,
-      count: items.filter((item) => item.category === selectedCategory && item.label === label).length,
-    }));
-    const selectedCount = items.filter((item) => item.category === selectedCategory).length;
-    if (selectedCount > 0 && details.every((detail) => detail.count === 0)) details[0].count = selectedCount;
-    return details.map((detail, index) => ({
-      ...detail,
-      count: detail.count || (index === 0 ? selectedCount : 0),
-      pct: selectedCount ? Math.round(((detail.count || (index === 0 ? selectedCount : 0)) / selectedCount) * 100) : 0,
-    }));
-  }, [items, selectedCategory]);
-
-  const timeStats = useMemo(() => {
-    const buckets = [
-      { label: '아침', start: 5, end: 11, count: 0 },
-      { label: '낮', start: 11, end: 17, count: 0 },
-      { label: '저녁', start: 17, end: 22, count: 0 },
-      { label: '밤', start: 22, end: 29, count: 0 },
-    ];
-    items.forEach((item) => {
-      const hour = new Date(item.createdAt).getHours();
-      const normalized = hour < 5 ? hour + 24 : hour;
-      const bucket = buckets.find((entry) => normalized >= entry.start && normalized < entry.end) ?? buckets[0];
-      bucket.count += 1;
-    });
-    const max = Math.max(...buckets.map((bucket) => bucket.count), 1);
-    return buckets.map((bucket) => ({ ...bucket, pct: Math.round((bucket.count / max) * 100) }));
-  }, [items]);
-
   const topCategory = categoryStats.slice().sort((a, b) => b.count - a.count)[0] ?? CATEGORIES[0];
-  const positiveCount = items.filter((item) => item.category === 'joy').length;
-  const negativeCount = items.filter((item) => item.category === 'sadness' || item.category === 'anger' || item.category === 'anxiety').length;
-  const careNeeded = items.length > 0 && negativeCount / items.length >= 0.7;
   const activeDays = new Set(items.map((item) => toDateKey(new Date(item.createdAt)))).size;
-  const periodLabel = period === 'weekly' ? '이번 주' : period === 'monthly' ? '이번 달' : '최근 2주';
+  const periodLabel = period === 'weekly' ? '이번 주' : period === 'monthly' ? '이번 달' : `${customRange.start} ~ ${customRange.end}`;
   const selectedCategoryMeta = CATEGORY_BY_CODE[selectedCategory];
+  const patternPanel = buildPatternPanelState(categoryStats.length);
+  const recapThemes = useMemo(() => buildRecapThemes(items, periodLabel), [items, periodLabel]);
+  const activeRecapTheme = recapThemes.find((theme) => theme.id === activeRecapThemeId) ?? null;
+  const recapDialog = buildRecapDialogState(activeRecapTheme);
 
   return (
     <div style={styles.screen}>
@@ -210,6 +307,31 @@ export default function Analysis() {
         ))}
       </div>
 
+      {period === 'custom' && (
+        <div style={styles.customRange} aria-label="직접 기간 선택">
+          <label style={styles.dateLabel}>
+            시작
+            <input
+              type="date"
+              value={customRange.start}
+              max={customRange.end}
+              onChange={(event) => setCustomRange((range) => ({ ...range, start: event.target.value }))}
+              style={styles.dateInput}
+            />
+          </label>
+          <label style={styles.dateLabel}>
+            종료
+            <input
+              type="date"
+              value={customRange.end}
+              min={customRange.start}
+              onChange={(event) => setCustomRange((range) => ({ ...range, end: event.target.value }))}
+              style={styles.dateInput}
+            />
+          </label>
+        </div>
+      )}
+
       <main className="no-scrollbar" style={styles.content}>
         <section style={styles.summaryBand}>
           <div style={styles.summaryText}>
@@ -231,22 +353,35 @@ export default function Analysis() {
             )}
           </div>
           {items.length > 0 && (
-            <div style={styles.topGemCluster} aria-label="상위 감정 원석">
-              {topItems.map((item, index) => (
-                <GemBubble
-                key={item.label}
-                label={item.label}
-                emotionCode={item.emotionCode}
-                count={item.count}
-                large={index === 0}
-              />
-              ))}
+            <div style={styles.gemCase} aria-label="감정 요약 원석함">
+              <span style={styles.gemCaseLid}>요약 원석함</span>
+              <div style={styles.topGemCluster}>
+                {topItems.map((item, index) => (
+                  <GemBubble
+                    key={item.label}
+                    label={item.label}
+                    emotionCode={item.emotionCode}
+                    count={item.count}
+                    large={index === 0}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </section>
 
-        <section style={styles.section}>
-          <SectionHeader title="감정 패턴 시각화" caption="계열별 분포 / 직전 기간 대비" />
+        <section style={styles.patternSection} aria-label="감정 패턴 시각화">
+          <div style={styles.patternHeader}>
+            <span>
+              <span style={styles.sectionTitle}>감정 패턴 시각화</span>
+              <span style={styles.sectionCaption}>
+                {items.length === 0
+                  ? '계열별 분포를 바로 볼 수 있게 펼쳐두었어요'
+                  : `${selectedCategoryMeta.label} 계열 ${categoryStats.find((category) => category.code === selectedCategory)?.count ?? 0}개 · 화면 안에 바로 보기`}
+              </span>
+            </span>
+            <span style={styles.patternBadge}>{patternPanel.minVisibleRows}계열</span>
+          </div>
           <div style={styles.barList}>
             {categoryStats.map((category) => (
               <button
@@ -275,114 +410,84 @@ export default function Analysis() {
           </div>
         </section>
 
-        <section style={styles.detailBand}>
-          <SectionHeader title="계열별 세부 감정 분석" caption={`${selectedCategoryMeta.label} 안에서 더 자세히 보기`} />
-          <div style={styles.detailList}>
-            {selectedDetails.map((detail) => (
-              <div key={detail.label} style={styles.detailRow}>
-                <span style={styles.detailLabel}>{detail.label}</span>
-                <span style={styles.detailTrack}>
-                  <span
-                    style={{
-                      ...styles.detailFill,
-                      width: `${Math.max(detail.pct, detail.count ? 14 : 4)}%`,
-                      background: selectedCategoryMeta.color,
-                    }}
-                  />
-                </span>
-                <span style={styles.detailCount}>{detail.count}</span>
-              </div>
+        <section style={styles.recapBand}>
+          <SectionHeader title="주간·월간 감정 recap" />
+          <div className="no-scrollbar" style={styles.recapSlider} aria-label="감정 리캡 테마">
+            {recapThemes.map((theme) => (
+              <button
+                key={theme.id}
+                type="button"
+                onClick={() => setActiveRecapThemeId(theme.id)}
+                style={{
+                  ...styles.recapCard,
+                  background: theme.tone,
+                }}
+              >
+                <span style={styles.recapCardKicker}>{theme.records.length}개 기록</span>
+                <strong style={styles.recapCardTitle}>{theme.title}</strong>
+                <span style={styles.recapCardCaption}>{theme.caption}</span>
+              </button>
             ))}
           </div>
-          <p style={styles.insightText}>
-            {items.length === 0
-              ? '아직 분석할 원석이 없어요. 기록이 쌓이면 세부 패턴이 보여요.'
-              : `${selectedCategoryMeta.label} 중에서도 ${selectedDetails.slice().sort((a, b) => b.count - a.count)[0]?.label ?? selectedCategoryMeta.details[0]}을 가장 자주 마주했어요.`}
-          </p>
-        </section>
-
-        <section style={styles.section}>
-          <SectionHeader title="시간대별 감정원석 분포" caption="기록이 자주 쌓이는 시간" />
-          <div style={styles.timeGrid}>
-            {timeStats.map((bucket) => (
-              <div key={bucket.label} style={styles.timeColumn}>
-                <div style={styles.timeBarWrap}>
-                  <div style={{ ...styles.timeBar, height: `${Math.max(bucket.pct, 8)}%` }} />
-                </div>
-                <span style={styles.timeLabel}>{bucket.label}</span>
-                <span style={styles.timeCount}>{bucket.count}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section style={styles.questionBand}>
-          <span style={styles.sectionLabel}>주간 자기인지 질문 recap</span>
-          {items.length === 0 ? (
-            <>
-              <p style={styles.questionText}>이번 기간엔 아직 돌아볼 순간이 쌓이지 않았어요.</p>
-              <p style={styles.questionHint}>한 줄 기록이 충분해요. 짧은 마음 한 조각만 남겨도 다음에 꺼내볼 수 있어요.</p>
-            </>
-          ) : (
-            <>
-              <p style={styles.questionText}>{topCategory.label}이 올라왔던 순간은 주로 언제였나요?</p>
-              <p style={styles.questionHint}>이유를 캐묻기보다, 장소나 상황을 하나만 떠올려도 충분해요.</p>
-            </>
-          )}
-        </section>
-
-        <section style={styles.section}>
-          <SectionHeader
-            title={period === 'monthly' ? '월간 감정 리포트' : period === 'weekly' ? '주간 감정 리포트' : '최근 2주 Summary'}
-            caption="이번 기간의 마음 여정"
-          />
-          <p style={styles.journeyText}>
-            {items.length === 0
-              ? `${periodLabel}엔 아직 기록된 원석이 없어요.`
-              : `${periodLabel} ${items.length}개의 순간을 기록했어요. ${topCategory.label}을 가장 많이 마주했고, 긍정 원석도 ${positiveCount}번 남아 있어요.`}
-          </p>
-          <div style={styles.miniStats}>
-            <MiniStat label="기록한 날" value={`${activeDays}일`} />
-            <MiniStat label="긍정 원석" value={`${positiveCount}개`} />
-            <MiniStat label="케어 상태" value={careNeeded ? '살핌 필요' : '안정'} />
-          </div>
-        </section>
-
-        <section
-          style={{
-            ...styles.careBand,
-            background: items.length === 0 ? '#EDE2CC' : careNeeded ? '#EBCDC6' : '#DCE7D8',
-          }}
-        >
-          <span style={styles.sectionLabel}>
-            {items.length === 0 ? '시작 가이드' : careNeeded ? '행동 추천 카드' : 'Recap'}
-          </span>
-          {items.length === 0 ? (
-            <>
-              <strong style={styles.careTitle}>마음 한 조각부터 시작해볼까요</strong>
-              <p style={styles.careText}>카카오톡 챗봇에 짧은 메시지를 보내면, 그 순간이 원석으로 바뀌어 여기에 쌓여요.</p>
-            </>
-          ) : (
-            <>
-              <strong style={styles.careTitle}>{careNeeded ? '묵직한 감정이 조금 쌓였어요' : '빛났던 순간을 다시 볼게요'}</strong>
-              <p style={styles.careText}>
-                {careNeeded
-                  ? '오늘은 완료 여부를 묻지 않을게요. 물 한 잔, 짧은 산책, 편한 사람에게 안부 보내기 중 하나만 골라보세요.'
-                  : '좋았던 감정은 작게 다시 보는 것만으로도 마음에 오래 남아요.'}
-              </p>
-            </>
-          )}
         </section>
       </main>
+
+      {recapDialog && (
+        <div
+          style={styles.modalOverlay}
+          role="presentation"
+          onClick={() => setActiveRecapThemeId(null)}
+        >
+          <section
+            style={styles.modalSheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label={recapDialog.title}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={styles.modalHeader}>
+              <div>
+                <span style={styles.sectionLabel}>recap 기록</span>
+                <h2 style={styles.modalTitle}>{recapDialog.title}</h2>
+                <p style={styles.modalCaption}>{recapDialog.caption}</p>
+              </div>
+              <button type="button" onClick={() => setActiveRecapThemeId(null)} style={styles.modalClose}>
+                닫기
+              </button>
+            </div>
+            <div style={styles.modalRecords}>
+              {recapDialog.records.length === 0 ? (
+                <p style={styles.emptyRecord}>{recapDialog.emptyMessage}</p>
+              ) : (
+                recapDialog.records.map((record) => (
+                  <article
+                    key={`${activeRecapTheme?.id}-${record.id}`}
+                    style={{
+                      ...styles.recordCard,
+                      gridTemplateColumns: record.imageUrl ? '74px 1fr' : '1fr',
+                    }}
+                  >
+                    {record.imageUrl && <img src={record.imageUrl} alt="기록 사진" style={styles.recordImage} />}
+                    <div style={styles.recordBody}>
+                      <span style={styles.recordMeta}>{toDateKey(new Date(record.createdAt))} · {record.label}</span>
+                      <p style={styles.recordText}>{record.recordText ?? '텍스트 없이 원석만 남은 기록이에요.'}</p>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
 
-function SectionHeader({ title, caption }: { title: string; caption: string }) {
+function SectionHeader({ title, caption }: { title: string; caption?: string }) {
   return (
     <div style={styles.sectionHeader}>
       <h2 style={styles.sectionTitle}>{title}</h2>
-      <p style={styles.sectionCaption}>{caption}</p>
+      {caption && <p style={styles.sectionCaption}>{caption}</p>}
     </div>
   );
 }
@@ -407,18 +512,9 @@ function GemBubble({
 
   return (
     <div style={{ ...styles.gemBubble, transform: large ? 'scale(1.08)' : 'scale(0.92)' }}>
-      <GemStone gem={previewGem} size={34} variant={label} />
+      <GemStone gem={previewGem} size={18} variant={label} />
       <span style={styles.gemLabel}>{label}</span>
       <span style={styles.gemCount}>x{count}</span>
-    </div>
-  );
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={styles.miniStat}>
-      <span style={styles.miniValue}>{value}</span>
-      <span style={styles.miniLabel}>{label}</span>
     </div>
   );
 }
@@ -437,7 +533,7 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '30px 22px 10px',
+    padding: '16px 20px 6px',
     flexShrink: 0,
   },
   eyebrow: {
@@ -454,8 +550,8 @@ const styles: Record<string, CSSProperties> = {
     letterSpacing: 0,
   },
   totalBadge: {
-    width: 58,
-    height: 58,
+    width: 48,
+    height: 48,
     borderRadius: '50%',
     background: '#EDE2CC',
     display: 'flex',
@@ -478,7 +574,7 @@ const styles: Record<string, CSSProperties> = {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
     gap: 6,
-    padding: '0 22px 14px',
+    padding: '0 20px 10px',
     flexShrink: 0,
   },
   periodButton: {
@@ -490,20 +586,49 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
     outline: 'none',
   },
+  customRange: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 8,
+    padding: '0 22px 12px',
+    flexShrink: 0,
+  },
+  dateLabel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 5,
+    color: '#8B7355',
+    fontSize: 10,
+    fontWeight: 800,
+  },
+  dateInput: {
+    minHeight: 34,
+    border: '1px solid #E0D3BA',
+    borderRadius: 10,
+    background: '#FFFFFF',
+    color: '#5A4A32',
+    padding: '0 8px',
+    fontSize: 12,
+    fontWeight: 700,
+  },
   content: {
     flex: 1,
     minHeight: 0,
-    overflowY: 'auto',
-    padding: '0 16px 24px',
+    overflow: 'hidden',
+    padding: '0 14px 12px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
   },
   summaryBand: {
     display: 'grid',
-    gridTemplateColumns: '1.15fr 0.85fr',
-    gap: 12,
-    minHeight: 148,
+    gridTemplateColumns: '1.35fr 0.65fr',
+    gap: 10,
+    minHeight: 64,
     background: '#A0BCA8',
-    borderRadius: 0,
-    padding: '18px 16px',
+    borderRadius: 12,
+    padding: '10px 12px',
+    flexShrink: 0,
   },
   summaryText: {
     display: 'flex',
@@ -516,17 +641,18 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 800,
   },
   summaryTitle: {
-    marginTop: 8,
+    marginTop: 6,
     color: '#1E3328',
-    fontSize: 19,
-    lineHeight: 1.28,
+    fontSize: 15,
+    lineHeight: 1.18,
     wordBreak: 'keep-all',
   },
   summaryCopy: {
-    margin: '10px 0 0',
+    display: 'none',
+    margin: 0,
     color: '#3D6050',
-    fontSize: 12,
-    lineHeight: 1.48,
+    fontSize: 11,
+    lineHeight: 1.35,
     wordBreak: 'keep-all',
   },
   topGemCluster: {
@@ -535,12 +661,33 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'center',
     gap: 4,
   },
+  gemCase: {
+    minHeight: 46,
+    borderRadius: '14px 14px 10px 10px',
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.42), rgba(237,226,204,0.78))',
+    border: '1px solid rgba(90,74,50,0.14)',
+    boxShadow: 'inset 0 -6px 0 rgba(90,74,50,0.08)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    padding: '7px 4px',
+  },
+  gemCaseLid: {
+    padding: '2px 7px',
+    borderRadius: 999,
+    background: 'rgba(30,51,40,0.12)',
+    color: '#1E3328',
+    fontSize: 9,
+    fontWeight: 900,
+  },
   gemBubble: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: 4,
-    width: 48,
+    gap: 1,
+    width: 24,
   },
   gemStone: {
     display: 'block',
@@ -550,26 +697,79 @@ const styles: Record<string, CSSProperties> = {
     boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.32)',
   },
   gemLabel: {
-    width: 50,
+    display: 'none',
     textAlign: 'center',
     color: '#1E3328',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: 800,
   },
   gemCount: {
-    color: '#3D6050',
-    fontSize: 10,
+    display: 'none',
+    fontSize: 9,
     fontWeight: 700,
   },
   section: {
-    marginTop: 14,
+    marginTop: 10,
     background: '#FFFFFF',
     borderRadius: 8,
-    padding: '15px 14px',
+    padding: '11px 12px',
     boxShadow: '0 2px 10px rgba(90, 74, 50, 0.03)',
   },
+  patternSection: {
+    flex: 1,
+    minHeight: 0,
+    background: '#FFFFFF',
+    borderRadius: 12,
+    padding: '10px 11px 9px',
+    boxShadow: '0 2px 10px rgba(90, 74, 50, 0.03)',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
   sectionHeader: {
-    marginBottom: 12,
+    marginBottom: 6,
+  },
+  accordionHeader: {
+    width: '100%',
+    border: 0,
+    background: 'transparent',
+    padding: 0,
+    marginBottom: 0,
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    textAlign: 'left',
+    cursor: 'pointer',
+  },
+  accordionIcon: {
+    flexShrink: 0,
+    minWidth: 42,
+    borderRadius: 999,
+    background: '#EDE2CC',
+    color: '#5A4A32',
+    fontSize: 10,
+    fontWeight: 900,
+    textAlign: 'center',
+    padding: '5px 8px',
+  },
+  patternHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 7,
+  },
+  patternBadge: {
+    flexShrink: 0,
+    minWidth: 42,
+    borderRadius: 999,
+    background: '#EDE2CC',
+    color: '#5A4A32',
+    fontSize: 10,
+    fontWeight: 900,
+    textAlign: 'center',
+    padding: '5px 8px',
   },
   sectionTitle: {
     margin: 0,
@@ -579,24 +779,28 @@ const styles: Record<string, CSSProperties> = {
     letterSpacing: 0,
   },
   sectionCaption: {
-    margin: '4px 0 0',
+    display: 'block',
+    margin: '2px 0 0',
     color: '#8B7355',
-    fontSize: 11,
-    lineHeight: 1.35,
+    fontSize: 10,
+    lineHeight: 1.18,
   },
   barList: {
+    flex: 1,
+    minHeight: 0,
     display: 'grid',
-    gap: 7,
+    gridTemplateRows: 'repeat(5, minmax(19px, 1fr))',
+    gap: 2,
   },
   categoryRow: {
     display: 'grid',
-    gridTemplateColumns: '12px 42px 1fr 36px',
+    gridTemplateColumns: '10px 38px 1fr 32px',
     alignItems: 'center',
-    gap: 8,
-    minHeight: 30,
+    gap: 6,
+    minHeight: 0,
     border: 0,
-    borderRadius: 6,
-    padding: '3px 5px',
+    borderRadius: 8,
+    padding: '3px 6px',
     cursor: 'pointer',
     outline: 'none',
   },
@@ -612,7 +816,7 @@ const styles: Record<string, CSSProperties> = {
     textAlign: 'left',
   },
   barTrack: {
-    height: 10,
+    height: 14,
     borderRadius: 999,
     background: '#EFE8D9',
     overflow: 'hidden',
@@ -704,11 +908,163 @@ const styles: Record<string, CSSProperties> = {
     textAlign: 'right',
   },
   insightText: {
-    margin: '12px 0 0',
+    margin: '3px 0 0',
+    color: '#5A4A32',
+    fontSize: 12,
+    lineHeight: 1.3,
+    wordBreak: 'keep-all',
+  },
+  recapBand: {
+    background: '#EDE2CC',
+    borderRadius: 8,
+    padding: '7px 10px',
+    flexShrink: 0,
+  },
+  recapSlider: {
+    display: 'flex',
+    gap: 8,
+    overflowX: 'auto',
+    scrollSnapType: 'x mandatory',
+    paddingBottom: 0,
+  },
+  recapCard: {
+    minWidth: 148,
+    minHeight: 44,
+    border: 0,
+    borderRadius: 12,
+    padding: 8,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    textAlign: 'left',
+    color: '#3D3A34',
+    scrollSnapAlign: 'start',
+    cursor: 'pointer',
+  },
+  recapCardKicker: {
+    fontSize: 10,
+    fontWeight: 900,
+    color: '#8B7355',
+  },
+  recapCardTitle: {
+    marginTop: 5,
+    fontSize: 12,
+    lineHeight: 1.12,
+    wordBreak: 'keep-all',
+  },
+  recapCardCaption: {
+    display: 'none',
+    marginTop: 0,
+    fontSize: 9,
+    lineHeight: 1.18,
+    color: '#5A4A32',
+    wordBreak: 'keep-all',
+  },
+  recordList: {
+    display: 'grid',
+    gap: 9,
+    marginTop: 12,
+  },
+  recordCard: {
+    display: 'grid',
+    gridTemplateColumns: '74px 1fr',
+    gap: 10,
+    minHeight: 82,
+    borderRadius: 12,
+    background: 'rgba(255,255,255,0.62)',
+    padding: 10,
+  },
+  recordImage: {
+    width: 74,
+    height: 74,
+    objectFit: 'cover',
+    borderRadius: 10,
+    background: '#F9F4EA',
+  },
+  recordBody: {
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+  },
+  recordMeta: {
+    color: '#8B7355',
+    fontSize: 10,
+    fontWeight: 800,
+  },
+  recordText: {
+    margin: '6px 0 0',
     color: '#5A4A32',
     fontSize: 12,
     lineHeight: 1.45,
     wordBreak: 'keep-all',
+  },
+  emptyRecord: {
+    margin: 0,
+    color: '#8B7355',
+    fontSize: 12,
+    lineHeight: 1.45,
+  },
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 40,
+    background: 'rgba(30, 24, 16, 0.34)',
+    display: 'flex',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    padding: 14,
+  },
+  modalSheet: {
+    width: '100%',
+    maxWidth: 430,
+    maxHeight: '76vh',
+    borderRadius: '18px 18px 14px 14px',
+    background: '#F9F4EA',
+    boxShadow: '0 -10px 28px rgba(30, 24, 16, 0.2)',
+    padding: 15,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  modalHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  modalTitle: {
+    margin: '5px 0 0',
+    color: '#5A4A32',
+    fontSize: 18,
+    lineHeight: 1.25,
+    wordBreak: 'keep-all',
+  },
+  modalCaption: {
+    margin: '6px 0 0',
+    color: '#8B7355',
+    fontSize: 12,
+    lineHeight: 1.35,
+    wordBreak: 'keep-all',
+  },
+  modalClose: {
+    flexShrink: 0,
+    border: 0,
+    borderRadius: 999,
+    background: '#EDE2CC',
+    color: '#5A4A32',
+    fontSize: 11,
+    fontWeight: 900,
+    padding: '7px 10px',
+    cursor: 'pointer',
+  },
+  modalRecords: {
+    display: 'grid',
+    gap: 9,
+    overflowY: 'auto',
+    paddingRight: 2,
   },
   questionBand: {
     marginTop: 14,

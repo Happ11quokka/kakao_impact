@@ -210,6 +210,10 @@ class ChatbotRecord(Base):
     )
     image_url: Mapped[str | None] = mapped_column(Text)
     ai_gems: Mapped[str | None] = mapped_column(Text)
+    question_id: Mapped[str | None] = mapped_column(Text)
+    question_text: Mapped[str | None] = mapped_column(Text)
+    answer_text: Mapped[str | None] = mapped_column(Text)
+    linked_date: Mapped[date | None] = mapped_column(Date)
     entry_mode: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'emotion_classification'")
     )
