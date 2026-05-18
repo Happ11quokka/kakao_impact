@@ -1,6 +1,12 @@
 // === GemStone — 도감 스타일 파셋(다면체) 원석 렌더러 ===
+import {
+  DEFAULT_VARIANT_BY_EMOTION_CODE,
+  variantToFamilyShape,
+} from '../../data/emotion-variants';
 import { getEmotion } from '../../data/emotions';
+import { isUnclassifiedGem, UNCLASSIFIED_VARIANT } from '../../data/unclassified-gem';
 import type { Gem } from '../../types/gem';
+import UnclassifiedGemSvg from './UnclassifiedGemSvg';
 
 interface GemStoneProps {
   gem: Gem;
@@ -63,6 +69,14 @@ const SHAPE_PATH: Record<string, string> = {
   무기력: 'M12 60 Q16 34 50 32 Q84 34 88 60 Q86 78 50 80 Q14 78 12 60 Z',
   공허: 'M18 52 Q20 22 50 20 Q80 22 82 52 Q80 82 50 84 Q20 82 18 52 Z',
   후회: 'M22 50 Q24 22 54 20 Q78 24 82 50 Q80 76 58 84 Q36 86 24 70 Q18 62 22 50 Z',
+  // 분노 — 경멸 (날카로운 냉소 각)
+  경멸: 'M54 10 L76 24 L86 50 L68 82 L50 90 L22 76 L14 46 L34 18 Z',
+  // 불안 — 초조·공포
+  초조: 'M14 52 Q12 30 46 28 Q84 30 88 52 Q86 74 50 78 Q14 76 14 52 Z',
+  공포: 'M50 16 L62 30 L76 26 L84 48 L88 58 Q86 80 50 84 Q14 80 12 56 L24 38 L38 24 Z',
+  // 복잡 — 부끄러움·혼란스러움
+  부끄러움: 'M24 58 Q24 36 50 34 Q76 36 76 58 Q74 76 50 78 Q26 76 24 58 Z',
+  혼란스러움: 'M18 50 Q26 16 50 20 Q74 14 84 50 Q80 78 56 88 Q50 92 44 88 Q20 74 18 50 Z',
 };
 
 const FACETS: Record<string, string[]> = {
@@ -100,34 +114,6 @@ const FACETS: Record<string, string[]> = {
   ],
 };
 
-function shapeOf(silhouette?: string): 'pebble' | 'crystal' | 'fragment' {
-  if (silhouette === 'pebble' || silhouette === 'crystal' || silhouette === 'fragment') return silhouette;
-  return 'crystal';
-}
-
-function variantToFamily(variant: string, silhouette?: string): 'pebble' | 'crystal' | 'fragment' {
-  if (['설렘', '뿌듯'].includes(variant)) return 'crystal';
-  if (['우울', '외로움', '상실', '서러움', '걱정', '긴장', '위축', '감사', '편안', '무기력', '공허', '후회', '억울'].includes(variant)) return 'pebble';
-  if (['즐거움', '화남', '적대', '짜증', '실망'].includes(variant)) return 'fragment';
-  return shapeOf(silhouette);
-}
-
-function defaultVariantByEmotionCode(code: string): string {
-  const map: Record<string, string> = {
-    sadness: '우울',
-    solace: '외로움',
-    regret: '후회',
-    annoyance: '짜증',
-    joy: '즐거움',
-    satisfaction: '감사',
-    flutter: '설렘',
-    pride: '뿌듯',
-    serenity: '편안',
-    untroubled: '무기력',
-  };
-  return map[code] ?? '뿌듯';
-}
-
 function facetOpacity(tier: number): number {
   if (tier >= 4) return 0.96;
   if (tier === 3) return 0.88;
@@ -138,14 +124,39 @@ function facetOpacity(tier: number): number {
 export default function GemStone({ gem, size = 40, onClick, className = '', variant }: GemStoneProps) {
   const emotion = getEmotion(gem.emotionCode);
   if (!emotion) return null;
+
+  const resolvedVariant = variant ?? DEFAULT_VARIANT_BY_EMOTION_CODE[emotion.code] ?? '뿌듯';
+  const unclassified = isUnclassifiedGem(gem.emotionCode, variant);
+
+  if (unclassified) {
+    const idBase = `${gem.id}-unclassified-${gem.tier}`.replace(/[^a-zA-Z0-9_-]/g, '');
+    return (
+      <div
+        onClick={onClick}
+        className={className}
+        style={{
+          width: size,
+          height: size,
+          cursor: onClick ? 'pointer' : 'default',
+          display: 'inline-block',
+          transition: 'transform var(--duration-fast) var(--easing-out)',
+          filter:
+            'drop-shadow(0 2px 6px rgba(70,95,120,0.22)) drop-shadow(0 0 12px rgba(160,195,225,0.18))',
+        }}
+        title={`${emotion.gemName} (${UNCLASSIFIED_VARIANT}) — 감정을 골라 주세요`}
+      >
+        <UnclassifiedGemSvg size={size} idBase={idBase} tier={gem.tier} />
+      </div>
+    );
+  }
+
   const base = parseHexRgb(emotion.hexColor);
   const hi = tint(base, 0.48);
   const mid = tint(base, 0.16);
   const low = tint(base, -0.24);
   const dark = tint(base, -0.48);
   const glow = tint(base, 0.32);
-  const resolvedVariant = variant ?? defaultVariantByEmotionCode(emotion.code);
-  const shape = variantToFamily(resolvedVariant, emotion.silhouette);
+  const shape = variantToFamilyShape(resolvedVariant);
   const shapePath = SHAPE_PATH[shape];
   const facets = FACETS[shape];
   const variantPath = SHAPE_PATH[resolvedVariant] ?? shapePath;
@@ -222,6 +233,39 @@ export default function GemStone({ gem, size = 40, onClick, className = '', vari
 
         {resolvedVariant === '후회' && (
           <path d="M38 64 Q50 74 66 68" stroke={rgba(hi, 0.5)} strokeWidth="1.4" fill="none" strokeLinecap="round" />
+        )}
+
+        {resolvedVariant === '경멸' && (
+          <path d="M32 28 L68 72" stroke={rgba(hi, 0.55)} strokeWidth="2" strokeLinecap="round" opacity={0.7} />
+        )}
+
+        {resolvedVariant === '초조' && (
+          <g opacity={0.5}>
+            <path d="M30 46 Q50 38 70 46" stroke={rgba(hi, 0.7)} strokeWidth="1.5" fill="none" />
+            <path d="M28 54 Q50 46 72 54" stroke={rgba(hi, 0.55)} strokeWidth="1.3" fill="none" />
+          </g>
+        )}
+
+        {resolvedVariant === '공포' && (
+          <g opacity={0.55}>
+            <path d="M50 8 L50 18" stroke={rgba(hi, 0.75)} strokeWidth="1.6" strokeLinecap="round" />
+            <path d="M38 14 L44 22" stroke={rgba(hi, 0.6)} strokeWidth="1.3" strokeLinecap="round" />
+            <path d="M62 14 L56 22" stroke={rgba(hi, 0.6)} strokeWidth="1.3" strokeLinecap="round" />
+          </g>
+        )}
+
+        {resolvedVariant === '부끄러움' && (
+          <>
+            <ellipse cx="38" cy="54" rx="6" ry="3.5" fill={rgba(hi, 0.35)} />
+            <ellipse cx="62" cy="54" rx="6" ry="3.5" fill={rgba(hi, 0.35)} />
+          </>
+        )}
+
+        {resolvedVariant === '혼란스러움' && (
+          <g opacity={0.48}>
+            <path d="M40 38 Q50 48 60 38 Q50 58 40 48" stroke={rgba(hi, 0.65)} strokeWidth="1.4" fill="none" />
+            <path d="M44 62 Q50 52 56 62" stroke={rgba(mid, 0.7)} strokeWidth="1.2" fill="none" />
+          </g>
         )}
       </svg>
     </div>

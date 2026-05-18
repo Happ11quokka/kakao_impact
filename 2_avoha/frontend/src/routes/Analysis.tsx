@@ -5,6 +5,7 @@ import type { Gem } from '../types/gem';
 import { api, type ChatbotRecordDto } from '../lib/api';
 import { getEmotion } from '../data/emotions';
 import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
+import { EMOTION_VARIANTS_BY_CATEGORY } from '../data/emotion-variants';
 import GemStone from '../components/pixel/GemStone';
 
 type Period = 'weekly' | 'monthly' | 'custom';
@@ -28,11 +29,11 @@ type AnalysisItem = {
 };
 
 const CATEGORIES: Category[] = [
-  { code: 'sadness', label: '슬픔', color: '#58728E', soft: '#DDE5EC', details: ['우울', '외로움', '상실', '서러움'] },
-  { code: 'anxiety', label: '불안', color: '#B8C7D8', soft: '#E7EDF2', details: ['실망', '걱정', '긴장', '위축'] },
-  { code: 'anger', label: '분노', color: '#914640', soft: '#EBDDD9', details: ['짜증', '억울', '화남', '적대'] },
-  { code: 'joy', label: '기쁨', color: '#D4B84E', soft: '#F1E8BD', details: ['즐거움', '감사', '설렘', '뿌듯'] },
-  { code: 'complex', label: '복잡', color: '#3D3A34', soft: '#E2DFD8', details: ['편안', '무기력', '공허', '후회'] },
+  { code: 'sadness', label: '슬픔', color: '#58728E', soft: '#DDE5EC', details: [...EMOTION_VARIANTS_BY_CATEGORY.sadness] },
+  { code: 'anger', label: '분노', color: '#914640', soft: '#EBDDD9', details: [...EMOTION_VARIANTS_BY_CATEGORY.anger] },
+  { code: 'anxiety', label: '불안', color: '#B8C7D8', soft: '#E7EDF2', details: [...EMOTION_VARIANTS_BY_CATEGORY.anxiety] },
+  { code: 'joy', label: '기쁨', color: '#D4B84E', soft: '#F1E8BD', details: [...EMOTION_VARIANTS_BY_CATEGORY.joy] },
+  { code: 'complex', label: '복잡', color: '#3D3A34', soft: '#E2DFD8', details: [...EMOTION_VARIANTS_BY_CATEGORY.complex] },
 ];
 
 const CATEGORY_BY_CODE = Object.fromEntries(CATEGORIES.map((category) => [category.code, category])) as Record<CategoryCode, Category>;

@@ -3,6 +3,15 @@
 import type { Emotion } from '../types/emotion';
 
 export const EMOTIONS: Emotion[] = [
+  // 미분류 — 투명 유리 원석 (일상 기록·감정 미지정, 25종 중 선택 대기)
+  {
+    code: 'unclassified',
+    nameKo: '미분류',
+    gemName: '투명석',
+    hexColor: '#7B95A8',
+    category: 'calm',
+    silhouette: 'pebble',
+  },
   // 복잡/모호 계열 — 흑요석(불투명한 검은 돌)
   { code: 'untroubled', nameKo: '무탈',  gemName: '흑요석', hexColor: '#262A30', category: 'calm',     silhouette: 'pebble' },
   { code: 'serenity',   nameKo: '평온',  gemName: '흑요석', hexColor: '#2F343B', category: 'calm',     silhouette: 'pebble' },

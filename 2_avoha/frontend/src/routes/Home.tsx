@@ -4,6 +4,7 @@ import { useFieldStore } from '../stores/field-store';
 import { useInventoryStore } from '../stores/inventory-store';
 import { usePetStore } from '../stores/pet-store';
 import { emotionToCategory } from '../lib/emotion-category';
+import { UNCLASSIFIED_EMOTION_CODE } from '../data/unclassified-gem';
 import { getEmotion } from '../data/emotions';
 import CollectionBook from './CollectionBook';
 import ChibiAvatar from '../components/field/ChibiAvatar';
@@ -123,6 +124,7 @@ export default function Home() {
   const gemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     todayGems.forEach((gem) => {
+      if (gem.emotionCode === UNCLASSIFIED_EMOTION_CODE) return;
       const cat = emotionToCategory(gem.emotionCode);
       counts[cat] = (counts[cat] || 0) + 1;
     });
@@ -133,6 +135,7 @@ export default function Home() {
     const nowIso = new Date().toISOString();
     const grouped: Record<string, Gem | undefined> = {};
     todayGems.forEach((gem) => {
+      if (gem.emotionCode === UNCLASSIFIED_EMOTION_CODE) return;
       const cat = emotionToCategory(gem.emotionCode);
       if (!grouped[cat]) grouped[cat] = gem;
     });

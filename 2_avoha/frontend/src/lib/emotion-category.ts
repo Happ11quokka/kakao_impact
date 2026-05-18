@@ -6,6 +6,7 @@
 export type CategoryCode = 'sadness' | 'anxiety' | 'anger' | 'joy' | 'complex';
 
 export function emotionToCategory(code: string): CategoryCode {
+  if (code === 'unclassified') return 'complex';
   if (code === 'sadness') return 'sadness';
   if (code === 'annoyance') return 'anger';
   if (code === 'joy' || code === 'pride' || code === 'satisfaction' || code === 'flutter') return 'joy';

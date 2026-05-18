@@ -1,64 +1,26 @@
 // === CollectionBook 화면 — Figma 도감 오버레이 ===
 import GemStone from '../components/pixel/GemStone';
+import { ALL_EMOTION_VARIANT_LABELS, VARIANT_TO_EMOTION_CODE } from '../data/emotion-variants';
 import type { Gem } from '../types/gem';
 
 const FIGMA_WIDTH = 391;
 const FIGMA_HEIGHT = 540;
 
-const GRID_X = [24, 118, 212, 306] as const;
+/** 5열 × 5행 (계열당 5종) */
+const GRID_X = [18, 99, 180, 261, 318] as const;
 const GRID_Y = [41, 144, 242, 335, 431] as const;
-const EMOTION_ORDER = [
-  // 슬픔 계열
-  '우울', '외로움', '상실', '서러움', '실망',
-  // 불안 계열
-  '걱정', '긴장', '위축',
-  // 분노 계열
-  '짜증', '억울', '화남', '적대',
-  // 기쁨 계열
-  '즐거움', '감사', '설렘', '뿌듯', '편안',
-  // 복잡/모호 계열
-  '무기력', '공허', '후회',
-] as const;
 
-const FIGMA_EMOTIONS = EMOTION_ORDER.map((label, idx) => ({
+const FIGMA_EMOTIONS = ALL_EMOTION_VARIANT_LABELS.map((label, idx) => ({
   label,
-  x: GRID_X[idx % 4],
-  y: GRID_Y[Math.floor(idx / 4)],
+  x: GRID_X[idx % 5],
+  y: GRID_Y[Math.floor(idx / 5)],
 }));
-
-const LABEL_TO_EMOTION_CODE: Record<string, string> = {
-  // 슬픔 계열
-  우울: 'sadness',
-  외로움: 'sadness',
-  상실: 'sadness',
-  서러움: 'sadness',
-  실망: 'sadness',
-  // 불안 계열
-  걱정: 'solace',
-  긴장: 'solace',
-  위축: 'solace',
-  // 분노 계열
-  짜증: 'annoyance',
-  억울: 'annoyance',
-  화남: 'annoyance',
-  적대: 'annoyance',
-  // 기쁨 계열
-  즐거움: 'joy',
-  감사: 'satisfaction',
-  설렘: 'flutter',
-  뿌듯: 'pride',
-  편안: 'satisfaction',
-  // 복잡/모호 계열
-  무기력: 'untroubled',
-  공허: 'regret',
-  후회: 'regret',
-};
 
 function toBookGem(label: string, idx: number): Gem {
   const tier = ((idx % 4) + 1) as 1 | 2 | 3 | 4;
   return {
     id: `book-${idx}-${label}`,
-    emotionCode: LABEL_TO_EMOTION_CODE[label] ?? 'untroubled',
+    emotionCode: VARIANT_TO_EMOTION_CODE[label as keyof typeof VARIANT_TO_EMOTION_CODE] ?? 'untroubled',
     tier,
     createdAt: new Date().toISOString(),
     consumedAt: null,
@@ -103,14 +65,14 @@ export default function CollectionBook({ onClose }: { onClose?: () => void }) {
         X
       </button>
 
-      {FIGMA_EMOTIONS.map((item) => (
+      {FIGMA_EMOTIONS.map((item, idx) => (
         <div
           key={item.label}
           style={{
             position: 'absolute',
             left: `${(item.x / FIGMA_WIDTH) * 100}%`,
             top: `${(item.y / FIGMA_HEIGHT) * 100}%`,
-            width: `${(57 / FIGMA_WIDTH) * 100}%`,
+            width: `${(52 / FIGMA_WIDTH) * 100}%`,
             height: `${(92 / FIGMA_HEIGHT) * 100}%`,
             display: 'flex',
             flexDirection: 'column',
@@ -118,7 +80,7 @@ export default function CollectionBook({ onClose }: { onClose?: () => void }) {
           }}
         >
           <div style={{ width: '100%', height: `${(62 / 92) * 100}%`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <GemStone gem={toBookGem(item.label, item.x + item.y)} size={54} variant={item.label} />
+            <GemStone gem={toBookGem(item.label, idx)} size={50} variant={item.label} />
           </div>
           <span
             style={{
@@ -126,7 +88,7 @@ export default function CollectionBook({ onClose }: { onClose?: () => void }) {
               width: '100%',
               marginTop: -2,
               color: '#5A4A32',
-              fontSize: 'clamp(10px, 3.32vw, 13px)',
+              fontSize: 'clamp(9px, 2.8vw, 12px)',
               fontWeight: 400,
               lineHeight: '32px',
               textAlign: 'center',
