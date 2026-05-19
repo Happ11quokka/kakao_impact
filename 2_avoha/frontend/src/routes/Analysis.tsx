@@ -5,8 +5,14 @@ import { useRecordsStore } from '../stores/records-store';
 import type { Gem } from '../types/gem';
 import { api, type ChatbotRecordDto } from '../lib/api';
 import { getEmotion } from '../data/emotions';
-import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
+import { emotionToCategory, resolveCategory, type CategoryCode } from '../lib/emotion-category';
 import { EMOTION_VARIANTS_BY_CATEGORY } from '../data/emotion-variants';
+import {
+  getWeekIndex,
+  pickDynamicCategories,
+  pickDynamicQuestion,
+  type CategoryCounts,
+} from '../data/reflection-prompts';
 import GemStone from '../components/pixel/GemStone';
 import PhotoLightbox from '../components/PhotoLightbox';
 import { logicalKeyForChatbotRecord } from '../lib/logical-record';
@@ -51,7 +57,7 @@ export type RecapTheme = {
 };
 
 export type ReflectionPrompt = {
-  source: 'unanswered' | 'answered' | 'static';
+  source: 'dynamic' | 'unanswered' | 'answered' | 'static';
   question: string;
   answer?: string | null;
 };
@@ -287,8 +293,14 @@ export function buildRecapThemes(items: AnalysisItem[]): RecapTheme[] {
   }, []);
 }
 
-// 자기회고 prompt 선택: 미답 → 답완 → 정적 fallback 순.
-export function pickReflectionPrompt(records: ChatbotRecordDto[]): ReflectionPrompt {
+// 자기회고 prompt 선택: 동적 감정 질문(최우선) → 미답 → 답완 → 정적 fallback 순.
+export function pickReflectionPrompt(
+  records: ChatbotRecordDto[],
+  options?: { dynamicQuestion?: string | null },
+): ReflectionPrompt {
+  const dynamic = options?.dynamicQuestion?.trim();
+  if (dynamic) return { source: 'dynamic', question: dynamic };
+
   const withQuestion = records.filter((r) => r.questionText?.trim());
   const sortedDesc = withQuestion.slice().sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -346,7 +358,49 @@ export default function Analysis() {
     );
   }, [records, period, today, customRange]);
 
-  const reflectionPrompt = useMemo(() => pickReflectionPrompt(recordsInPeriod), [recordsInPeriod]);
+  // 주간 모드 한정 — 주 감정 분석 결과로 자기회고 질문을 동적 선택.
+  // monthly/custom 은 기존 priority(미답 → 답완 → static) 유지.
+  const dynamicQuestion = useMemo(() => {
+    if (period !== 'weekly') return null;
+    if (items.length === 0) return null;
+
+    const startThisWeek = startOfWeek(today);
+    const prevWeekToday = new Date(startThisWeek.getTime() - 1);
+
+    const recordsBySourceId = new Map<string, ChatbotRecordDto>();
+    for (const r of records) recordsBySourceId.set(String(r.id), r);
+
+    const countWith = (arr: AnalysisItem[]): CategoryCounts => {
+      const c: CategoryCounts = { sadness: 0, anger: 0, anxiety: 0, joy: 0, complex: 0 };
+      for (const it of arr) {
+        const gemName = it.sourceMessageId
+          ? recordsBySourceId.get(it.sourceMessageId)?.gem
+          : null;
+        const cat = resolveCategory(it.emotionCode, gemName);
+        c[cat] += 1;
+      }
+      return c;
+    };
+
+    const counts = countWith(items);
+    const itemsPrevWeek = buildAnalysisItems(gems, records, 'weekly', prevWeekToday);
+    const prevCounts = countWith(itemsPrevWeek);
+
+    const hits = pickDynamicCategories({
+      counts,
+      prevCounts,
+      total: items.length,
+    });
+    if (hits.length === 0) return null;
+    const weekIndex = getWeekIndex(today);
+    const chosen = hits[Math.floor(Math.random() * hits.length)];
+    return pickDynamicQuestion(chosen, weekIndex);
+  }, [gems, items, period, records, today]);
+
+  const reflectionPrompt = useMemo(
+    () => pickReflectionPrompt(recordsInPeriod, { dynamicQuestion }),
+    [recordsInPeriod, dynamicQuestion],
+  );
   const activeRecapTheme = recapThemes.find((t) => t.id === activeRecapId) ?? null;
   const [reflectionDraft, setReflectionDraft] = useState('');
   const [savingReflection, setSavingReflection] = useState(false);

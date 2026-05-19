@@ -224,4 +224,26 @@ describe('Analysis reflection prompt', () => {
     expect(prompt.source).toBe('static');
     expect(prompt.question.length).toBeGreaterThan(0);
   });
+
+  it('prefers dynamicQuestion option over unanswered chatbot question', () => {
+    const records: ChatbotRecordDto[] = [
+      { ...baseRecord, id: 1, questionText: '미답 질문', answerText: null, createdAt: '2026-05-18T09:00:00.000Z' },
+    ];
+
+    const prompt = pickReflectionPrompt(records, { dynamicQuestion: '주 감정 기반 질문이에요?' });
+
+    expect(prompt.source).toBe('dynamic');
+    expect(prompt.question).toBe('주 감정 기반 질문이에요?');
+  });
+
+  it('falls back to chatbot priority when dynamicQuestion is null', () => {
+    const records: ChatbotRecordDto[] = [
+      { ...baseRecord, id: 1, questionText: '미답 질문', answerText: null, createdAt: '2026-05-18T09:00:00.000Z' },
+    ];
+
+    const prompt = pickReflectionPrompt(records, { dynamicQuestion: null });
+
+    expect(prompt.source).toBe('unanswered');
+    expect(prompt.question).toBe('미답 질문');
+  });
 });
