@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAnalysisItems,
-  buildPatternPanelState,
-  buildRecapDialogState,
   buildRecapThemes,
   dateInAnalysisPeriod,
+  pickReflectionPrompt,
   type AnalysisItem,
 } from './Analysis';
 import type { ChatbotRecordDto } from '../lib/api';
@@ -48,69 +47,105 @@ describe('Analysis record enrichment', () => {
   });
 });
 
-describe('Analysis pattern panel', () => {
-  it('keeps the pattern visualization open and sized as the primary viewport section', () => {
-    const panel = buildPatternPanelState(5);
+describe('Analysis recap themes', () => {
+  const items: AnalysisItem[] = [
+    {
+      id: 'item-joy-1',
+      emotionCode: 'joy',
+      category: 'joy',
+      label: '즐거움',
+      color: '#D4B84E',
+      createdAt: '2026-05-18T09:00:00.000Z',
+      recordText: '친구와 커피를 마셨다.',
+      imageUrl: 'https://example.com/coffee.jpg',
+    },
+    {
+      id: 'item-joy-2',
+      emotionCode: 'joy',
+      category: 'joy',
+      label: '편안',
+      color: '#D4B84E',
+      createdAt: '2026-05-17T09:00:00.000Z',
+      recordText: '오후가 잔잔했다.',
+    },
+    {
+      id: 'item-sadness-1',
+      emotionCode: 'sadness',
+      category: 'sadness',
+      label: '우울',
+      color: '#58728E',
+      createdAt: '2026-05-16T09:00:00.000Z',
+      recordText: '하루가 무거웠다.',
+    },
+    {
+      id: 'item-complex-1',
+      emotionCode: 'regret',
+      category: 'complex',
+      label: '후회',
+      color: '#3D3A34',
+      createdAt: '2026-05-15T09:00:00.000Z',
+      recordText: '회의에서 말을 아꼈다.',
+    },
+  ];
 
-    expect(panel.expanded).toBe(true);
-    expect(panel.toggleLabel).toBeNull();
-    expect(panel.layoutRole).toBe('primary-fill');
-    expect(panel.minVisibleRows).toBe(5);
+  it('orders slides positive (joy) first then negative categories', () => {
+    const themes = buildRecapThemes(items);
+
+    expect(themes.map((t) => t.category)).toEqual(['joy', 'sadness', 'complex']);
+    expect(themes[0].title).toBe('웃음이 가장 많았던 순간이에요');
+    expect(themes[1].title).toBe('위로가 필요했던 순간이에요');
+  });
+
+  it('skips categories with no records', () => {
+    const themes = buildRecapThemes(items.filter((i) => i.category === 'joy'));
+
+    expect(themes).toHaveLength(1);
+    expect(themes[0].category).toBe('joy');
+  });
+
+  it('returns empty array when no items', () => {
+    expect(buildRecapThemes([])).toEqual([]);
+  });
+
+  it('sorts records within a category by most recent first', () => {
+    const themes = buildRecapThemes(items);
+    const joy = themes.find((t) => t.category === 'joy');
+
+    expect(joy?.records[0].id).toBe('item-joy-1');
+    expect(joy?.records[1].id).toBe('item-joy-2');
   });
 });
 
-describe('Analysis recap themes', () => {
-  it('builds selectable recap themes with related records', () => {
-    const items: AnalysisItem[] = [
-      {
-        id: 'item-1',
-        emotionCode: 'joy',
-        category: 'joy',
-        label: '즐거움',
-        color: '#D4B84E',
-        createdAt: '2026-05-18T09:00:00.000Z',
-        recordText: '친구와 커피를 마셨다.',
-        imageUrl: 'https://example.com/coffee.jpg',
-      },
-      {
-        id: 'item-2',
-        emotionCode: 'regret',
-        category: 'complex',
-        label: '후회',
-        color: '#3D3A34',
-        createdAt: '2026-05-17T09:00:00.000Z',
-        recordText: '회의에서 말을 아꼈다.',
-      },
+describe('Analysis reflection prompt', () => {
+  it('prefers the most recent unanswered question', () => {
+    const records: ChatbotRecordDto[] = [
+      { ...baseRecord, id: 1, questionText: '오래된 답완 질문', answerText: '답이 있어요', createdAt: '2026-05-10T09:00:00.000Z' },
+      { ...baseRecord, id: 2, questionText: '최근 미답 질문', answerText: null, createdAt: '2026-05-18T09:00:00.000Z' },
     ];
 
-    const themes = buildRecapThemes(items, '이번 주');
+    const prompt = pickReflectionPrompt(records);
 
-    expect(themes.length).toBeGreaterThanOrEqual(3);
-    expect(themes[0].title).toContain('이번 주');
-    expect(themes.some((theme) => theme.title.includes('사진'))).toBe(true);
-    expect(themes.flatMap((theme) => theme.records).some((record) => record.imageUrl?.includes('coffee'))).toBe(true);
+    expect(prompt.source).toBe('unanswered');
+    expect(prompt.question).toBe('최근 미답 질문');
   });
 
-  it('prepares a popup dialog state instead of requiring inline recap records', () => {
-    const items: AnalysisItem[] = [
-      {
-        id: 'item-1',
-        emotionCode: 'joy',
-        category: 'joy',
-        label: '즐거움',
-        color: '#D4B84E',
-        createdAt: '2026-05-18T09:00:00.000Z',
-        recordText: '친구와 커피를 마셨다.',
-        imageUrl: 'https://example.com/coffee.jpg',
-      },
+  it('falls back to most recent answered question', () => {
+    const records: ChatbotRecordDto[] = [
+      { ...baseRecord, id: 1, questionText: '답한 질문 1', answerText: '답 1', createdAt: '2026-05-10T09:00:00.000Z' },
+      { ...baseRecord, id: 2, questionText: '답한 질문 2 (최신)', answerText: '답 2', createdAt: '2026-05-18T09:00:00.000Z' },
     ];
-    const [theme] = buildRecapThemes(items, '이번 주');
 
-    const dialog = buildRecapDialogState(theme);
+    const prompt = pickReflectionPrompt(records);
 
-    expect(dialog?.title).toBe(theme.title);
-    expect(dialog?.records).toHaveLength(1);
-    expect(dialog?.emptyMessage).toContain('기록');
-    expect(buildRecapDialogState(null)).toBeNull();
+    expect(prompt.source).toBe('answered');
+    expect(prompt.question).toBe('답한 질문 2 (최신)');
+    expect(prompt.answer).toBe('답 2');
+  });
+
+  it('uses static prompt when no question records exist', () => {
+    const prompt = pickReflectionPrompt([baseRecord]);
+
+    expect(prompt.source).toBe('static');
+    expect(prompt.question.length).toBeGreaterThan(0);
   });
 });
