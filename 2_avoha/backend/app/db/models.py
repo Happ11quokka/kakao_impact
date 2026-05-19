@@ -9,6 +9,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Date,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -223,13 +224,15 @@ class ChatbotRecord(Base):
     ai_emotion_code: Mapped[str | None] = mapped_column(Text)
     confirmed_emotion_code: Mapped[str | None] = mapped_column(Text)
     confirmed_emotion_codes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
-    confirmed_at: Mapped[datetime | None]
-    web_reviewed_at: Mapped[datetime | None]
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    web_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
     )

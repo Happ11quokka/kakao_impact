@@ -115,7 +115,9 @@ export const useRecordsStore = create<RecordsState>((set, get) => ({
       set({ savingId: null, records: prev });
       return {
         ok: false,
-        error: ERROR_LABEL[code] ?? (target ? '감정 저장에 실패했어요' : '기록을 찾을 수 없어요'),
+        error:
+          ERROR_LABEL[code] ??
+          (target ? `감정 저장에 실패했어요 (${code})` : '기록을 찾을 수 없어요'),
       };
     }
   },
@@ -138,7 +140,7 @@ export const useRecordsStore = create<RecordsState>((set, get) => ({
       const code = err instanceof ApiError ? err.code : 'UNKNOWN';
       return {
         ok: false,
-        error: ERROR_LABEL[code] ?? '자기회고 저장에 실패했어요',
+        error: ERROR_LABEL[code] ?? `자기회고 저장에 실패했어요 (${code})`,
       };
     }
   },
