@@ -1,4 +1,4 @@
-# 아보하 · Frontend
+# 로기 · Frontend
 
 모바일 웹/PWA. 카톡 채널 **"닥토 공방"** 하단 메뉴에서 링크 클릭 → 즉시 진입.
 
@@ -18,7 +18,7 @@
 | `/inventory` | Inventory | 4×4 그리드(광물·스티커 탭) · 등급 테두리 돌멩이/원석/보석/크리스탈 |
 | `/workshop` | Workshop | 드래그앤드롭 세공 |
 | `/book` | CollectionBook | 도감 + 레시피 카드 |
-| `/me` | MyPage | 아보하 지수·설정 |
+| `/me` | MyPage | 로기 지수·설정 |
 | `/login/callback` | LoginCallback | Kakao OAuth 콜백 |
 
 ## 인접 파트 인터페이스
@@ -56,6 +56,6 @@ VITE_SSE_PATH=/sse/inventory
 - [ ] **FE-7** 세공소 드래그앤드롭 + 레시피 판정
 - [ ] **FE-8** SSE 실시간 인벤토리 반영
 - [ ] **FE-9** 도감 (수집률·실루엣·레시피 카드)
-- [ ] **FE-10** 마이페이지 + 아보하 지수 그래프 (Recharts)
+- [ ] **FE-10** 마이페이지 + 로기 지수 그래프 (Recharts)
 - [ ] **FE-11** PWA manifest, 오프라인 캐시
 - [ ] **FE-12** E2E 스모크 테스트

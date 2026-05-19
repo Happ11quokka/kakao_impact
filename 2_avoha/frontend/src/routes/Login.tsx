@@ -124,7 +124,7 @@ export default function Login() {
           <ChibiAvatar className="animate-float" size={104} />
         </div>
         <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: 28, fontWeight: 700, color: 'var(--color-ink)' }}>
-          아보하
+          로기
         </h1>
         <p style={{ fontSize: 14, color: 'var(--color-ink-muted)', lineHeight: 1.6 }}>
           카카오톡 일상이 감정 광물이 됩니다.

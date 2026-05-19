@@ -582,7 +582,7 @@ export default function Home() {
 
   const lakeHelper =
     lakeStones.length > 0
-      ? '아보하를 움직여 오늘의 감정을 찾아보세요.'
+      ? '로기를 움직여 오늘의 감정을 찾아보세요.'
       : '카카오톡 챗봇에서 오늘 마음을 남기면 호수에 원석이 생겨요.';
 
   return (
@@ -838,7 +838,7 @@ export default function Home() {
 
             <div
               role="slider"
-              aria-label="아보하 이동 조이스틱"
+              aria-label="로기 이동 조이스틱"
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(Math.hypot(joystick.x, joystick.y))}
