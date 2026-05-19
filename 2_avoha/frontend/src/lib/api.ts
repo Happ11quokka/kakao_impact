@@ -463,6 +463,16 @@ export const api = {
     return request<{ records: RecordDto[] }>(`/records${suffix ? `?${suffix}` : ''}`);
   },
 
+  createSelfReflection: (body: {
+    questionText: string;
+    answerText: string;
+    linkedDate?: string;
+  }) =>
+    request<{ ok: boolean; record: RecordDto }>('/records/reflection', {
+      method: 'POST',
+      json: body,
+    }),
+
   confirmRecordEmotion: (
     recordId: number,
     body: {

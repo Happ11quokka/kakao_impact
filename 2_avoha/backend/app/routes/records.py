@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -94,6 +94,12 @@ class ConfirmEmotionBody(BaseModel):
     interaction: Literal["confirm", "reclassify"] = "confirm"
     reflectionType: Literal["question", "meditation", "none"] = "none"
     reflectionAnswer: str | None = None
+
+
+class CreateReflectionBody(BaseModel):
+    questionText: str = Field(min_length=1, max_length=500)
+    answerText: str = Field(min_length=1, max_length=2000)
+    linkedDate: str | None = None  # "YYYY-MM-DD"; 없으면 오늘
 
 
 @router.get("/records")
@@ -277,3 +283,84 @@ async def confirm_record_emotion(
             "createdAt": _iso_utc(gem.created_at),
         },
     }
+
+
+@router.post("/records/reflection")
+async def create_self_reflection(
+    body: CreateReflectionBody,
+    user_id: uuid.UUID = Depends(require_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    provider_key = (
+        await session.execute(
+            select(User.provider_user_key).where(User.id == user_id).limit(1)
+        )
+    ).scalar_one_or_none()
+    if not provider_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"message": "USER_NOT_LINKED", "code": "USER_NOT_LINKED"}},
+        )
+
+    now = datetime.now(timezone.utc)
+    linked: date
+    if body.linkedDate:
+        try:
+            linked = date.fromisoformat(body.linkedDate)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": {"message": "INVALID_DATE", "code": "INVALID_DATE"}},
+            )
+    else:
+        linked = now.date()
+
+    record = ChatbotRecord(
+        user_id=provider_key,
+        gem="자기회고",
+        record_text=None,
+        has_photo=False,
+        image_url=None,
+        ai_gems=None,
+        question_id=f"self-reflection-{int(now.timestamp())}",
+        question_text=body.questionText.strip(),
+        answer_text=body.answerText.strip(),
+        linked_date=linked,
+        entry_mode="plain_record",
+        classification_status="user_confirmed",
+        ai_emotion_code=None,
+        confirmed_emotion_code=None,
+        confirmed_emotion_codes=None,
+        confirmed_at=now,
+        web_reviewed_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(record)
+    await session.flush()
+
+    session.add(
+        Event(
+            user_id=user_id,
+            event_type="self_reflection_created",
+            props={
+                "recordId": record.id,
+                "questionText": record.question_text,
+                "linkedDate": linked.isoformat(),
+            },
+        )
+    )
+
+    await session.commit()
+    await session.refresh(record)
+
+    sse_bus.publish(
+        user_id,
+        {
+            "type": "record_created",
+            "recordId": record.id,
+            "kind": "self_reflection",
+        },
+    )
+
+    return {"ok": True, "record": _record_payload(record)}

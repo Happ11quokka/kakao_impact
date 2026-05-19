@@ -1,6 +1,7 @@
 // === Analysis 화면 — 상단 2박스 요약 + 패턴 아코디언 + 카테고리별 풀스크린 리캡 ===
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
+import { useRecordsStore } from '../stores/records-store';
 import type { Gem } from '../types/gem';
 import { api, type ChatbotRecordDto } from '../lib/api';
 import { getEmotion } from '../data/emotions';
@@ -276,7 +277,10 @@ export default function Analysis() {
 
   const reflectionPrompt = useMemo(() => pickReflectionPrompt(recordsInPeriod), [recordsInPeriod]);
   const activeRecapTheme = recapThemes.find((t) => t.id === activeRecapId) ?? null;
-  const isReflectionOpen = activeRecapId === 'reflection';
+  const [reflectionDraft, setReflectionDraft] = useState('');
+  const [savingReflection, setSavingReflection] = useState(false);
+  const [reflectionError, setReflectionError] = useState<string | null>(null);
+  const createSelfReflection = useRecordsStore((s) => s.createSelfReflection);
 
   return (
     <div style={styles.screen}>
@@ -516,28 +520,58 @@ export default function Analysis() {
                   </div>
                 </button>
               ))}
-              <button
-                type="button"
-                onClick={() => setActiveRecapId('reflection')}
-                style={{
-                  ...styles.recapTile,
-                  background: 'linear-gradient(160deg, #EDE2CC 0%, #A0BCA8 100%)',
-                }}
-                aria-label="자기회고 질문 보기"
-              >
-                <div style={{ ...styles.recapTileArt, fontSize: 36 }}>💭</div>
-                <div style={styles.recapTileBody}>
-                  <strong style={styles.recapTileTitle}>자기회고</strong>
-                  <span style={styles.recapTileMeta}>마지막으로 한 가지만 더</span>
-                </div>
-              </button>
             </div>
           )}
         </section>
+
+        {/* 영역 4: 자기회고 — 동적 프롬프트 + textarea + 저장 (캘린더의 자기인지와 동일 포맷으로 적재) */}
+        <section style={styles.reflectionSection} aria-label="자기회고">
+          <SectionHeader title="자기회고" caption="마지막으로 한 가지만 더" />
+          <p style={styles.reflectionQuestion}>Q. {reflectionPrompt.question}</p>
+          {reflectionPrompt.source === 'answered' && reflectionPrompt.answer && (
+            <div style={styles.reflectionPrevious}>
+              <span style={styles.reflectionPreviousLabel}>지난번 내 답</span>
+              <p style={styles.reflectionPreviousText}>{reflectionPrompt.answer}</p>
+            </div>
+          )}
+          <textarea
+            value={reflectionDraft}
+            onChange={(e) => setReflectionDraft(e.target.value)}
+            placeholder="짧게 한 문장으로 적어도 괜찮아요."
+            disabled={savingReflection}
+            style={styles.reflectionTextarea}
+          />
+          {reflectionError && <p style={styles.reflectionError}>{reflectionError}</p>}
+          <button
+            type="button"
+            disabled={savingReflection || reflectionDraft.trim().length === 0}
+            onClick={async () => {
+              const answer = reflectionDraft.trim();
+              if (!answer) return;
+              setSavingReflection(true);
+              setReflectionError(null);
+              const result = await createSelfReflection(reflectionPrompt.question, answer);
+              setSavingReflection(false);
+              if (result.ok) {
+                setReflectionDraft('');
+                api.chatbotRecords(200).then((res) => setRecords(res.records)).catch(() => {});
+              } else {
+                setReflectionError(result.error ?? '저장에 실패했어요');
+              }
+            }}
+            style={{
+              ...styles.reflectionSubmit,
+              opacity: savingReflection || reflectionDraft.trim().length === 0 ? 0.5 : 1,
+              cursor: savingReflection || reflectionDraft.trim().length === 0 ? 'default' : 'pointer',
+            }}
+          >
+            {savingReflection ? '저장 중…' : '자기회고 남기기'}
+          </button>
+        </section>
       </main>
 
-      {/* 영역 3+4: 바텀시트 모달 — 카테고리 기록 또는 자기회고 */}
-      {(activeRecapTheme || isReflectionOpen) && (
+      {/* 영역 3 바텀시트: 카테고리 기록 모달 */}
+      {activeRecapTheme && (
         <div
           style={styles.recapSheetOverlay}
           onClick={() => setActiveRecapId(null)}
@@ -547,23 +581,14 @@ export default function Analysis() {
             style={styles.recapSheet}
             role="dialog"
             aria-modal="true"
-            aria-label={activeRecapTheme ? activeRecapTheme.title : '자기회고 질문'}
+            aria-label={activeRecapTheme.title}
             onClick={(event) => event.stopPropagation()}
           >
             <span style={styles.recapSheetGrip} aria-hidden />
             <header style={styles.recapSheetHeader}>
               <div style={styles.recapSheetTitleBlock}>
-                {activeRecapTheme ? (
-                  <>
-                    <span style={styles.recapSheetKicker}>{activeRecapTheme.caption}</span>
-                    <h2 style={styles.recapSheetTitle}>{activeRecapTheme.title}</h2>
-                  </>
-                ) : (
-                  <>
-                    <span style={styles.recapSheetKicker}>마지막으로 한 가지만 더</span>
-                    <h2 style={styles.recapSheetTitle}>{reflectionPrompt.question}</h2>
-                  </>
-                )}
+                <span style={styles.recapSheetKicker}>{activeRecapTheme.caption}</span>
+                <h2 style={styles.recapSheetTitle}>{activeRecapTheme.title}</h2>
               </div>
               <button
                 type="button"
@@ -624,25 +649,6 @@ export default function Analysis() {
                   </li>
                 ))}
               </ul>
-            )}
-
-            {isReflectionOpen && (
-              <div style={styles.recapSheetReflection}>
-                {reflectionPrompt.source === 'answered' && reflectionPrompt.answer && (
-                  <div style={styles.recapWrapAnswerBox}>
-                    <span style={styles.recapWrapAnswerLabel}>지난번 내 답</span>
-                    <p style={styles.recapWrapAnswerText}>{reflectionPrompt.answer}</p>
-                  </div>
-                )}
-                {reflectionPrompt.source === 'unanswered' && (
-                  <p style={styles.recapWrapHint}>
-                    아직 답하지 못한 질문이에요. 캘린더에서 마저 답해볼 수 있어요.
-                  </p>
-                )}
-                {reflectionPrompt.source === 'static' && (
-                  <p style={styles.recapWrapHint}>{periodLabel}을(를) 천천히 돌아봐요.</p>
-                )}
-              </div>
             )}
           </section>
         </div>
@@ -1142,34 +1148,68 @@ const styles: Record<string, CSSProperties> = {
     wordBreak: 'keep-all',
     overflowWrap: 'anywhere',
   },
-  recapSheetReflection: {
+  reflectionSection: {
+    background: '#EDE2CC',
+    borderRadius: 12,
+    padding: '12px 14px 14px',
     display: 'flex',
     flexDirection: 'column',
-    gap: 10,
+    gap: 8,
+    flexShrink: 0,
   },
-  recapWrapAnswerBox: {
+  reflectionQuestion: {
+    margin: '4px 0 2px',
+    color: '#5A4A32',
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1.45,
+    wordBreak: 'keep-all',
+  },
+  reflectionPrevious: {
     padding: 12,
     borderRadius: 12,
     background: '#FFFFFF',
     boxShadow: '0 1px 3px rgba(90, 74, 50, 0.06)',
   },
-  recapWrapAnswerLabel: {
+  reflectionPreviousLabel: {
     color: '#8B7355',
     fontSize: 10,
     fontWeight: 800,
   },
-  recapWrapAnswerText: {
+  reflectionPreviousText: {
     margin: '4px 0 0',
     color: '#5A4A32',
     fontSize: 13,
     lineHeight: 1.5,
     wordBreak: 'keep-all',
   },
-  recapWrapHint: {
-    margin: 0,
+  reflectionTextarea: {
+    minHeight: 110,
+    padding: '12px 14px',
+    border: '1px solid #E0D3BA',
+    borderRadius: 10,
+    background: '#FFFFFF',
     color: '#5A4A32',
     fontSize: 13,
-    lineHeight: 1.5,
-    wordBreak: 'keep-all',
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    resize: 'none',
+    outline: 'none',
+  },
+  reflectionSubmit: {
+    alignSelf: 'flex-end',
+    border: 0,
+    borderRadius: 10,
+    padding: '10px 18px',
+    background: '#A0BCA8',
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  reflectionError: {
+    margin: 0,
+    color: '#B23A3A',
+    fontSize: 12,
+    fontWeight: 700,
   },
 };
