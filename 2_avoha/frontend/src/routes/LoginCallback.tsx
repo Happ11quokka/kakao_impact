@@ -47,10 +47,31 @@ export default function LoginCallback() {
         justifyContent: 'center',
         flexDirection: 'column',
         gap: 16,
+        background: 'linear-gradient(180deg, #F8E8D8 0%, #FFFAF4 60%, #E8D8C8 100%)',
       }}
     >
       <ChibiAvatar className="animate-float" size={86} />
-      <p style={{ color: 'var(--color-ink-muted)', fontSize: 14 }}>로그인 중...</p>
+      <p style={{ color: 'var(--color-ink-muted)', fontSize: 14, margin: 0 }}>
+        로그인 마무리 중<span aria-hidden="true">…</span>
+      </p>
+      <div style={{ display: 'flex', gap: 6 }} aria-hidden="true">
+        {[0, 0.15, 0.3].map((delay, i) => (
+          <span
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: 'var(--color-point-green, #A0BCA8)',
+              animation: 'loadingDot 1.2s ease-in-out infinite',
+              animationDelay: `${delay}s`,
+            }}
+          />
+        ))}
+      </div>
+      <style>{`
+        @keyframes loadingDot { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.15); } }
+      `}</style>
     </div>
   );
 }

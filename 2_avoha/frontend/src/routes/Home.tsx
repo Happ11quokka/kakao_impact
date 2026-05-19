@@ -24,11 +24,11 @@ const CONFIRMED_SLOTS = [
 ];
 
 const MASCOT_START = { x: 50, y: 66 };
-const LAKE_MOVE_RADIUS = 44;
+const LAKE_MOVE_RADIUS = 48;
 const PROXIMITY_PROMPT_RADIUS = 18;
 const JOYSTICK_KNOB_LIMIT = 24;
 const JOYSTICK_SPEED = 0.036;
-const MASCOT_SIZE = 66;
+const MASCOT_SIZE = 58;
 const GEM_BOX_SLOT_COUNT = 5;
 
 type FieldPosition = { x: number; y: number };
@@ -47,8 +47,8 @@ function clampToLake(position: FieldPosition): FieldPosition {
   const d = Math.hypot(dx, dy);
   if (d <= LAKE_MOVE_RADIUS) {
     return {
-      x: Math.max(6, Math.min(94, position.x)),
-      y: Math.max(6, Math.min(94, position.y)),
+      x: Math.max(2, Math.min(98, position.x)),
+      y: Math.max(2, Math.min(98, position.y)),
     };
   }
   const scale = LAKE_MOVE_RADIUS / d;
@@ -189,7 +189,6 @@ export default function Home() {
     let confirmedIndex = 0;
 
     return todayRecords
-      .filter((record) => record.classificationStatus === 'needs_confirmation' || Boolean(recordEmotionCode(record)))
       .slice(0, CANDIDATE_SLOTS.length + CONFIRMED_SLOTS.length)
       .map<LakeStone>((record) => {
         const isCandidate = record.classificationStatus === 'needs_confirmation';
@@ -200,7 +199,7 @@ export default function Home() {
           ? [record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret']
           : record.confirmedEmotionCodes && record.confirmedEmotionCodes.length > 0
             ? record.confirmedEmotionCodes
-            : [recordEmotionCode(record) ?? 'regret'];
+            : [recordEmotionCode(record) ?? 'untroubled'];
         return {
           record,
           position: slot,
@@ -373,7 +372,18 @@ export default function Home() {
         overflowX: 'hidden',
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
+        <div
+          style={{
+            background: 'var(--color-point-yellow)',
+            borderRadius: 14,
+            padding: '7px 14px',
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-sub)' }}>
+            {todayDateString}
+          </span>
+        </div>
         <button
           type="button"
           onClick={() => setShowBook(true)}
@@ -392,33 +402,18 @@ export default function Home() {
         </button>
       </div>
 
-      {!showBook ? (
-        <section
-          aria-label="오늘의 마음 호수"
-          style={{
-            position: 'relative',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            height: 450,
-            flexShrink: 0,
-            marginBottom: 8,
-          }}
-        >
-          <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
-            <div
-              style={{
-                background: 'var(--color-point-yellow)',
-                borderRadius: 14,
-                padding: '7px 22px',
-              }}
-            >
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-sub)' }}>
-                {todayDateString}
-              </span>
-            </div>
-          </div>
-
+      <section
+        aria-label="오늘의 마음 호수"
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          height: 450,
+          flexShrink: 0,
+          marginBottom: 8,
+        }}
+      >
           <div style={{ textAlign: 'center', marginBottom: 8 }}>
             <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--color-text-main)' }}>
               오늘의 마음 호수
@@ -575,7 +570,7 @@ export default function Home() {
               );
             })}
 
-            {lakeStones.length === 0 && (
+            {todayRecords.length === 0 && (
               <div
                 style={{
                   width: 148,
@@ -704,32 +699,6 @@ export default function Home() {
             </div>
           )}
         </section>
-      ) : (
-        <div
-          style={{
-            position: 'relative',
-            marginTop: 8,
-            marginBottom: 20,
-            marginLeft: -20,
-            marginRight: -20,
-            display: 'flex',
-            justifyContent: 'center',
-            width: 'calc(100% + 40px)',
-          }}
-        >
-          <div
-            style={{
-              width: 'calc(100% - 12px)',
-              maxWidth: 391,
-              aspectRatio: '391 / 540',
-              overflow: 'hidden',
-              animation: 'slideDown 0.2s ease-out',
-            }}
-          >
-            <CollectionBook onClose={() => setShowBook(false)} />
-          </div>
-        </div>
-      )}
 
       {!showBook && (
         <section
@@ -1366,6 +1335,43 @@ export default function Home() {
         </section>
       )}
 
+      {showBook && (
+        <>
+          <div
+            onClick={() => setShowBook(false)}
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(20, 14, 8, 0.35)',
+              backdropFilter: 'blur(6px)',
+              WebkitBackdropFilter: 'blur(6px)',
+              zIndex: 40,
+              animation: 'backdropFadeIn 0.22s ease-out',
+            }}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="감정 도감"
+            style={{
+              position: 'absolute',
+              left: 12,
+              right: 12,
+              top: 64,
+              bottom: 90,
+              borderRadius: 20,
+              overflow: 'hidden',
+              boxShadow: '0 24px 60px rgba(86, 71, 48, 0.28)',
+              zIndex: 50,
+              animation: 'overlayCardIn 0.28s cubic-bezier(0.32, 0.72, 0, 1)',
+            }}
+          >
+            <CollectionBook onClose={() => setShowBook(false)} />
+          </div>
+        </>
+      )}
+
       {recordToast && (
         <div
           role="status"
@@ -1391,6 +1397,14 @@ export default function Home() {
         @keyframes slideDown {
           from { transform: translateY(-8px); opacity: 0; }
           to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes backdropFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes overlayCardIn {
+          from { opacity: 0; transform: translateY(12px) scale(0.98); }
+          to   { opacity: 1; transform: translateY(0)   scale(1); }
         }
         @keyframes sheetUp {
           from { transform: translateY(16px); opacity: 0; }

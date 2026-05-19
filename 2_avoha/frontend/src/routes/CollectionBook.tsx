@@ -73,23 +73,32 @@ export default function CollectionBook({ onClose }: { onClose?: () => void }) {
           aria-label="도감 닫기"
           style={{
             position: 'absolute',
-            top: 0,
-            right: 2,
-            width: 24,
-            height: 45,
-            border: 0,
-            background: 'transparent',
-            color: '#000000',
-            fontSize: 18,
-            fontWeight: 400,
-            lineHeight: '45px',
+            top: 12,
+            right: 12,
+            width: 32,
+            height: 32,
+            border: '1px solid rgba(86,71,48,0.16)',
+            background: 'rgba(255,255,255,0.92)',
+            borderRadius: '50%',
+            boxShadow: '0 2px 8px rgba(86,71,48,0.12)',
             padding: 0,
             cursor: 'pointer',
             outline: 'none',
             zIndex: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            WebkitTapHighlightColor: 'transparent',
           }}
         >
-          X
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path
+              d="M2 2 L12 12 M12 2 L2 12"
+              stroke="#5A4A32"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
 
         {FIGMA_EMOTIONS.map((item, idx) => (
