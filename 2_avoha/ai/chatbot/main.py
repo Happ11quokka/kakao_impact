@@ -767,6 +767,48 @@ def save_gem(
                 pass
 
 
+def save_simple_record_with_classification(
+    user_id: str,
+    record_text: str,
+    has_photo: bool,
+    image_url: str | None = None,
+    *,
+    trace_id: _uuid.UUID | None = None,
+):
+    """단순모드 기록도 응답만 줄이고 저장값은 대화모드처럼 AI 분류해서 남긴다."""
+    if not (record_text or image_url):
+        return
+
+    result = classify_emotion_with_supervisor(record_text or "", trace_id=trace_id, user_id=user_id)
+    valid_gems: list[str] = []
+    if isinstance(result, list):
+        valid_gems = [gem for gem in result if gem in EMOTION_TO_GEM.values()]
+
+    if valid_gems:
+        ai_gems = ",".join(valid_gems)
+        for gem in valid_gems:
+            save_gem(
+                user_id,
+                gem,
+                record_text,
+                has_photo,
+                image_url,
+                ai_gems,
+                trace_id=trace_id,
+            )
+        return
+
+    save_gem(
+        user_id,
+        "일상기록",
+        record_text,
+        has_photo,
+        image_url,
+        None,
+        trace_id=trace_id,
+    )
+
+
 def _is_persisted_url(url: str | None) -> bool:
     """이미 PHOTO_PUBLIC_BASE_URL prefix 인 경우 True (재업로드 방지)."""
     if not url:
@@ -2279,7 +2321,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if is_image_url(utterance):
         # 단순모드에서 사진 수신 시 바로 저장
         if pending_simple_record.get(user_id):
-            background_tasks.add_task(save_gem, user_id, "단순기록", "", True, utterance, None, trace_id=trace_id)
+            background_tasks.add_task(
+                save_simple_record_with_classification,
+                user_id,
+                "",
+                True,
+                utterance,
+                trace_id=trace_id,
+            )
             return JSONResponse(kakao_response(
                 "사진이 바로 저장됐어요! ",
                 custom_replies=BASE_QUICK_REPLIES
@@ -2316,7 +2365,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     # 단순모드 텍스트 처리
     if pending_simple_record.get(user_id):
-        background_tasks.add_task(save_gem, user_id, "단순기록", utterance, False, None, None, trace_id=trace_id)
+        background_tasks.add_task(
+            save_simple_record_with_classification,
+            user_id,
+            utterance,
+            False,
+            None,
+            trace_id=trace_id,
+        )
         return JSONResponse(kakao_response(
             "기록됐어요! ",
             custom_replies=BASE_QUICK_REPLIES
