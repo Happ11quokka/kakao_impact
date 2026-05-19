@@ -91,6 +91,14 @@ function isSameLocalDate(iso: string, base = new Date()): boolean {
   );
 }
 
+// 사용자가 웹(원판/캘린더)에서 한 번도 확정/재분류하지 않은 기록은 원판에 머문다.
+// 챗봇 INSERT 시 classification_status='user_confirmed' 디폴트라도, web_reviewed_at 가
+// 비어 있으면 사용자의 명시적 확정이 아직 없는 상태.
+export function needsLakeReview(record: RecordDto): boolean {
+  if (record.classificationStatus === 'needs_confirmation') return true;
+  return !record.webReviewedAt;
+}
+
 function recordEmotionCode(record: RecordDto): string | null {
   return (
     record.confirmedEmotionCode ??
@@ -194,9 +202,7 @@ export function buildTodayCategoryGemSlots(
   );
 
   const todayConfirmed = records.filter(
-    (record) =>
-      isSameLocalDate(record.createdAt, base) &&
-      record.classificationStatus !== 'needs_confirmation',
+    (record) => isSameLocalDate(record.createdAt, base) && !needsLakeReview(record),
   );
 
   for (const record of todayConfirmed) {
@@ -354,14 +360,18 @@ export default function Home() {
   const lakeStones = useMemo<LakeStone[]>(() => {
     let candidateIndex = 0;
     return todayRecords
-      .filter((record) => record.classificationStatus === 'needs_confirmation')
+      .filter(needsLakeReview)
       .slice(0, CANDIDATE_SLOTS.length)
       .map<LakeStone>((record) => {
         const slot = CANDIDATE_SLOTS[candidateIndex++ % CANDIDATE_SLOTS.length];
+        const codes = confirmedEmotionCodes(record);
         return {
           record,
           position: slot,
-          emotionCodes: [record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret'],
+          emotionCodes:
+            codes.length > 0
+              ? codes
+              : [record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret'],
           status: 'candidate',
         };
       });
@@ -372,7 +382,7 @@ export default function Home() {
     [todayRecords],
   );
   const todayConfirmedCount = useMemo(
-    () => todayRecords.filter((record) => record.classificationStatus !== 'needs_confirmation').length,
+    () => todayRecords.filter((record) => !needsLakeReview(record)).length,
     [todayRecords],
   );
   const activeCategorySlot = useMemo(
