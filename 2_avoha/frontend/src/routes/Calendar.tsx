@@ -355,7 +355,7 @@ function GemDayTile({
                 createdAt: new Date().toISOString(),
                 consumedAt: null,
               }}
-              size={12}
+              size={9}
               variant={dot.label}
             />
           ))}
@@ -915,20 +915,20 @@ const styles: Record<string, CSSProperties> = {
   },
   tileGemRow: {
     position: 'absolute',
-    top: 6,
+    top: 4,
     left: '50%',
     transform: 'translateX(-50%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
-    maxWidth: 40,
+    gap: 1,
+    maxWidth: 36,
     pointerEvents: 'none',
   },
   tileGemMore: {
     marginLeft: 1,
     color: 'rgba(86, 71, 48, 0.7)',
-    fontSize: 9,
+    fontSize: 7,
     fontWeight: 800,
     lineHeight: 1,
   },
