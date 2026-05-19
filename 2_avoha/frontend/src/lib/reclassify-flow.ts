@@ -20,8 +20,8 @@ export function recordHasConfirmedEmotion(record: RecordDto): boolean {
 export function buildRecordReclassifyAction(record: RecordDto): RecordReclassifyAction {
   const confirmed = recordHasConfirmedEmotion(record);
   return {
-    label: confirmed ? '감정 재분류하기' : '감정 분류하기',
-    ariaLabel: confirmed ? '감정 재분류 아코디언 열기' : '감정 분류 아코디언 열기',
+    label: confirmed ? '감정 자세히보기' : '감정 분류하기',
+    ariaLabel: confirmed ? '감정 자세히보기 아코디언 열기' : '감정 분류 아코디언 열기',
     interaction: confirmed ? 'reclassify' : 'confirm',
   };
 }

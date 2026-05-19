@@ -612,13 +612,6 @@ function RecordDetail({
         </button>
       </div>
 
-      {record.recordText && (
-        <>
-          <div style={styles.recordLabel}>기록 내용</div>
-          <p style={styles.recordText}>{record.recordText}</p>
-        </>
-      )}
-
       {reflection && (
         <div style={styles.reflectionBox}>
           <div style={styles.recordLabel}>자기인지 질문</div>
@@ -631,6 +624,23 @@ function RecordDetail({
           )}
         </div>
       )}
+
+      {record.recordText && (
+        <>
+          <div style={styles.recordLabel}>기록 내용</div>
+          <p style={styles.recordText}>{record.recordText}</p>
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={onOpenPicker}
+        aria-label="감정 재분류 아코디언 열기"
+        aria-expanded={open}
+        style={styles.reclassifyBottomTab}
+      >
+        감정 재분류하기
+      </button>
     </div>
   );
 }
@@ -1205,6 +1215,19 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 800,
     padding: '6px 10px',
     cursor: 'pointer',
+  },
+  reclassifyBottomTab: {
+    marginTop: 12,
+    width: '100%',
+    border: 0,
+    borderRadius: 12,
+    background: '#F4E8CD',
+    color: TEXT_MAIN,
+    fontSize: 11,
+    fontWeight: 800,
+    padding: '10px 12px',
+    cursor: 'pointer',
+    textAlign: 'center',
   },
   reclassifyBox: {
     marginTop: 12,
