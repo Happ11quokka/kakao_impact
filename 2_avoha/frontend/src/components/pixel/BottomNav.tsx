@@ -13,13 +13,17 @@ export default function BottomNav() {
     <nav
       className="safe-area-bottom"
       style={{
+        position: 'relative',
+        zIndex: 50,
         display: 'flex',
         justifyContent: 'space-around',
         alignItems: 'center',
-        height: 70,
+        minHeight: 70,
+        paddingTop: 6,
         background: 'var(--color-base)',
         borderTop: '1px solid #E5E5E5',
         flexShrink: 0,
+        boxShadow: '0 -1px 10px rgba(86, 71, 48, 0.06)',
       }}
     >
       {tabs.map(tab => (

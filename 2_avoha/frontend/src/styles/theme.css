@@ -256,8 +256,13 @@ body {
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* === Safe Area === */
+/*
+ * Kakao 인앱 브라우저·일부 안드로이드 chromium은 env(safe-area-inset-bottom)을 0으로
+ * 보고하는데, 실제로는 하단 swipe 영역/툴바가 페이지를 덮어 네비게이션을 가린다.
+ * env() 값과 무관하게 최소 20px의 여유를 강제해서 라벨이 잘리지 않도록 함.
+ */
 .safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px);
 }
 
 /* === Pixel Art Rendering === */
