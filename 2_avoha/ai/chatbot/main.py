@@ -515,6 +515,25 @@ def _call_openai_chat(
     return None
 
 
+TYPO_NORMALIZATION = {
+    "힘덜어": "힘들어",
+    "힘덜다": "힘들다",
+    "힘덜었어": "힘들었어",
+    "힘덜어요": "힘들어요",
+    "힘덜어서": "힘들어서",
+    "힘덜었어요": "힘들었어요",
+    "힘덜었는데": "힘들었는데",
+    "힘덜어도": "힘들어도",
+}
+
+
+def normalize_text_for_classification(text: str) -> str:
+    normalized = text or ""
+    for typo, fixed in TYPO_NORMALIZATION.items():
+        normalized = normalized.replace(typo, fixed)
+    return normalized
+
+
 def classify_emotion(
     text: str,
     *,
@@ -522,6 +541,7 @@ def classify_emotion(
     user_id: str | None = None,
 ) -> list[str] | str | None:
     emotion_list = ", ".join(EMOTION_TO_GEM.keys())
+    normalized_text = normalize_text_for_classification(text)
     prompt = (
         "다음 입력을 세 가지로 분류해줘.\n"
         "1. 인사말만 있거나 감정/일상 내용이 없으면: '기록아님'만 답해\n"
@@ -529,10 +549,16 @@ def classify_emotion(
         "3. 감정이 담긴 기록이면: 아래 감정 목록 중 해당하는 단어로 답해줘\n"
         "   감정 단어가 직접 등장하지 않아도 문장의 맥락과 뉘앙스에서 감정이 느껴지면 추론해서 답해줘.\n"
         "   (예: '드디어 배가 나아졌어' → 편안함, '오늘 발표 잘 끝났다' → 뿌듯함, '기다리던 택배 왔다' → 설렘)\n"
+        "   '행복하다', '좋다', '기분 좋다', '신난다'는 즐거움으로 분류해.\n"
+        "   '힘들다', '힘들어'는 단순 사실이 아니라 감정/상태 표현으로 보고 문맥에 따라 무기력함, 걱정, 후회 등으로 분류해.\n"
+        "   예: '지금 너무 많이 먹어서 행복하고 힘들어' → 즐거움, 무기력함\n"
+        "4. 사용자 문장에는 오타, 받침 실수, 음절 치환이 있을 수 있어. 명백한 오타는 문맥상 자연스러운 한국어로 보정해서 해석해.\n"
+        "   예: '힘덜어'는 '힘들어'로 해석해.\n"
         f"감정 목록: {emotion_list}\n"
         "여러 감정이 담겨있으면 쉼표로만 구분해서 최대 3개까지만 답해줘. "
         "감정이 하나라면 단어 하나만 답해줘. 다른 말은 절대 하지 마.\n\n"
-        f"입력: {text}"
+        f"원문 입력: {text}\n"
+        f"오타 보정 참고 입력: {normalized_text}"
     )
     if not OPENAI_API_KEY:
         print("[classify_emotion config error] OPENAI_API_KEY is not configured")
@@ -611,6 +637,7 @@ def supervisor_check_classification(
     emotion_list = ", ".join(EMOTION_TO_GEM.keys())
     gem_list = ", ".join(EMOTION_TO_GEM.values())
     initial_text = _classification_to_text(initial_result)
+    normalized_text = normalize_text_for_classification(text)
     prompt = (
         "너는 감정 기록 챗봇의 Supervisor 검증 노드다.\n"
         "목표: 사용자 발화가 챗봇 시나리오 goal에 맞게 분류됐는지 검증한다.\n\n"
@@ -621,8 +648,13 @@ def supervisor_check_classification(
         f"허용 감정: {emotion_list}\n"
         f"허용 원석: {gem_list}\n"
         f"사용자 발화: {text}\n"
+        f"오타 보정 참고 발화: {normalized_text}\n"
         f"1차 분류 결과: {initial_text}\n\n"
         "검증 기준:\n"
+        "- 사용자 발화에는 오타, 받침 실수, 음절 치환이 있을 수 있다. 예: '힘덜어'는 문맥상 '힘들어'로 본다.\n"
+        "- '행복하다', '좋다', '기분 좋다', '신난다'는 즐거움 감정 단서로 본다.\n"
+        "- '힘들다', '힘들어'는 단순 사실이 아니라 감정/상태 표현으로 보고 문맥에 따라 무기력함, 걱정, 후회 등으로 검토한다.\n"
+        "- 예: '지금 너무 많이 먹어서 행복하고 힘들어'는 감정 맥락이 있으므로 즐거움과 무기력함 후보를 검토한다.\n"
         "- 발화에 감정 맥락이 있는데 '일상기록' 또는 '기록아님'으로 빠졌는지 확인한다.\n"
         "- 단순 사실 나열인데 감정 원석으로 과잉 분류했는지 확인한다.\n"
         "- 허용 목록 밖의 값은 실패로 본다.\n"
