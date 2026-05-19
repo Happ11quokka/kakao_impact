@@ -1,5 +1,6 @@
 // === Home 화면 — 오늘의 감정 호수 ===
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useInventoryStore } from '../stores/inventory-store';
 import { useRecordsStore } from '../stores/records-store';
 import { EMOTIONS, getEmotion } from '../data/emotions';
@@ -254,6 +255,8 @@ function stonePromptLabel(stone: LakeStone, emotionName?: string): string {
 }
 
 export default function Home() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { fetchInventory } = useInventoryStore();
   const { records, fetchRecords, confirmEmotion, savingId } = useRecordsStore();
   const [showBook, setShowBook] = useState(false);
@@ -277,6 +280,15 @@ export default function Home() {
     fetchInventory();
     fetchRecords();
   }, [fetchInventory, fetchRecords]);
+
+  // 마이페이지의 "감정 도감" 단축에서 navigate('/', { state: { openBook: true } }) 로 들어오면 바로 도감 오픈.
+  useEffect(() => {
+    const state = location.state as { openBook?: boolean } | null;
+    if (state?.openBook) {
+      setShowBook(true);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     if (!activeRecordId) return;
