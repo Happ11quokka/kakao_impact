@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCalendarDayDots,
+  buildCalendarEmotionDots,
+  buildRecordGemBadges,
   buildRecordReflection,
   calendarRecordEmotionCode,
   calendarRecordEmotionCodes,
@@ -7,6 +10,7 @@ import {
   dayQuestionStatus,
 } from './Calendar';
 import type { RecordDto } from '../lib/api';
+import type { Gem } from '../types/gem';
 
 const baseRecord: RecordDto = {
   id: 1,
@@ -28,11 +32,21 @@ const baseRecord: RecordDto = {
   gemEmotionCode: null,
 };
 
+function gem(id: string, emotionCode: string): Gem {
+  return {
+    id,
+    emotionCode,
+    tier: 1,
+    createdAt: '2026-05-18T10:00:00.000Z',
+    consumedAt: null,
+  };
+}
+
 describe('Calendar record reclassification helpers', () => {
-  it('treats past unconfirmed/plain records as reclassification candidates', () => {
+  it('treats past unconfirmed/plain records as unclassified reclassification candidates', () => {
     expect(calendarRecordNeedsReclassification(baseRecord)).toBe(true);
-    expect(calendarRecordEmotionCode(baseRecord)).toBe('regret');
-    expect(calendarRecordEmotionCodes(baseRecord)).toEqual(['regret']);
+    expect(calendarRecordEmotionCode(baseRecord)).toBeNull();
+    expect(calendarRecordEmotionCodes(baseRecord)).toEqual([]);
   });
 
   it('does not require reclassification after a record has been confirmed', () => {
@@ -81,6 +95,65 @@ describe('Calendar record reclassification helpers', () => {
   });
 });
 
+describe('Calendar record gem badges', () => {
+  it('keeps unconfirmed records as an unclassified gemstone instead of showing the AI guess', () => {
+    const badges = buildRecordGemBadges(baseRecord);
+
+    expect(badges).toEqual([
+      {
+        gem: {
+          id: 'record-1-unclassified-0',
+          emotionCode: 'unclassified',
+          tier: 1,
+          createdAt: '2026-05-18T10:00:00.000Z',
+          consumedAt: null,
+        },
+        label: '미분류',
+      },
+    ]);
+  });
+
+  it('builds gemstone badge view models for confirmed calendar records', () => {
+    const badges = buildRecordGemBadges({
+      ...baseRecord,
+      id: 9,
+      classificationStatus: 'user_confirmed',
+      confirmedEmotionCode: 'joy',
+      confirmedEmotionCodes: ['joy'],
+      gemEmotionCode: 'joy',
+      gemId: 'gem-joy',
+    });
+
+    expect(badges).toEqual([
+      {
+        gem: {
+          id: 'gem-joy',
+          emotionCode: 'joy',
+          tier: 1,
+          createdAt: '2026-05-18T10:00:00.000Z',
+          consumedAt: null,
+        },
+        label: '기쁨',
+      },
+    ]);
+  });
+
+  it('builds one gemstone badge per confirmed emotion for multi-emotion records', () => {
+    const badges = buildRecordGemBadges({
+      ...baseRecord,
+      id: 10,
+      classificationStatus: 'reclassified',
+      confirmedEmotionCode: 'joy',
+      confirmedEmotionCodes: ['joy', 'pride'],
+      gemEmotionCode: 'joy',
+      gemId: 'gem-multi',
+    });
+
+    expect(badges.map((badge) => badge.gem.emotionCode)).toEqual(['joy', 'pride']);
+    expect(badges.map((badge) => badge.label)).toEqual(['기쁨', '뿌듯']);
+  });
+});
+
 describe('Calendar day question status', () => {
   it('returns none when no record has a question', () => {
     expect(dayQuestionStatus([baseRecord])).toBe('none');
@@ -111,5 +184,61 @@ describe('Calendar day question status', () => {
 
     expect(dayQuestionStatus([q1])).toBe('unanswered');
     expect(dayQuestionStatus([q1, q2])).toBe('unanswered');
+  });
+});
+
+describe('Calendar day emotion dots', () => {
+  it('represents one dot per collected emotion on that day, including multi-emotion records', () => {
+    const records: RecordDto[] = [
+      {
+        ...baseRecord,
+        id: 11,
+        classificationStatus: 'reclassified',
+        confirmedEmotionCode: 'joy',
+        confirmedEmotionCodes: ['joy', 'pride'],
+        gemEmotionCode: 'joy',
+        gemId: 'gem-multi',
+      },
+      {
+        ...baseRecord,
+        id: 12,
+        classificationStatus: 'user_confirmed',
+        confirmedEmotionCode: 'flutter',
+        confirmedEmotionCodes: ['flutter'],
+        gemEmotionCode: 'flutter',
+        gemId: 'gem-flutter',
+      },
+    ];
+
+    expect(buildCalendarDayDots([], records).map((dot) => dot.label)).toEqual(['기쁨', '뿌듯', '설렘']);
+  });
+
+  it('keeps unconfirmed records as unclassified dots instead of using the AI guess', () => {
+    expect(buildCalendarDayDots([], [baseRecord])).toEqual([
+      { id: 'record-1-unclassified-0', color: '#7B95A8', label: '미분류' },
+    ]);
+  });
+
+  it('represents day gems as small color dots instead of gemstone glyphs', () => {
+    const dots = buildCalendarEmotionDots([
+      gem('g1', 'sadness'),
+      gem('g2', 'pride'),
+      gem('g3', 'flutter'),
+      gem('g4', 'serenity'),
+      gem('g5', 'joy'),
+    ]);
+
+    expect(dots).toEqual([
+      { id: 'g1', color: '#1F3F8C', label: '슬픔' },
+      { id: 'g2', color: '#D6A63A', label: '뿌듯' },
+      { id: 'g3', color: '#BF7D26', label: '설렘' },
+      { id: 'g4', color: '#2F343B', label: '평온' },
+    ]);
+  });
+
+  it('uses the neutral unclassified color when an emotion code is unknown', () => {
+    expect(buildCalendarEmotionDots([gem('g1', 'unknown')])).toEqual([
+      { id: 'g1', color: '#7B95A8', label: 'unknown' },
+    ]);
   });
 });
