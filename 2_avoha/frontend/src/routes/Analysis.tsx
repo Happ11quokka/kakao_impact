@@ -1,5 +1,5 @@
 // === Analysis 화면 — 상단 2박스 요약 + 패턴 아코디언 + 카테고리별 풀스크린 리캡 ===
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
 import type { Gem } from '../types/gem';
 import { api, type ChatbotRecordDto } from '../lib/api';
@@ -219,9 +219,7 @@ export default function Analysis() {
   const [period, setPeriod] = useState<Period>('weekly');
   const [customRange, setCustomRange] = useState<CustomRange>(defaultCustomRange);
   const [selectedCategory, setSelectedCategory] = useState<CategoryCode | null>(null);
-  const [recapOpen, setRecapOpen] = useState(false);
-  const [recapIndex, setRecapIndex] = useState(0);
-  const trackRef = useRef<HTMLDivElement | null>(null);
+  const [activeRecapId, setActiveRecapId] = useState<string | null>(null);
   const { gems, fetchInventory } = useInventoryStore();
   const [records, setRecords] = useState<ChatbotRecordDto[]>([]);
 
@@ -257,22 +255,8 @@ export default function Analysis() {
   }, [records, period, today, customRange]);
 
   const reflectionPrompt = useMemo(() => pickReflectionPrompt(recordsInPeriod), [recordsInPeriod]);
-  const totalSlides = recapThemes.length + 1; // +1: 마지막 자기회고 슬라이드
-
-  // 풀스크린 진입 시 외부 스크롤 잠금 + 트랙 초기화.
-  useEffect(() => {
-    if (!recapOpen) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    // iOS Safari 첫 페인트 보정
-    requestAnimationFrame(() => {
-      trackRef.current?.scrollTo({ left: 0 });
-      setRecapIndex(0);
-    });
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [recapOpen]);
+  const activeRecapTheme = recapThemes.find((t) => t.id === activeRecapId) ?? null;
+  const isReflectionOpen = activeRecapId === 'reflection';
 
   return (
     <div style={styles.screen}>
@@ -476,117 +460,153 @@ export default function Analysis() {
           </div>
         </section>
 
-        {/* 영역 3: 리캡 CTA */}
-        <section style={styles.recapBand}>
-          <SectionHeader title="감정 리캡" />
+        {/* 영역 3: 감정 리캡 — 유튜브 뮤직 스타일 가로 스크롤 타일 */}
+        <section style={styles.recapBand} aria-label="감정 리캡">
+          <SectionHeader title="감정 리캡" caption="이 기간을 채워준 감정들을 다시 만나보세요" />
           {recapThemes.length === 0 ? (
             <p style={styles.recapEmpty}>이번 기간엔 회고할 기록이 부족해요.</p>
           ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setRecapIndex(0);
-                setRecapOpen(true);
-              }}
-              style={styles.recapStartButton}
-              aria-label="감정 리캡 시작"
-            >
-              <span style={styles.recapStartTitle}>지금 리캡 보기</span>
-              <span style={styles.recapStartMeta}>
-                {recapThemes.length + 1}장 · {items.length}개 원석
-              </span>
-            </button>
+            <div className="no-scrollbar" style={styles.recapTileTrack}>
+              {recapThemes.map((theme) => (
+                <button
+                  key={theme.id}
+                  type="button"
+                  onClick={() => setActiveRecapId(theme.id)}
+                  style={{
+                    ...styles.recapTile,
+                    background: `linear-gradient(160deg, ${theme.tone} 0%, ${CATEGORY_BY_CODE[theme.category].color}55 100%)`,
+                  }}
+                  aria-label={`${theme.title} 리캡 보기`}
+                >
+                  <div style={styles.recapTileArt}>
+                    <GemStone
+                      gem={{
+                        id: `tile-${theme.id}`,
+                        emotionCode: REPRESENTATIVE_EMOTION_BY_CATEGORY[theme.category],
+                        tier: 3,
+                        createdAt: new Date().toISOString(),
+                      }}
+                      size={56}
+                      variant={EMOTION_VARIANTS_BY_CATEGORY[theme.category][0]}
+                    />
+                  </div>
+                  <div style={styles.recapTileBody}>
+                    <strong style={styles.recapTileTitle}>{theme.title}</strong>
+                    <span style={styles.recapTileMeta}>{theme.records.length}개의 순간</span>
+                  </div>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setActiveRecapId('reflection')}
+                style={{
+                  ...styles.recapTile,
+                  background: 'linear-gradient(160deg, #EDE2CC 0%, #A0BCA8 100%)',
+                }}
+                aria-label="자기회고 질문 보기"
+              >
+                <div style={{ ...styles.recapTileArt, fontSize: 36 }}>💭</div>
+                <div style={styles.recapTileBody}>
+                  <strong style={styles.recapTileTitle}>자기회고</strong>
+                  <span style={styles.recapTileMeta}>마지막으로 한 가지만 더</span>
+                </div>
+              </button>
+            </div>
           )}
         </section>
       </main>
 
-      {/* 영역 3+4: 풀스크린 리캡 슬라이드 */}
-      {recapOpen && (
-        <div style={styles.recapFullscreen} role="dialog" aria-modal="true" aria-label="감정 리캡">
-          <header style={styles.recapTopBar}>
-            <span style={styles.recapPeriod}>{periodLabel} 리캡</span>
-            <button
-              type="button"
-              onClick={() => setRecapOpen(false)}
-              style={styles.recapCloseBtn}
-              aria-label="리캡 닫기"
-            >
-              ×
-            </button>
-          </header>
-          <div
-            ref={trackRef}
-            className="no-scrollbar"
-            onScroll={(event) => {
-              const next = Math.round(event.currentTarget.scrollLeft / event.currentTarget.clientWidth);
-              setRecapIndex(next);
-            }}
-            style={styles.recapTrack}
+      {/* 영역 3+4: 바텀시트 모달 — 카테고리 기록 또는 자기회고 */}
+      {(activeRecapTheme || isReflectionOpen) && (
+        <div
+          style={styles.recapSheetOverlay}
+          onClick={() => setActiveRecapId(null)}
+          role="presentation"
+        >
+          <section
+            style={styles.recapSheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label={activeRecapTheme ? activeRecapTheme.title : '자기회고 질문'}
+            onClick={(event) => event.stopPropagation()}
           >
-            {recapThemes.map((theme) => (
-              <article key={theme.id} style={{ ...styles.recapSlide, background: theme.tone }}>
-                <span style={styles.recapSlideKicker}>{theme.caption}</span>
-                <h2 style={styles.recapSlideTitle}>{theme.title}</h2>
-                <ul style={styles.recapSlideRecords}>
-                  {theme.records.slice(0, 5).map((record) => (
-                    <li key={record.id} style={styles.recapSlideRow}>
-                      {record.imageUrl ? (
-                        <img src={record.imageUrl} alt="" style={styles.recapSlidePhoto} />
-                      ) : (
-                        <span style={styles.recapSlideGemSlot}>
-                          <GemStone
-                            gem={{
-                              id: `recap-${record.id}`,
-                              emotionCode: record.emotionCode,
-                              tier: 2,
-                              createdAt: record.createdAt,
-                            }}
-                            size={28}
-                            variant={record.label}
-                          />
-                        </span>
-                      )}
-                      <div style={styles.recapSlideRowBody}>
-                        <span style={styles.recapSlideMeta}>
-                          {toDateKey(new Date(record.createdAt))} · {record.label}
-                        </span>
-                        <p style={styles.recapSlideText}>
-                          {record.recordText ?? '텍스트 없이 원석만 남은 순간이에요.'}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ))}
-            <article style={{ ...styles.recapSlide, background: '#EDE2CC' }}>
-              <span style={styles.recapSlideKicker}>마지막으로 한 가지만 더</span>
-              <h2 style={styles.recapSlideTitle}>{reflectionPrompt.question}</h2>
-              {reflectionPrompt.source === 'answered' && reflectionPrompt.answer && (
-                <div style={styles.recapWrapAnswerBox}>
-                  <span style={styles.recapWrapAnswerLabel}>지난번 내 답</span>
-                  <p style={styles.recapWrapAnswerText}>{reflectionPrompt.answer}</p>
-                </div>
-              )}
-              {reflectionPrompt.source === 'unanswered' && (
-                <p style={styles.recapWrapHint}>아직 답하지 못한 질문이에요. 캘린더에서 마저 답해볼 수 있어요.</p>
-              )}
-              {reflectionPrompt.source === 'static' && (
-                <p style={styles.recapWrapHint}>{periodLabel}을(를) 천천히 돌아봐요.</p>
-              )}
-            </article>
-          </div>
-          <div style={styles.recapDots} aria-hidden>
-            {Array.from({ length: totalSlides }).map((_, i) => (
-              <span
-                key={i}
-                style={{
-                  ...styles.recapDot,
-                  ...(i === recapIndex ? styles.recapDotActive : null),
-                }}
-              />
-            ))}
-          </div>
+            <span style={styles.recapSheetGrip} aria-hidden />
+            <header style={styles.recapSheetHeader}>
+              <div style={styles.recapSheetTitleBlock}>
+                {activeRecapTheme ? (
+                  <>
+                    <span style={styles.recapSheetKicker}>{activeRecapTheme.caption}</span>
+                    <h2 style={styles.recapSheetTitle}>{activeRecapTheme.title}</h2>
+                  </>
+                ) : (
+                  <>
+                    <span style={styles.recapSheetKicker}>마지막으로 한 가지만 더</span>
+                    <h2 style={styles.recapSheetTitle}>{reflectionPrompt.question}</h2>
+                  </>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveRecapId(null)}
+                style={styles.recapSheetClose}
+                aria-label="닫기"
+              >
+                ×
+              </button>
+            </header>
+
+            {activeRecapTheme && (
+              <ul style={styles.recapSheetList}>
+                {activeRecapTheme.records.map((record) => (
+                  <li key={record.id} style={styles.recapSheetRow}>
+                    {record.imageUrl ? (
+                      <img src={record.imageUrl} alt="" style={styles.recapSheetPhoto} />
+                    ) : (
+                      <span style={styles.recapSheetGemSlot}>
+                        <GemStone
+                          gem={{
+                            id: `recap-${record.id}`,
+                            emotionCode: record.emotionCode,
+                            tier: 2,
+                            createdAt: record.createdAt,
+                          }}
+                          size={28}
+                          variant={record.label}
+                        />
+                      </span>
+                    )}
+                    <div style={styles.recapSheetRowBody}>
+                      <span style={styles.recapSheetMeta}>
+                        {toDateKey(new Date(record.createdAt))} · {record.label}
+                      </span>
+                      <p style={styles.recapSheetText}>
+                        {record.recordText ?? '텍스트 없이 원석만 남은 순간이에요.'}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {isReflectionOpen && (
+              <div style={styles.recapSheetReflection}>
+                {reflectionPrompt.source === 'answered' && reflectionPrompt.answer && (
+                  <div style={styles.recapWrapAnswerBox}>
+                    <span style={styles.recapWrapAnswerLabel}>지난번 내 답</span>
+                    <p style={styles.recapWrapAnswerText}>{reflectionPrompt.answer}</p>
+                  </div>
+                )}
+                {reflectionPrompt.source === 'unanswered' && (
+                  <p style={styles.recapWrapHint}>
+                    아직 답하지 못한 질문이에요. 캘린더에서 마저 답해볼 수 있어요.
+                  </p>
+                )}
+                {reflectionPrompt.source === 'static' && (
+                  <p style={styles.recapWrapHint}>{periodLabel}을(를) 천천히 돌아봐요.</p>
+                )}
+              </div>
+            )}
+          </section>
         </div>
       )}
     </div>
@@ -604,6 +624,7 @@ function SectionHeader({ title, caption }: { title: string; caption?: string }) 
 
 const styles: Record<string, CSSProperties> = {
   screen: {
+    position: 'relative',
     flex: 1,
     minHeight: 0,
     display: 'flex',
@@ -892,152 +913,189 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     fontWeight: 700,
   },
-  recapStartButton: {
-    marginTop: 6,
-    width: '100%',
-    border: 0,
-    borderRadius: 12,
-    background: '#A0BCA8',
-    color: '#FFFFFF',
-    padding: '14px 16px',
+  recapTileTrack: {
     display: 'flex',
-    alignItems: 'center',
+    gap: 10,
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    padding: '8px 2px 4px',
+    scrollSnapType: 'x mandatory',
+  },
+  recapTile: {
+    flex: '0 0 132px',
+    minHeight: 184,
+    border: 0,
+    borderRadius: 16,
+    padding: '14px 12px 12px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 12,
     cursor: 'pointer',
-    boxShadow: '0 4px 12px rgba(61, 96, 80, 0.18)',
+    scrollSnapAlign: 'start',
+    boxShadow: '0 4px 12px rgba(90, 74, 50, 0.1)',
+    color: '#1E3328',
+    textAlign: 'left',
   },
-  recapStartTitle: {
-    fontSize: 15,
-    fontWeight: 900,
-    letterSpacing: 0.2,
-  },
-  recapStartMeta: {
-    fontSize: 11,
-    fontWeight: 700,
-    opacity: 0.85,
-  },
-  recapFullscreen: {
-    position: 'fixed',
-    inset: 0,
-    zIndex: 60,
-    background: '#F9F4EA',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  recapTopBar: {
+  recapTileArt: {
+    width: 64,
+    height: 64,
+    borderRadius: 14,
+    background: 'rgba(255,255,255,0.42)',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 'calc(14px + env(safe-area-inset-top)) 18px 10px',
-    flexShrink: 0,
+    justifyContent: 'center',
   },
-  recapPeriod: {
-    color: '#8B7355',
-    fontSize: 12,
-    fontWeight: 800,
-    letterSpacing: 0.2,
-  },
-  recapCloseBtn: {
-    width: 34,
-    height: 34,
-    border: 0,
-    borderRadius: 999,
-    background: '#EDE2CC',
-    color: '#5A4A32',
-    fontSize: 20,
-    fontWeight: 800,
-    cursor: 'pointer',
-    outline: 'none',
-  },
-  recapTrack: {
-    flex: 1,
-    display: 'flex',
-    overflowX: 'auto',
-    overflowY: 'hidden',
-    scrollSnapType: 'x mandatory',
-  },
-  recapSlide: {
-    flex: '0 0 100%',
-    scrollSnapAlign: 'start',
-    padding: '24px 22px 84px',
+  recapTileBody: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 14,
-    overflow: 'hidden',
+    gap: 2,
+    width: '100%',
   },
-  recapSlideKicker: {
-    color: '#5A4A32',
+  recapTileTitle: {
     fontSize: 12,
-    fontWeight: 800,
-    letterSpacing: 0.2,
-  },
-  recapSlideTitle: {
-    margin: 0,
-    color: '#1E3328',
-    fontSize: 24,
     fontWeight: 900,
     lineHeight: 1.25,
     wordBreak: 'keep-all',
   },
-  recapSlideRecords: {
-    margin: '6px 0 0',
+  recapTileMeta: {
+    fontSize: 10,
+    fontWeight: 700,
+    color: 'rgba(30, 51, 40, 0.62)',
+  },
+  recapSheetOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 30,
+    display: 'flex',
+    alignItems: 'flex-end',
+    justifyContent: 'stretch',
+    padding: 0,
+    background: 'rgba(30, 51, 40, 0.18)',
+  },
+  recapSheet: {
+    position: 'relative',
+    width: '100%',
+    maxHeight: '62vh',
+    zIndex: 31,
+    overflow: 'auto',
+    background: '#F9F4EA',
+    borderRadius: '22px 22px 0 0',
+    padding: '14px 18px calc(96px + env(safe-area-inset-bottom))',
+    boxShadow: '0 -10px 28px rgba(30, 51, 40, 0.18)',
+  },
+  recapSheetGrip: {
+    display: 'block',
+    width: 40,
+    height: 4,
+    margin: '0 auto 12px',
+    borderRadius: 99,
+    background: 'rgba(90, 74, 50, 0.22)',
+  },
+  recapSheetHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14,
+  },
+  recapSheetTitleBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    minWidth: 0,
+  },
+  recapSheetKicker: {
+    color: '#8B7355',
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: 0.2,
+  },
+  recapSheetTitle: {
+    margin: 0,
+    color: '#1E3328',
+    fontSize: 18,
+    fontWeight: 900,
+    lineHeight: 1.3,
+    wordBreak: 'keep-all',
+  },
+  recapSheetClose: {
+    flexShrink: 0,
+    width: 28,
+    height: 28,
+    border: 0,
+    borderRadius: 999,
+    background: '#EDE2CC',
+    color: '#5A4A32',
+    fontSize: 18,
+    fontWeight: 800,
+    cursor: 'pointer',
+    outline: 'none',
+  },
+  recapSheetList: {
+    margin: 0,
     padding: 0,
     listStyle: 'none',
     display: 'flex',
     flexDirection: 'column',
     gap: 10,
-    overflowY: 'auto',
   },
-  recapSlideRow: {
+  recapSheetRow: {
     display: 'grid',
-    gridTemplateColumns: '64px 1fr',
+    gridTemplateColumns: '56px 1fr',
     gap: 10,
-    background: 'rgba(255,255,255,0.62)',
+    background: '#FFFFFF',
     borderRadius: 12,
     padding: 10,
     alignItems: 'flex-start',
+    boxShadow: '0 1px 3px rgba(90, 74, 50, 0.06)',
   },
-  recapSlidePhoto: {
-    width: 64,
-    height: 64,
+  recapSheetPhoto: {
+    width: 56,
+    height: 56,
     objectFit: 'cover',
     borderRadius: 10,
     background: '#F9F4EA',
   },
-  recapSlideGemSlot: {
-    width: 64,
-    height: 64,
+  recapSheetGemSlot: {
+    width: 56,
+    height: 56,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'rgba(255,255,255,0.55)',
+    background: '#EFE8D9',
     borderRadius: 10,
   },
-  recapSlideRowBody: {
+  recapSheetRowBody: {
     minWidth: 0,
     display: 'flex',
     flexDirection: 'column',
     justifyContent: 'center',
   },
-  recapSlideMeta: {
+  recapSheetMeta: {
     color: '#8B7355',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 800,
   },
-  recapSlideText: {
-    margin: '4px 0 0',
+  recapSheetText: {
+    margin: '3px 0 0',
     color: '#5A4A32',
-    fontSize: 13,
+    fontSize: 12,
     lineHeight: 1.45,
     wordBreak: 'keep-all',
     overflowWrap: 'anywhere',
   },
+  recapSheetReflection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+  },
   recapWrapAnswerBox: {
-    marginTop: 8,
     padding: 12,
     borderRadius: 12,
-    background: 'rgba(255,255,255,0.62)',
+    background: '#FFFFFF',
+    boxShadow: '0 1px 3px rgba(90, 74, 50, 0.06)',
   },
   recapWrapAnswerLabel: {
     color: '#8B7355',
@@ -1057,26 +1115,5 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 13,
     lineHeight: 1.5,
     wordBreak: 'keep-all',
-  },
-  recapDots: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 'calc(24px + env(safe-area-inset-bottom))',
-    display: 'flex',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  recapDot: {
-    display: 'inline-block',
-    width: 6,
-    height: 6,
-    borderRadius: 99,
-    background: 'rgba(90,74,50,0.25)',
-    transition: 'width 200ms ease, background 200ms ease',
-  },
-  recapDotActive: {
-    width: 18,
-    background: '#5A4A32',
   },
 };

@@ -339,13 +339,9 @@ function DatePanel({
       style={styles.panel}
       onClick={(event) => event.stopPropagation()}
     >
+      <span style={styles.panelGrip} aria-hidden />
       <header style={styles.sheetHeader}>
-        <div>
-          <span style={styles.sheetDate}>{formatKoreanDate(dateKey)}</span>
-          <span style={styles.sheetCount}>
-            기록 {records.length}개 · 원석 {gems.length}개
-          </span>
-        </div>
+        <span style={styles.sheetDate}>{formatKoreanDate(dateKey)}</span>
         <button type="button" onClick={onClose} aria-label="팝업 닫기" style={styles.sheetClose}>
           ×
         </button>
@@ -353,22 +349,6 @@ function DatePanel({
 
       {!hasContent && (
         <p style={styles.emptyText}>이 날은 기록된 원석이 없어요.</p>
-      )}
-
-      {questionRecords.length > 0 && (
-        <section style={styles.questionBlock} aria-label="자기인지 질문">
-          <span style={styles.questionLabel}>오늘의 자기인지 질문</span>
-          {questionRecords.map((qr) => (
-            <div key={`q-${qr.id}`} style={styles.questionItem}>
-              <p style={styles.questionPrompt}>{qr.questionText}</p>
-              {qr.answerText ? (
-                <p style={styles.questionAnswer}>{qr.answerText}</p>
-              ) : (
-                <span style={styles.questionMissing}>아직 답하지 못했어요</span>
-              )}
-            </div>
-          ))}
-        </section>
       )}
 
       {(sortedRecords.length > 0 || sortedGems.length > 0) && (
@@ -418,6 +398,24 @@ function DatePanel({
               </article>
             );
           })}
+        </section>
+      )}
+
+      {questionRecords.length > 0 && (
+        <section style={styles.questionBlock} aria-label="이 날의 성찰">
+          <div style={styles.questionBlockHeader}>
+            <span style={styles.questionLabel}>이 날의 성찰</span>
+          </div>
+          {questionRecords.map((qr) => (
+            <div key={`q-${qr.id}`} style={styles.questionItem}>
+              <p style={styles.questionPrompt}>Q. {qr.questionText}</p>
+              {qr.answerText ? (
+                <p style={styles.questionAnswer}>{qr.answerText}</p>
+              ) : (
+                <span style={styles.questionMissing}>아직 답하지 못했어요</span>
+              )}
+            </div>
+          ))}
         </section>
       )}
 
@@ -784,46 +782,43 @@ const styles: Record<string, CSSProperties> = {
     inset: 0,
     zIndex: 30,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '20px 18px calc(90px + env(safe-area-inset-bottom))',
-    background: 'rgba(30, 51, 40, 0.22)',
-    backdropFilter: 'blur(2px)',
+    alignItems: 'flex-end',
+    justifyContent: 'stretch',
+    padding: 0,
+    background: 'rgba(30, 51, 40, 0.16)',
   },
   panel: {
     position: 'relative',
-    width: 'min(360px, 100%)',
-    maxHeight: 'min(78vh, 560px)',
+    width: '100%',
+    maxHeight: '55vh',
     zIndex: 31,
     overflow: 'auto',
     background: DETAIL_PANEL,
-    borderRadius: 22,
-    padding: '18px 18px 18px',
+    borderRadius: '22px 22px 0 0',
+    padding: '14px 18px calc(96px + env(safe-area-inset-bottom))',
     color: TEXT_MAIN,
-    boxShadow: '0 18px 42px rgba(30, 51, 40, 0.22)',
+    boxShadow: '0 -10px 28px rgba(30, 51, 40, 0.18)',
+  },
+  panelGrip: {
+    display: 'block',
+    width: 40,
+    height: 4,
+    margin: '0 auto 12px',
+    borderRadius: 99,
+    background: 'rgba(30, 51, 40, 0.22)',
   },
   sheetHeader: {
     display: 'flex',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 10,
-    marginBottom: 10,
-    borderBottom: '1px solid rgba(255,255,255,0.22)',
+    marginBottom: 14,
     gap: 10,
   },
   sheetDate: {
-    display: 'block',
     color: TEXT_MAIN,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: 900,
     letterSpacing: 0.2,
-  },
-  sheetCount: {
-    display: 'block',
-    marginTop: 3,
-    color: TEXT_SUB,
-    fontSize: 10,
-    fontWeight: 700,
   },
   sheetClose: {
     flexShrink: 0,
@@ -839,18 +834,23 @@ const styles: Record<string, CSSProperties> = {
     outline: 'none',
   },
   questionBlock: {
-    marginBottom: 12,
-    padding: 10,
-    borderRadius: 12,
-    background: 'rgba(255,255,255,0.24)',
-    border: '1px solid rgba(255,255,255,0.28)',
+    marginTop: 14,
+    paddingTop: 14,
+    borderTop: '1px solid rgba(255,255,255,0.22)',
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
   },
+  questionBlockHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
   questionLabel: {
     color: TEXT_SUB,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: 800,
     letterSpacing: 0.2,
   },
