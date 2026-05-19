@@ -1256,6 +1256,27 @@ def _safe_pending_emotion_selection(user_id: str) -> dict | None:
     return data
 
 
+def _multi_emotion_selection_replies(sel: dict) -> list:
+    selected = sel.get("selected_emotions")
+    if not isinstance(selected, list):
+        selected = []
+    remaining = [e for e in sel["emotions"] if e not in selected]
+    replies = [{"label": e, "action": "message", "messageText": e} for e in remaining]
+    if selected:
+        replies.append({"label": "완료하기", "action": "message", "messageText": "완료하기"})
+    return replies
+
+
+def _multi_emotion_selection_text(sel: dict) -> str:
+    selected = sel.get("selected_emotions")
+    if not isinstance(selected, list):
+        selected = []
+    if selected:
+        selected_names = ", ".join(selected)
+        return f"{selected_names}을 선택했어요.\n더 저장할 감정이 있으면 골라주세요."
+    return "저장할 감정을 골라주세요."
+
+
 def _safe_pending_photo(user_id: str) -> tuple[bool, list[str], datetime | None]:
     data = pending_photo.get(user_id)
     if not isinstance(data, dict):
@@ -1370,7 +1391,7 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
         )
 
     VALID_GEMS = set(EMOTION_TO_GEM.values())
-    valid_gems = [g for g in result if g in VALID_GEMS]
+    valid_gems = [g for g in result if g in VALID_GEMS][:3]
 
     pending_gem.pop(user_id, None)
     pending_emotion_selection.pop(user_id, None)
@@ -1389,6 +1410,7 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
             "emotions": emotion_words, "text": utterance,
             "has_photo": has_photo, "image_url": image_url,
             "ai_gems": ",".join(valid_gems),
+            "selected_emotions": [],
         }
         gem_names = ", ".join(valid_gems)
         return kakao_response(
@@ -2085,8 +2107,37 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         sel = _safe_pending_emotion_selection(user_id)
         if not sel:
             return JSONResponse(kakao_response("저장할 원석이 없어요."))
-        emotion_buttons = [{"label": e, "action": "message", "messageText": e} for e in sel["emotions"]]
-        return JSONResponse(kakao_response("어떤 원석을 채집할까요?", custom_replies=emotion_buttons))
+        sel["selected_emotions"] = []
+        return JSONResponse(kakao_response(
+            "저장할 감정을 골라주세요.",
+            custom_replies=_multi_emotion_selection_replies(sel),
+        ))
+
+    if utterance == "완료하기":
+        sel = _safe_pending_emotion_selection(user_id)
+        if not sel:
+            return JSONResponse(kakao_response("저장할 원석이 없어요."))
+        selected = sel.get("selected_emotions")
+        if not isinstance(selected, list) or not selected:
+            return JSONResponse(kakao_response(
+                "먼저 저장할 감정을 하나 이상 골라주세요.",
+                custom_replies=_multi_emotion_selection_replies(sel),
+            ))
+        gems_to_save = [EMOTION_TO_GEM[e] for e in selected if e in EMOTION_TO_GEM]
+        for gem in gems_to_save:
+            background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
+        pending_emotion_selection.pop(user_id, None)
+        saved_names = ", ".join(gems_to_save)
+        msg = f"{saved_names}{_josa_eul(saved_names)} 수집했어요!\n아래 웹 사이트에서 수집한 조각 기록들을 더 자세히 살펴 볼 수 있어요."
+        alert_msg = check_negative_accumulation(user_id)
+        if alert_msg:
+            msg += alert_msg
+        response = kakao_response(msg)
+        for gem in gems_to_save:
+            response = _maybe_attach_reflection_invite(response, user_id, gem, sel["text"])
+            if user_id in pending_reflection:
+                break
+        return JSONResponse(response)
 
     # 감정 선택하기 (일상 기록 후 감정 카테고리 선택)
     if utterance in ("감정 선택하기", "감정 추가하기"):
@@ -2130,9 +2181,19 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         sel = _safe_pending_emotion_selection(user_id)
         print(f"[emotion click] utterance={utterance}, sel={sel}, pending_gem={pending_gem.get(user_id)}")
         if sel and utterance in sel["emotions"]:
-            pending_emotion_selection.pop(user_id, None)
-            pending_gem[user_id] = {"gem": gem, "text": sel["text"], "has_photo": bool(sel.get("has_photo", False)), "image_url": sel.get("image_url"), "ai_gems": sel.get("ai_gems"), "reclassify_step": 0}
-            return JSONResponse(kakao_response(f"{gem}{_josa_eul(gem)} 선택하셨어요! ✨\n저장할까요?", custom_replies=_gem_save_quick_replies(gem)))
+            selected = sel.get("selected_emotions")
+            if not isinstance(selected, list):
+                selected = []
+                sel["selected_emotions"] = selected
+            if utterance not in selected:
+                selected.append(utterance)
+            replies = _multi_emotion_selection_replies(sel)
+            if len(selected) >= len(sel["emotions"]):
+                replies = [{"label": "완료하기", "action": "message", "messageText": "완료하기"}]
+            return JSONResponse(kakao_response(
+                _multi_emotion_selection_text(sel),
+                custom_replies=replies,
+            ))
         existing = _safe_pending_gem(user_id)
         if existing:
             if existing.get("daily") and existing.get("daily_emotion_select"):
