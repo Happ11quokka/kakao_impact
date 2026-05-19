@@ -140,6 +140,56 @@ describe('Analysis recap themes', () => {
 
     expect(themes[0].records).toHaveLength(1);
   });
+
+  it('deduplicates items that share the same record text on the same day (different source messages)', () => {
+    // 시간은 UTC 09:00~13:00 사이로 잡아 한국 표준시(UTC+9) 기준으로도 모두 같은 일자(2026-05-19) 안에 있도록 한다.
+    const themes = buildRecapThemes([
+      {
+        ...items[0],
+        id: 'joy-msg-A',
+        sourceMessageId: 'msg-A',
+        createdAt: '2026-05-19T09:00:00.000Z',
+        recordText: '오늘 공부하면서 힘들었어',
+      },
+      {
+        ...items[0],
+        id: 'joy-msg-B',
+        sourceMessageId: 'msg-B',
+        createdAt: '2026-05-19T11:00:00.000Z',
+        recordText: '오늘 공부하면서 힘들었어',
+      },
+      {
+        ...items[0],
+        id: 'joy-msg-C',
+        sourceMessageId: 'msg-C',
+        createdAt: '2026-05-19T13:00:00.000Z',
+        recordText: '오늘 공부하면서 힘들었어',
+      },
+    ]);
+
+    expect(themes[0].records).toHaveLength(1);
+  });
+
+  it('keeps items separate when text matches but the day differs', () => {
+    const themes = buildRecapThemes([
+      {
+        ...items[0],
+        id: 'joy-day1',
+        sourceMessageId: 'msg-1',
+        createdAt: '2026-05-18T09:00:00.000Z',
+        recordText: '같은 문장',
+      },
+      {
+        ...items[0],
+        id: 'joy-day2',
+        sourceMessageId: 'msg-2',
+        createdAt: '2026-05-19T09:00:00.000Z',
+        recordText: '같은 문장',
+      },
+    ]);
+
+    expect(themes[0].records).toHaveLength(2);
+  });
 });
 
 describe('Analysis reflection prompt', () => {

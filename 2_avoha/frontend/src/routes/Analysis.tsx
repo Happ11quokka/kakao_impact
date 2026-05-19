@@ -223,10 +223,21 @@ export function buildAnalysisItems(
 // 카테고리별 리캡 슬라이드: 긍정(joy) → 부정 순. 데이터 없는 카테고리는 스킵.
 // 같은 사용자 메시지에서 비롯된 sibling 행(같은 logicalKey)은 1개의 "순간" 으로 묶고,
 // 그 안의 감정 라벨들을 합쳐서(`기쁨·뿌듯`) 보여준다.
+// 추가: BE가 source_message_id를 다르게 발급해도 (같은 날 같은 텍스트/사진) 같은
+// 순간으로 인지되도록 (날짜+텍스트+사진) 기반 fallback 키를 우선 사용. logicalKey 매칭이
+// gem<->record id 스페이스 차이로 실패해서 dateRecord fallback 텍스트가 중복 노출되던 버그를 막음.
+function recapGroupKey(item: AnalysisItem): string {
+  const text = item.recordText?.trim();
+  const day = toDateKey(new Date(item.createdAt));
+  if (text) return `txt|${day}|${text}`;
+  if (item.imageUrl) return `img|${day}|${item.imageUrl}`;
+  return item.logicalKey ?? item.sourceMessageId ?? String(item.id);
+}
+
 export function buildRecapThemes(items: AnalysisItem[]): RecapTheme[] {
   const itemsByLogicalKey = new Map<string, AnalysisItem[]>();
   for (const item of items) {
-    const key = item.logicalKey ?? item.sourceMessageId ?? item.id;
+    const key = recapGroupKey(item);
     const bucket = itemsByLogicalKey.get(key);
     if (bucket) bucket.push(item);
     else itemsByLogicalKey.set(key, [item]);
