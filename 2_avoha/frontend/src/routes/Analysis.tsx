@@ -8,6 +8,7 @@ import { getEmotion } from '../data/emotions';
 import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
 import { EMOTION_VARIANTS_BY_CATEGORY } from '../data/emotion-variants';
 import GemStone from '../components/pixel/GemStone';
+import PhotoLightbox from '../components/PhotoLightbox';
 
 export type Period = 'weekly' | 'monthly' | 'custom';
 
@@ -280,6 +281,7 @@ export default function Analysis() {
   const [reflectionDraft, setReflectionDraft] = useState('');
   const [savingReflection, setSavingReflection] = useState(false);
   const [reflectionError, setReflectionError] = useState<string | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const createSelfReflection = useRecordsStore((s) => s.createSelfReflection);
 
   return (
@@ -605,7 +607,14 @@ export default function Analysis() {
                 {activeRecapTheme.records.map((record) => (
                   <li key={record.id} style={styles.recapSheetRow}>
                     {record.imageUrl ? (
-                      <img src={record.imageUrl} alt="" style={styles.recapSheetPhoto} />
+                      <button
+                        type="button"
+                        onClick={() => setLightboxUrl(record.imageUrl!)}
+                        aria-label="사진 크게 보기"
+                        style={styles.recapSheetPhotoButton}
+                      >
+                        <img src={record.imageUrl} alt="" style={styles.recapSheetPhoto} />
+                      </button>
                     ) : (
                       <span style={styles.recapSheetGemSlot}>
                         <GemStone
@@ -653,6 +662,8 @@ export default function Analysis() {
           </section>
         </div>
       )}
+
+      <PhotoLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
     </div>
   );
 }
@@ -1101,6 +1112,16 @@ const styles: Record<string, CSSProperties> = {
     objectFit: 'cover',
     borderRadius: 10,
     background: '#F9F4EA',
+    display: 'block',
+  },
+  recapSheetPhotoButton: {
+    padding: 0,
+    margin: 0,
+    border: 0,
+    background: 'transparent',
+    cursor: 'zoom-in',
+    borderRadius: 10,
+    WebkitTapHighlightColor: 'transparent',
   },
   recapSheetGemSlot: {
     width: 56,

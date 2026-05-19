@@ -1,10 +1,11 @@
 // === Calendar 화면 — Figma 월별 캘린더 + 날짜 기록 패널 ===
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
 import type { Gem } from '../types/gem';
 import type { RecordDto } from '../lib/api';
 import { EMOTIONS, getEmotion } from '../data/emotions';
 import GemStone from '../components/pixel/GemStone';
+import PhotoLightbox from '../components/PhotoLightbox';
 import { useRecordsStore } from '../stores/records-store';
 import { buildRecordReclassifyAction } from '../lib/reclassify-flow';
 
@@ -377,6 +378,7 @@ function DatePanel({
 }) {
   const [pickerRecordId, setPickerRecordId] = useState<number | null>(null);
   const [pickerSelection, setPickerSelection] = useState<string[]>([]);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const pickerRecord = records.find((record) => record.id === pickerRecordId) ?? null;
   const hasContent = gems.length > 0 || records.length > 0;
   const pickerIsReclassify = pickerRecord
@@ -449,6 +451,7 @@ function DatePanel({
                     onOpenPicker={() => {
                       setPickerRecordId((current) => (current === record.id ? null : record.id));
                     }}
+                    onPhotoClick={setLightboxUrl}
                   />
                   {pickerRecordId === record.id && (
                     <ReclassifyAccordion
@@ -516,6 +519,7 @@ function DatePanel({
         </section>
       )}
 
+      <PhotoLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
     </section>
   );
 }
@@ -524,10 +528,12 @@ function RecordDetail({
   record,
   open,
   onOpenPicker,
+  onPhotoClick,
 }: {
   record: RecordDto;
   open: boolean;
   onOpenPicker: () => void;
+  onPhotoClick?: (url: string) => void;
 }) {
   const reflection = buildRecordReflection(record);
   const gemBadges = buildRecordGemBadges(record);
@@ -538,7 +544,14 @@ function RecordDetail({
       {record.hasPhoto && (
         <div style={styles.photoBox}>
           {record.imageUrl ? (
-            <img src={record.imageUrl} alt="" style={styles.photoImage} />
+            <button
+              type="button"
+              onClick={() => onPhotoClick?.(record.imageUrl!)}
+              aria-label="사진 크게 보기"
+              style={styles.photoButton}
+            >
+              <img src={record.imageUrl} alt="" style={styles.photoImage} />
+            </button>
           ) : (
             <span>사용자가 올린 사진</span>
           )}
@@ -668,19 +681,32 @@ function MonthPicker({
 }) {
   const [draftYear, setDraftYear] = useState(year);
   const [draftMonth, setDraftMonth] = useState(month);
+  const yearColRef = useRef<HTMLDivElement>(null);
+  const monthColRef = useRef<HTMLDivElement>(null);
 
   const yearOptions = Array.from({ length: 15 }, (_, index) => year - 7 + index);
   const monthOptions = Array.from({ length: 12 }, (_, index) => index);
+
+  useEffect(() => {
+    yearColRef.current
+      ?.querySelector<HTMLButtonElement>(`button[data-value="${draftYear}"]`)
+      ?.scrollIntoView({ block: 'center' });
+    monthColRef.current
+      ?.querySelector<HTMLButtonElement>(`button[data-value="${draftMonth}"]`)
+      ?.scrollIntoView({ block: 'center' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div style={styles.pickerLayer}>
       <div style={styles.pickerCard}>
         <div style={styles.pickerColumns}>
-          <div style={styles.pickerColumn}>
+          <div ref={yearColRef} style={styles.pickerColumn}>
             {yearOptions.map((option) => (
               <button
                 key={option}
                 type="button"
+                data-value={option}
                 onClick={() => setDraftYear(option)}
                 style={{
                   ...styles.pickerOption,
@@ -693,11 +719,12 @@ function MonthPicker({
             ))}
           </div>
 
-          <div style={styles.pickerColumn}>
+          <div ref={monthColRef} style={styles.pickerColumn}>
             {monthOptions.map((option) => (
               <button
                 key={`${draftYear}-${option}`}
                 type="button"
+                data-value={option}
                 onClick={() => setDraftMonth(option)}
                 style={{
                   ...styles.pickerOption,
@@ -1023,6 +1050,17 @@ const styles: Record<string, CSSProperties> = {
     height: '100%',
     objectFit: 'cover',
     display: 'block',
+  },
+  photoButton: {
+    display: 'block',
+    width: '100%',
+    height: '100%',
+    padding: 0,
+    margin: 0,
+    border: 0,
+    background: 'transparent',
+    cursor: 'zoom-in',
+    WebkitTapHighlightColor: 'transparent',
   },
   recordLabel: {
     color: TEXT_SUB,
