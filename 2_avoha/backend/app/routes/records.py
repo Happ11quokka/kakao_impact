@@ -93,6 +93,7 @@ class ConfirmEmotionBody(BaseModel):
     emotionCodes: list[str] | None = Field(default=None)
     interaction: Literal["confirm", "reclassify"] = "confirm"
     reflectionType: Literal["question", "meditation", "none"] = "none"
+    reflectionAnswer: str | None = None
 
 
 @router.get("/records")
@@ -225,6 +226,10 @@ async def confirm_record_emotion(
     record.confirmed_at = now
     record.web_reviewed_at = now
     record.updated_at = now
+    reflection_answer = (body.reflectionAnswer or "").strip()
+    if reflection_answer:
+        record.question_text = "지금 다시 보니, 그 순간의 감정을 바꾸고 싶은 이유는 무엇인가요?"
+        record.answer_text = reflection_answer
 
     session.add(
         Event(
@@ -236,6 +241,7 @@ async def confirm_record_emotion(
                 "emotionCodes": codes,
                 "interaction": body.interaction,
                 "reflectionType": body.reflectionType,
+                "reflectionAnswered": bool(reflection_answer),
             },
         )
     )

@@ -12,7 +12,11 @@ interface RecordsState {
   confirmEmotion: (
     recordId: number,
     emotionCodes: string[],
-    opts?: { interaction?: 'confirm' | 'reclassify'; reflectionType?: 'question' | 'meditation' | 'none' },
+    opts?: {
+      interaction?: 'confirm' | 'reclassify';
+      reflectionType?: 'question' | 'meditation' | 'none';
+      reflectionAnswer?: string;
+    },
   ) => Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -74,6 +78,7 @@ export const useRecordsStore = create<RecordsState>((set, get) => ({
         emotionCodes: codes,
         interaction,
         reflectionType: opts?.reflectionType ?? 'none',
+        reflectionAnswer: opts?.reflectionAnswer,
       });
       set((s) => ({
         savingId: null,

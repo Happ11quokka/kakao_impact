@@ -1,11 +1,12 @@
 // === Calendar 화면 — Figma 월별 캘린더 + 날짜 기록 패널 ===
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
 import type { Gem } from '../types/gem';
 import type { RecordDto } from '../lib/api';
 import { EMOTIONS, getEmotion } from '../data/emotions';
 import GemStone from '../components/pixel/GemStone';
 import { useRecordsStore } from '../stores/records-store';
+import { buildReclassifyFlowState, buildRecordReclassifyAction } from '../lib/reclassify-flow';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const CALENDAR_BG = '#F9F4EA';
@@ -267,17 +268,18 @@ export default function Calendar() {
             records={selectedRecords}
             savingId={savingId}
             onClose={() => setSelectedDate(null)}
-            onConfirmEmotion={async (record, emotionCodes) => {
-              const wasCandidate = calendarRecordNeedsReclassification(record);
+            onConfirmEmotion={async (record, emotionCodes, reflectionAnswer) => {
+              const interaction = buildRecordReclassifyAction(record).interaction;
               const result = await confirmEmotion(record.id, emotionCodes, {
-                interaction: wasCandidate ? 'confirm' : 'reclassify',
-                reflectionType: 'none',
+                interaction,
+                reflectionType: 'question',
+                reflectionAnswer,
               });
               const primary = getEmotion(emotionCodes[0]);
               const multiSuffix = emotionCodes.length > 1 ? ` 외 ${emotionCodes.length - 1}개` : '';
               setRecordToast(
                 result.ok
-                  ? wasCandidate
+                  ? interaction === 'confirm'
                     ? `${primary?.nameKo ?? '감정'}${multiSuffix} 원석으로 저장했어요`
                     : `${primary?.nameKo ?? '감정'}${multiSuffix} 원석으로 업데이트했어요`
                   : result.error ?? '감정 저장에 실패했어요',
@@ -372,15 +374,17 @@ function DatePanel({
   records: RecordDto[];
   savingId: number | null;
   onClose: () => void;
-  onConfirmEmotion: (record: RecordDto, emotionCodes: string[]) => Promise<void>;
+  onConfirmEmotion: (record: RecordDto, emotionCodes: string[], reflectionAnswer: string) => Promise<void>;
 }) {
   const [pickerRecordId, setPickerRecordId] = useState<number | null>(null);
   const [pickerSelection, setPickerSelection] = useState<string[]>([]);
+  const [reclassifyAnswer, setReclassifyAnswer] = useState('');
+  const [reclassifyAnswerSubmitted, setReclassifyAnswerSubmitted] = useState(false);
   const pickerRecord = records.find((record) => record.id === pickerRecordId) ?? null;
   const hasContent = gems.length > 0 || records.length > 0;
-  const pickerIsReclassify = Boolean(
-    pickerRecord && !calendarRecordNeedsReclassification(pickerRecord),
-  );
+  const pickerIsReclassify = pickerRecord
+    ? buildRecordReclassifyAction(pickerRecord).interaction === 'reclassify'
+    : false;
 
   const questionRecords = records.filter((r) => r.questionText?.trim());
   const sortedRecords = [...records].sort(
@@ -394,6 +398,8 @@ function DatePanel({
   useEffect(() => {
     setPickerRecordId(null);
     setPickerSelection([]);
+    setReclassifyAnswer('');
+    setReclassifyAnswerSubmitted(false);
   }, [dateKey, records]);
 
   useEffect(() => {
@@ -403,8 +409,21 @@ function DatePanel({
       );
     } else {
       setPickerSelection([]);
+      setReclassifyAnswer('');
+      setReclassifyAnswerSubmitted(false);
     }
   }, [pickerRecord, pickerIsReclassify]);
+
+  const submitReclassifyAnswer = () => {
+    if (!reclassifyAnswer.trim()) return;
+    setReclassifyAnswerSubmitted(true);
+  };
+
+  const handleReclassifyAnswerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    submitReclassifyAnswer();
+  };
 
   return (
     <section
@@ -444,8 +463,43 @@ function DatePanel({
                 >
                   <RecordDetail
                     record={record}
-                    onOpenPicker={() => setPickerRecordId(record.id)}
+                    open={pickerRecordId === record.id}
+                    onOpenPicker={() => {
+                      setPickerRecordId((current) => (current === record.id ? null : record.id));
+                      setReclassifyAnswer('');
+                      setReclassifyAnswerSubmitted(false);
+                    }}
                   />
+                  {pickerRecordId === record.id && (
+                    <ReclassifyAccordion
+                      record={record}
+                      answer={reclassifyAnswer}
+                      answerSubmitted={reclassifyAnswerSubmitted}
+                      selection={pickerSelection}
+                      saving={savingId === record.id}
+                      onAnswerChange={(value) => {
+                        setReclassifyAnswer(value);
+                        setReclassifyAnswerSubmitted(false);
+                      }}
+                      onAnswerSubmit={submitReclassifyAnswer}
+                      onAnswerKeyDown={handleReclassifyAnswerKeyDown}
+                      onToggleEmotion={(emotionCode) => {
+                        setPickerSelection((prev) =>
+                          prev.includes(emotionCode)
+                            ? prev.filter((code) => code !== emotionCode)
+                            : [...prev, emotionCode],
+                        );
+                      }}
+                      onSave={() =>
+                        void onConfirmEmotion(record, pickerSelection, reclassifyAnswer).then(() => {
+                          setPickerRecordId(null);
+                          setPickerSelection([]);
+                          setReclassifyAnswer('');
+                          setReclassifyAnswerSubmitted(false);
+                        })
+                      }
+                    />
+                  )}
                 </div>
               </article>
             );
@@ -492,108 +546,22 @@ function DatePanel({
         </section>
       )}
 
-      {pickerRecord && (
-        <div style={styles.reclassifyBox}>
-          <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
-          <p style={styles.reclassifyHint}>
-            {pickerIsReclassify
-              ? '여러 감정이 함께 떠오르면 모두 골라주세요.'
-              : '오늘이 지나도 미분류 원석은 캘린더에서 다시 분류할 수 있어요.'}
-          </p>
-          <div style={styles.emotionGrid}>
-            {EMOTIONS.map((emotion) => {
-              const selected = pickerIsReclassify && pickerSelection.includes(emotion.code);
-              return (
-                <button
-                  key={emotion.code}
-                  type="button"
-                  disabled={savingId === pickerRecord.id}
-                  onClick={() => {
-                    if (pickerIsReclassify) {
-                      setPickerSelection((prev) =>
-                        prev.includes(emotion.code)
-                          ? prev.filter((c) => c !== emotion.code)
-                          : [...prev, emotion.code],
-                      );
-                    } else {
-                      void onConfirmEmotion(pickerRecord, [emotion.code]).then(() =>
-                        setPickerRecordId(null),
-                      );
-                    }
-                  }}
-                  style={{
-                    ...styles.emotionButton,
-                    border: selected
-                      ? `2px solid ${emotion.hexColor}`
-                      : `1px solid ${emotion.hexColor}66`,
-                    background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
-                    cursor: savingId === pickerRecord.id ? 'wait' : 'pointer',
-                    position: 'relative',
-                    fontWeight: 800,
-                  }}
-                >
-                  {emotion.nameKo}
-                  {selected && (
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        position: 'absolute',
-                        top: 2,
-                        right: 4,
-                        fontSize: 9,
-                        fontWeight: 800,
-                        color: emotion.hexColor,
-                      }}
-                    >
-                      ✓
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          {pickerIsReclassify && (
-            <button
-              type="button"
-              disabled={pickerSelection.length === 0 || savingId === pickerRecord.id}
-              onClick={() =>
-                void onConfirmEmotion(pickerRecord, pickerSelection).then(() => {
-                  setPickerRecordId(null);
-                  setPickerSelection([]);
-                })
-              }
-              style={{
-                width: '100%',
-                minHeight: 38,
-                marginTop: 10,
-                border: 'none',
-                borderRadius: 10,
-                background:
-                  pickerSelection.length === 0 ? '#C9C3B7' : 'rgba(61, 107, 80, 0.94)',
-                color: '#FFFFFF',
-                fontSize: 11,
-                fontWeight: 800,
-                cursor:
-                  pickerSelection.length === 0 || savingId === pickerRecord.id
-                    ? 'wait'
-                    : 'pointer',
-              }}
-            >
-              {pickerSelection.length === 0
-                ? '감정을 골라주세요'
-                : `감정 ${pickerSelection.length}개 저장`}
-            </button>
-          )}
-        </div>
-      )}
     </section>
   );
 }
 
-function RecordDetail({ record, onOpenPicker }: { record: RecordDto; onOpenPicker: () => void }) {
-  const needsReclassification = calendarRecordNeedsReclassification(record);
+function RecordDetail({
+  record,
+  open,
+  onOpenPicker,
+}: {
+  record: RecordDto;
+  open: boolean;
+  onOpenPicker: () => void;
+}) {
   const reflection = buildRecordReflection(record);
   const gemBadges = buildRecordGemBadges(record);
+  const action = buildRecordReclassifyAction(record);
 
   return (
     <div>
@@ -620,11 +588,15 @@ function RecordDetail({ record, onOpenPicker }: { record: RecordDto; onOpenPicke
             <span style={styles.recordMetaPill}>미분류 원석</span>
           )}
         </div>
-        {needsReclassification && (
-          <button type="button" onClick={onOpenPicker} style={styles.reclassifyOpenButton}>
-            감정 분류하기
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={onOpenPicker}
+          aria-label={action.ariaLabel}
+          aria-expanded={open}
+          style={styles.reclassifyOpenButton}
+        >
+          {action.label}
+        </button>
       </div>
 
       {record.recordText && (
@@ -650,6 +622,112 @@ function RecordDetail({ record, onOpenPicker }: { record: RecordDto; onOpenPicke
   );
 }
 
+function ReclassifyAccordion({
+  record,
+  answer,
+  answerSubmitted,
+  selection,
+  saving,
+  onAnswerChange,
+  onAnswerSubmit,
+  onAnswerKeyDown,
+  onToggleEmotion,
+  onSave,
+}: {
+  record: RecordDto;
+  answer: string;
+  answerSubmitted: boolean;
+  selection: string[];
+  saving: boolean;
+  onAnswerChange: (value: string) => void;
+  onAnswerSubmit: () => void;
+  onAnswerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onToggleEmotion: (emotionCode: string) => void;
+  onSave: () => void;
+}) {
+  const action = buildRecordReclassifyAction(record);
+  const flow = buildReclassifyFlowState(answer, answerSubmitted);
+  const canSave = flow.canChooseEmotion && selection.length > 0 && !saving;
+
+  return (
+    <div style={styles.reclassifyBox} aria-label={`${action.label} 아코디언`}>
+      <div style={styles.recordLabel}>자기인지 질문</div>
+      <p style={styles.reclassifyHint}>Q. {flow.question}</p>
+      {!flow.canChooseEmotion ? (
+        <>
+          <textarea
+            value={answer}
+            disabled={saving}
+            onChange={(event) => onAnswerChange(event.target.value)}
+            onKeyDown={onAnswerKeyDown}
+            placeholder="짧게 한 문장으로 적어도 괜찮아요."
+            style={styles.reclassifyTextarea}
+          />
+          <button
+            type="button"
+            disabled={answer.trim().length === 0 || saving}
+            onClick={onAnswerSubmit}
+            style={{
+              ...styles.reclassifySaveButton,
+              background: answer.trim().length > 0 && !saving ? 'rgba(61, 107, 80, 0.94)' : '#C9C3B7',
+              cursor: answer.trim().length > 0 && !saving ? 'pointer' : 'wait',
+            }}
+          >
+            {answer.trim().length > 0 ? 'Enter를 눌러 감정 다시 고르기' : '답변을 적고 Enter를 누르면 감정을 고를 수 있어요'}
+          </button>
+        </>
+      ) : (
+        <>
+          <p style={styles.reclassifyAnswerCard}>
+            {flow.answer}
+          </p>
+          <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
+          <p style={styles.reclassifyHint}>여러 감정이 함께 떠오르면 모두 골라주세요.</p>
+          <div style={styles.emotionGrid}>
+            {EMOTIONS.map((emotion) => {
+              const selected = selection.includes(emotion.code);
+              return (
+                <button
+                  key={emotion.code}
+                  type="button"
+                  disabled={saving}
+                  onClick={() => onToggleEmotion(emotion.code)}
+                  style={{
+                    ...styles.emotionButton,
+                    border: selected
+                      ? `2px solid ${emotion.hexColor}`
+                      : `1px solid ${emotion.hexColor}66`,
+                    background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
+                    cursor: saving ? 'wait' : 'pointer',
+                    position: 'relative',
+                  }}
+                >
+                  {emotion.nameKo}
+                  {selected && (
+                    <span aria-hidden="true" style={styles.emotionCheckMark}>✓</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            disabled={!canSave}
+            onClick={onSave}
+            style={{
+              ...styles.reclassifySaveButton,
+              background: canSave ? 'rgba(61, 107, 80, 0.94)' : '#C9C3B7',
+              cursor: canSave ? 'pointer' : 'wait',
+            }}
+          >
+            {selection.length === 0 ? '감정을 골라주세요' : `감정 ${selection.length}개 저장`}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function MonthPicker({
   year,
   month,
@@ -664,12 +742,8 @@ function MonthPicker({
   const [draftYear, setDraftYear] = useState(year);
   const [draftMonth, setDraftMonth] = useState(month);
 
-  const yearOptions = [draftYear - 1, draftYear, draftYear + 1];
-  const monthOptions = [
-    (draftMonth + 11) % 12,
-    draftMonth,
-    (draftMonth + 1) % 12,
-  ];
+  const yearOptions = Array.from({ length: 15 }, (_, index) => year - 7 + index);
+  const monthOptions = Array.from({ length: 12 }, (_, index) => index);
 
   return (
     <div style={styles.pickerLayer}>
@@ -1129,6 +1203,33 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.45,
     margin: '0 0 10px',
   },
+  reclassifyTextarea: {
+    width: '100%',
+    minHeight: 64,
+    marginBottom: 10,
+    padding: '9px 10px',
+    borderRadius: 10,
+    border: '1px solid rgba(86, 71, 48, 0.16)',
+    background: 'rgba(255, 255, 255, 0.78)',
+    color: TEXT_MAIN,
+    fontSize: 11,
+    lineHeight: 1.45,
+    resize: 'vertical',
+    boxSizing: 'border-box',
+  },
+  reclassifyAnswerCard: {
+    margin: '0 0 12px',
+    padding: '9px 10px',
+    borderRadius: 10,
+    background: 'rgba(255, 255, 255, 0.34)',
+    border: '1px solid rgba(255, 255, 255, 0.18)',
+    color: TEXT_MAIN,
+    fontSize: 11,
+    fontWeight: 700,
+    lineHeight: 1.5,
+    wordBreak: 'keep-all',
+    overflowWrap: 'anywhere',
+  },
   emotionGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(5, 1fr)',
@@ -1141,6 +1242,24 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 10,
     fontWeight: 800,
     padding: '0 4px',
+  },
+  emotionCheckMark: {
+    position: 'absolute',
+    top: 2,
+    right: 4,
+    fontSize: 9,
+    fontWeight: 800,
+    color: TEXT_SUB,
+  },
+  reclassifySaveButton: {
+    width: '100%',
+    minHeight: 38,
+    marginTop: 10,
+    border: 'none',
+    borderRadius: 10,
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: 800,
   },
   toast: {
     position: 'absolute',
@@ -1179,8 +1298,13 @@ const styles: Record<string, CSSProperties> = {
   },
   pickerColumn: {
     position: 'relative',
-    display: 'grid',
+    display: 'flex',
+    flexDirection: 'column',
     gap: 6,
+    maxHeight: 168,
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    paddingRight: 2,
   },
   pickerOption: {
     height: 25,

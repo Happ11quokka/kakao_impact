@@ -32,6 +32,8 @@ export type AnalysisItem = {
   createdAt: string;
   recordText?: string | null;
   imageUrl?: string | null;
+  sourceMessageId?: string;
+  emotionBadges?: Array<{ code: string; label: string }>;
 };
 
 export type RecapTheme = {
@@ -136,6 +138,7 @@ function gemToItem(gem: Gem, index: number): AnalysisItem {
     color: emotion?.hexColor ?? CATEGORY_BY_CODE[category].color,
     createdAt: gem.createdAt,
     recordText: gem.sourceText,
+    sourceMessageId: gem.sourceMessageId,
   };
 }
 
@@ -163,15 +166,25 @@ export function buildAnalysisItems(
   customRange?: CustomRange,
 ): AnalysisItem[] {
   const recordDataByDate = recordToDataByDate(records);
-  return gems
+  const filteredItems = gems
     .map(gemToItem)
-    .filter((item) => dateInAnalysisPeriod(new Date(item.createdAt), period, today, customRange))
+    .filter((item) => dateInAnalysisPeriod(new Date(item.createdAt), period, today, customRange));
+  const badgesBySourceMessageId = filteredItems.reduce<Record<string, Array<{ code: string; label: string }>>>((acc, item) => {
+    if (!item.sourceMessageId) return acc;
+    if (!acc[item.sourceMessageId]) acc[item.sourceMessageId] = [];
+    acc[item.sourceMessageId].push({ code: item.emotionCode, label: getEmotion(item.emotionCode)?.nameKo ?? item.label });
+    return acc;
+  }, {});
+
+  return filteredItems
     .map((item) => {
       const recordData = recordDataByDate[toDateKey(new Date(item.createdAt))];
+      const emotionBadges = item.sourceMessageId ? badgesBySourceMessageId[item.sourceMessageId] : undefined;
       return {
         ...item,
         recordText: item.recordText ?? recordData?.recordText,
         imageUrl: recordData?.imageUrl ?? null,
+        emotionBadges: emotionBadges && emotionBadges.length > 1 ? emotionBadges : undefined,
       };
     });
 }
@@ -179,9 +192,16 @@ export function buildAnalysisItems(
 // 카테고리별 리캡 슬라이드: 긍정(joy) → 부정 순. 데이터 없는 카테고리는 스킵.
 export function buildRecapThemes(items: AnalysisItem[]): RecapTheme[] {
   return RECAP_ORDER.reduce<RecapTheme[]>((acc, code) => {
-    const records = items
+    const sortedRecords = items
       .filter((item) => item.category === code)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const seenSources = new Set<string>();
+    const records = sortedRecords.filter((item) => {
+      const key = item.sourceMessageId ?? item.id;
+      if (seenSources.has(key)) return false;
+      seenSources.add(key);
+      return true;
+    });
     if (records.length === 0) return acc;
     acc.push({
       id: `recap-${code}`,
@@ -579,6 +599,24 @@ export default function Analysis() {
                       <span style={styles.recapSheetMeta}>
                         {toDateKey(new Date(record.createdAt))} · {record.label}
                       </span>
+                      {record.emotionBadges && (
+                        <div style={styles.recapSheetBadgeRow}>
+                          {record.emotionBadges.map((badge) => (
+                            <span key={`${record.id}-${badge.code}`} style={styles.recapSheetBadge}>
+                              <GemStone
+                                gem={{
+                                  id: `recap-badge-${record.id}-${badge.code}`,
+                                  emotionCode: badge.code,
+                                  tier: 1,
+                                  createdAt: record.createdAt,
+                                }}
+                                size={16}
+                              />
+                              {badge.label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <p style={styles.recapSheetText}>
                         {record.recordText ?? '텍스트 없이 원석만 남은 순간이에요.'}
                       </p>
@@ -1075,6 +1113,24 @@ const styles: Record<string, CSSProperties> = {
   },
   recapSheetMeta: {
     color: '#8B7355',
+    fontSize: 10,
+    fontWeight: 800,
+  },
+  recapSheetBadgeRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 5,
+    marginTop: 5,
+  },
+  recapSheetBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+    padding: '3px 6px',
+    borderRadius: 999,
+    background: '#FFFFFF',
+    border: '1px solid rgba(90, 74, 50, 0.08)',
+    color: '#5A4A32',
     fontSize: 10,
     fontWeight: 800,
   },

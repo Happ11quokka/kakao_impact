@@ -174,16 +174,16 @@ let mockRecords: RecordDto[] = [
   {
     id: 102,
     gem: '즐거움 조각',
-    recordText: '퇴근길에 좋아하는 노래를 들으면서 걷는데, 오늘 하루가 생각보다 괜찮았다는 느낌이 들었어.',
+    recordText: '퇴근길에 좋아하는 노래를 들으면서 걷는데, 오늘 하루가 괜찮았다는 안도감과 스스로 챙겼다는 뿌듯함, 내일에 대한 설렘이 같이 있었어.',
     hasPhoto: false,
     imageUrl: null,
-    aiGems: '즐거움 조각',
+    aiGems: '즐거움 조각,뿌듯함 조각,설렘 조각',
     createdAt: mockEmotionRecordTime,
     entryMode: 'emotion_classification',
     classificationStatus: 'user_confirmed',
     aiEmotionCode: 'joy',
     confirmedEmotionCode: 'joy',
-    confirmedEmotionCodes: ['joy'],
+    confirmedEmotionCodes: ['joy', 'pride', 'flutter'],
     confirmedAt: mockEmotionRecordTime,
     webReviewedAt: null,
     updatedAt: mockEmotionRecordTime,
@@ -217,8 +217,26 @@ let mockRecords: RecordDto[] = [
 
 let mockGems: GemDto[] = [
   {
-    id: 'mock-gem-102',
+    id: 'mock-gem-102-joy',
     emotionCode: 'joy',
+    tier: 1,
+    source: 'chatbot_emotion_classification',
+    sourceMessageId: '102',
+    craftedFrom: [],
+    createdAt: mockRecords[1].createdAt,
+  },
+  {
+    id: 'mock-gem-102-pride',
+    emotionCode: 'pride',
+    tier: 1,
+    source: 'chatbot_emotion_classification',
+    sourceMessageId: '102',
+    craftedFrom: [],
+    createdAt: mockRecords[1].createdAt,
+  },
+  {
+    id: 'mock-gem-102-flutter',
+    emotionCode: 'flutter',
     tier: 1,
     source: 'chatbot_emotion_classification',
     sourceMessageId: '102',
@@ -334,6 +352,7 @@ function mockRequest<T>(path: string, init: JsonInit): T | undefined {
       emotionCode?: string;
       emotionCodes?: string[];
       interaction?: 'confirm' | 'reclassify';
+      reflectionAnswer?: string;
     };
     const target = mockRecords.find((record) => record.id === recordId);
     if (!target || !body?.emotionCode) {
@@ -347,7 +366,7 @@ function mockRequest<T>(path: string, init: JsonInit): T | undefined {
     const now = new Date().toISOString();
     const status: RecordClassificationStatus =
       body.interaction === 'reclassify' ? 'reclassified' : 'user_confirmed';
-    const gemId = target.gemId ?? `mock-gem-${target.id}`;
+    const gemId = target.gemId ?? `mock-gem-${target.id}-${primary}`;
     target.classificationStatus = status;
     target.confirmedEmotionCode = primary;
     target.confirmedEmotionCodes = codes;
@@ -356,17 +375,22 @@ function mockRequest<T>(path: string, init: JsonInit): T | undefined {
     target.updatedAt = now;
     target.gemId = gemId;
     target.gemEmotionCode = primary;
+    if (body.reflectionAnswer?.trim()) {
+      target.questionText = '그 순간 가장 크게 남아 있던 느낌은 무엇에 가까웠나요?';
+      target.answerText = body.reflectionAnswer.trim();
+    }
 
-    const gem: GemDto = {
-      id: gemId,
-      emotionCode: primary,
+    const gems: GemDto[] = codes.map((code) => ({
+      id: code === primary ? gemId : `mock-gem-${target.id}-${code}`,
+      emotionCode: code,
       tier: 1,
       source: 'chatbot_record',
       sourceMessageId: String(target.id),
       craftedFrom: [],
       createdAt: now,
-    };
-    mockGems = [gem, ...mockGems.filter((item) => item.id !== gem.id)];
+    }));
+    const nextGemIds = new Set(gems.map((gem) => gem.id));
+    mockGems = [...gems, ...mockGems.filter((item) => item.sourceMessageId !== String(target.id) && !nextGemIds.has(item.id))];
     mockRecords = [...mockRecords];
 
     return {
@@ -381,10 +405,10 @@ function mockRequest<T>(path: string, init: JsonInit): T | undefined {
         updatedAt: target.updatedAt,
       },
       gem: {
-        id: gem.id,
-        emotionCode: gem.emotionCode,
-        tier: gem.tier,
-        createdAt: gem.createdAt,
+        id: gems[0].id,
+        emotionCode: gems[0].emotionCode,
+        tier: gems[0].tier,
+        createdAt: gems[0].createdAt,
       },
     } as T;
   }
@@ -446,6 +470,7 @@ export const api = {
       emotionCodes?: string[];
       interaction?: 'confirm' | 'reclassify';
       reflectionType?: 'question' | 'meditation' | 'none';
+      reflectionAnswer?: string;
     },
   ) =>
     request<{

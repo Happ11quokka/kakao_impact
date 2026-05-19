@@ -45,6 +45,22 @@ describe('Analysis record enrichment', () => {
     expect(item.recordText).toBe('햇빛이 좋아서 산책했다.');
     expect(item.imageUrl).toBe('https://example.com/walk.jpg');
   });
+
+  it('keeps sibling emotion badges together for multi-emotion recap rows', () => {
+    const gems: Gem[] = [
+      { ...baseGem, id: 'gem-joy', emotionCode: 'joy', sourceMessageId: '102' },
+      { ...baseGem, id: 'gem-pride', emotionCode: 'pride', sourceMessageId: '102' },
+      { ...baseGem, id: 'gem-flutter', emotionCode: 'flutter', sourceMessageId: '102' },
+    ];
+
+    const items = buildAnalysisItems(gems, [{ ...baseRecord, id: 102 }], 'weekly', today);
+
+    expect(items[0].emotionBadges).toEqual([
+      { code: 'joy', label: '기쁨' },
+      { code: 'pride', label: '뿌듯' },
+      { code: 'flutter', label: '설렘' },
+    ]);
+  });
 });
 
 describe('Analysis recap themes', () => {
@@ -113,6 +129,16 @@ describe('Analysis recap themes', () => {
 
     expect(joy?.records[0].id).toBe('item-joy-1');
     expect(joy?.records[1].id).toBe('item-joy-2');
+  });
+
+  it('deduplicates multi-emotion gems from the same source message into one recap moment', () => {
+    const themes = buildRecapThemes([
+      { ...items[0], id: 'joy-102', emotionCode: 'joy', label: '기쁨', sourceMessageId: '102' },
+      { ...items[0], id: 'pride-102', emotionCode: 'pride', label: '뿌듯', sourceMessageId: '102' },
+      { ...items[0], id: 'flutter-102', emotionCode: 'flutter', label: '설렘', sourceMessageId: '102' },
+    ]);
+
+    expect(themes[0].records).toHaveLength(1);
   });
 });
 
