@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildActiveRecordGemBadges, buildHomeStoneGemLayout, buildReclassifyReflectionOptions, buildTodayGemBoxItems } from './Home';
+import {
+  buildActiveRecordGemBadges,
+  buildHomeStoneGemLayout,
+  buildTodayCategoryGemSlots,
+} from './Home';
 import type { RecordDto } from '../lib/api';
 
 const baseRecord: RecordDto = {
@@ -22,41 +26,83 @@ const baseRecord: RecordDto = {
   gemEmotionCode: null,
 };
 
-describe('Home today gem box items', () => {
-  it('excludes unconfirmed records from the today gem box while leaving them available in the lake', () => {
-    const items = buildTodayGemBoxItems([baseRecord], new Date('2026-05-19T12:00:00.000Z'));
+const today = new Date('2026-05-19T12:00:00.000Z');
 
-    expect(items).toEqual([]);
-  });
+function makeConfirmed(overrides: Partial<RecordDto> & { id: number; codes: string[] }): RecordDto {
+  return {
+    ...baseRecord,
+    id: overrides.id,
+    createdAt: overrides.createdAt ?? '2026-05-19T10:00:00.000Z',
+    updatedAt: overrides.createdAt ?? '2026-05-19T10:00:00.000Z',
+    classificationStatus: 'user_confirmed',
+    confirmedEmotionCode: overrides.codes[0],
+    confirmedEmotionCodes: overrides.codes,
+    gemEmotionCode: overrides.codes[0],
+    gemId: `gem-${overrides.id}`,
+  };
+}
 
-  it('keeps confirmed records in chronological order with their confirmed emotion label', () => {
-    const confirmed: RecordDto = {
-      ...baseRecord,
-      id: 2,
-      createdAt: '2026-05-19T10:00:00.000Z',
-      classificationStatus: 'user_confirmed',
-      confirmedEmotionCode: 'joy',
-      confirmedEmotionCodes: ['joy'],
-      gemEmotionCode: 'joy',
-      gemId: 'gem-joy',
-    };
-    const unconfirmedLater: RecordDto = {
-      ...baseRecord,
-      id: 3,
-      createdAt: '2026-05-19T11:00:00.000Z',
-      aiEmotionCode: 'regret',
-    };
-
-    const items = buildTodayGemBoxItems(
-      [unconfirmedLater, confirmed],
-      new Date('2026-05-19T12:00:00.000Z'),
+describe('Home today category gem slots', () => {
+  it('always returns one slot per category, defaulting to count 0', () => {
+    const slots = buildTodayCategoryGemSlots([], today);
+    expect(slots.map((slot) => slot.category).sort()).toEqual(
+      ['anger', 'anxiety', 'complex', 'joy', 'sadness'],
     );
-
-    expect(items.map((item) => [item.record.id, item.emotionCode, item.label, item.status])).toEqual([
-      [2, 'joy', '기쁨', 'confirmed'],
-    ]);
+    expect(slots.every((slot) => slot.count === 0)).toBe(true);
+    expect(slots.every((slot) => slot.records.length === 0)).toBe(true);
   });
 
+  it('excludes unconfirmed records from category counts', () => {
+    const slots = buildTodayCategoryGemSlots([baseRecord], today);
+    const joy = slots.find((slot) => slot.category === 'joy');
+    expect(joy?.count).toBe(0);
+  });
+
+  it('deduplicates within a single record so joy + pride counts as joy ×1', () => {
+    const record = makeConfirmed({ id: 2, codes: ['joy', 'pride'] });
+    const slots = buildTodayCategoryGemSlots([record], today);
+    const joy = slots.find((slot) => slot.category === 'joy');
+    expect(joy?.count).toBe(1);
+    expect(joy?.records).toEqual([record]);
+  });
+
+  it('spreads multi-category emotions across categories', () => {
+    const record = makeConfirmed({ id: 3, codes: ['joy', 'sadness'] });
+    const slots = buildTodayCategoryGemSlots([record], today);
+    expect(slots.find((s) => s.category === 'joy')?.count).toBe(1);
+    expect(slots.find((s) => s.category === 'sadness')?.count).toBe(1);
+  });
+
+  it('sorts by count desc, breaking ties in joy → sadness → anger → anxiety → complex order', () => {
+    const records = [
+      makeConfirmed({ id: 10, codes: ['joy'], createdAt: '2026-05-19T09:00:00.000Z' }),
+      makeConfirmed({ id: 11, codes: ['sadness'], createdAt: '2026-05-19T09:10:00.000Z' }),
+      makeConfirmed({ id: 12, codes: ['annoyance'], createdAt: '2026-05-19T09:20:00.000Z' }),
+      makeConfirmed({ id: 13, codes: ['joy'], createdAt: '2026-05-19T09:30:00.000Z' }),
+    ];
+    const slots = buildTodayCategoryGemSlots(records, today);
+    expect(slots.map((slot) => slot.category)).toEqual([
+      'joy',
+      'sadness',
+      'anger',
+      'anxiety',
+      'complex',
+    ]);
+    expect(slots.map((slot) => slot.count)).toEqual([2, 1, 1, 0, 0]);
+  });
+
+  it('orders records within a category by createdAt ascending', () => {
+    const records = [
+      makeConfirmed({ id: 20, codes: ['joy'], createdAt: '2026-05-19T11:00:00.000Z' }),
+      makeConfirmed({ id: 21, codes: ['joy'], createdAt: '2026-05-19T03:00:00.000Z' }),
+    ];
+    const slots = buildTodayCategoryGemSlots(records, today);
+    const joy = slots.find((slot) => slot.category === 'joy');
+    expect(joy?.records.map((r) => r.id)).toEqual([21, 20]);
+  });
+});
+
+describe('Home stone + active record helpers', () => {
   it('lays out multi-emotion home stones inside one circle without overlap', () => {
     const layout = buildHomeStoneGemLayout(['joy', 'pride', 'flutter']);
 
@@ -88,12 +134,6 @@ describe('Home today gem box items', () => {
       { code: 'joy', label: '기쁨' },
       { code: 'pride', label: '뿌듯' },
       { code: 'flutter', label: '설렘' },
-    ]);
-  });
-
-  it('requires a self-awareness question before reclassifying an already confirmed emotion', () => {
-    expect(buildReclassifyReflectionOptions()).toEqual([
-      { type: 'question', label: '자기인지 질문' },
     ]);
   });
 });

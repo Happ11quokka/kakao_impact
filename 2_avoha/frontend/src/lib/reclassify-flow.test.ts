@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildReclassifyFlowState, buildRecordReclassifyAction } from './reclassify-flow';
+import { buildRecordReclassifyAction } from './reclassify-flow';
 import type { RecordDto } from './api';
 
 const baseRecord: RecordDto = {
@@ -42,24 +42,6 @@ describe('reclassify flow helpers', () => {
       label: '감정 재분류하기',
       ariaLabel: '감정 재분류 아코디언 열기',
       interaction: 'reclassify',
-    });
-  });
-
-  it('requires a self-awareness answer before showing the emotion picker', () => {
-    expect(buildReclassifyFlowState('')).toEqual({
-      question: '그 순간 가장 크게 남아 있던 느낌은 무엇에 가까웠나요?',
-      answer: '',
-      canChooseEmotion: false,
-    });
-    expect(buildReclassifyFlowState('  다시 생각해보니 안도감이 더 컸어요.  ')).toEqual({
-      question: '그 순간 가장 크게 남아 있던 느낌은 무엇에 가까웠나요?',
-      answer: '다시 생각해보니 안도감이 더 컸어요.',
-      canChooseEmotion: false,
-    });
-    expect(buildReclassifyFlowState('  다시 생각해보니 안도감이 더 컸어요.  ', true)).toEqual({
-      question: '그 순간 가장 크게 남아 있던 느낌은 무엇에 가까웠나요?',
-      answer: '다시 생각해보니 안도감이 더 컸어요.',
-      canChooseEmotion: true,
     });
   });
 });

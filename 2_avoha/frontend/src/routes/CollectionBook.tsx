@@ -28,18 +28,11 @@ function toBookGem(label: string, idx: number): Gem {
   };
 }
 
-const UNCLASSIFIED_SLOTS = [
-  { tier: 1 as const, label: '미분류 · 일상 기록' },
-  { tier: 2 as const, label: '미분류 · 짧은 기록' },
-  { tier: 3 as const, label: '미분류 · 사진 기록' },
-  { tier: 4 as const, label: '미분류 · 긴 기록' },
-];
-
-function toUnclassifiedGem(tier: 1 | 2 | 3 | 4, idx: number): Gem {
+function toUnclassifiedGem(): Gem {
   return {
-    id: `book-unclassified-${idx}`,
+    id: 'book-unclassified',
     emotionCode: UNCLASSIFIED_EMOTION_CODE,
-    tier,
+    tier: 1,
     createdAt: new Date().toISOString(),
     consumedAt: null,
   };
@@ -188,51 +181,40 @@ export default function CollectionBook({ onClose }: { onClose?: () => void }) {
           </p>
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: 10,
-            justifyItems: 'center',
-          }}
-        >
-          {UNCLASSIFIED_SLOTS.map((slot, idx) => (
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+            }}
+          >
             <div
-              key={slot.label}
               style={{
+                width: 60,
+                height: 60,
                 display: 'flex',
-                flexDirection: 'column',
                 alignItems: 'center',
-                width: '100%',
+                justifyContent: 'center',
               }}
             >
-              <div
-                style={{
-                  width: 60,
-                  height: 60,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <GemStone gem={toUnclassifiedGem(slot.tier, idx)} size={52} />
-              </div>
-              <span
-                style={{
-                  display: 'block',
-                  marginTop: 2,
-                  color: '#5A4A32',
-                  fontSize: 'clamp(9px, 2.6vw, 11px)',
-                  fontWeight: 500,
-                  lineHeight: 1.35,
-                  textAlign: 'center',
-                  wordBreak: 'keep-all',
-                }}
-              >
-                {slot.label}
-              </span>
+              <GemStone gem={toUnclassifiedGem()} size={52} />
             </div>
-          ))}
+            <span
+              style={{
+                display: 'block',
+                marginTop: 2,
+                color: '#5A4A32',
+                fontSize: 'clamp(9px, 2.6vw, 11px)',
+                fontWeight: 500,
+                lineHeight: 1.35,
+                textAlign: 'center',
+                wordBreak: 'keep-all',
+              }}
+            >
+              미분류
+            </span>
+          </div>
         </div>
       </section>
     </div>

@@ -1,5 +1,5 @@
 // === Home 화면 — 오늘의 감정 호수 ===
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
 import { useRecordsStore } from '../stores/records-store';
 import { EMOTIONS, getEmotion } from '../data/emotions';
@@ -7,7 +7,8 @@ import CollectionBook from './CollectionBook';
 import ChibiAvatar from '../components/field/ChibiAvatar';
 import GemStone from '../components/pixel/GemStone';
 import type { RecordDto } from '../lib/api';
-import { buildReclassifyFlowState } from '../lib/reclassify-flow';
+import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
+import { buildRecordReclassifyAction } from '../lib/reclassify-flow';
 
 const CANDIDATE_SLOTS = [
   { x: 30, y: 48 },
@@ -30,15 +31,37 @@ const PROXIMITY_PROMPT_RADIUS = 18;
 const JOYSTICK_KNOB_LIMIT = 24;
 const JOYSTICK_SPEED = 0.036;
 const MASCOT_SIZE = 58;
-const GEM_BOX_SLOT_COUNT = 5;
+const MEDITATION_SECONDS = 5;
+
+const GEM_BOX_CATEGORY_ORDER: CategoryCode[] = ['joy', 'sadness', 'anger', 'anxiety', 'complex'];
+
+const CATEGORY_LABELS: Record<CategoryCode, string> = {
+  joy: '기쁨',
+  sadness: '슬픔',
+  anger: '분노',
+  anxiety: '불안',
+  complex: '복잡',
+};
+
+const REPRESENTATIVE_EMOTION_BY_CATEGORY: Record<CategoryCode, string> = {
+  joy: 'joy',
+  sadness: 'sadness',
+  anger: 'annoyance',
+  anxiety: 'solace',
+  complex: 'regret',
+};
+
+const CATEGORY_ACCENT: Record<CategoryCode, string> = {
+  joy: '#D4B84E',
+  sadness: '#58728E',
+  anger: '#914640',
+  anxiety: '#B8C7D8',
+  complex: '#3D3A34',
+};
 
 type FieldPosition = { x: number; y: number };
-type ReflectionType = 'question' | 'none';
-type ReflectionMode = 'idle' | 'choice' | 'picker';
-type ReclassifyReflectionOption = {
-  type: Exclude<ReflectionType, 'none'>;
-  label: string;
-};
+type ReflectionType = 'meditation' | 'none';
+type ReflectionMode = 'idle' | 'meditation' | 'picker';
 type LakeStone = {
   record: RecordDto;
   position: FieldPosition;
@@ -150,42 +173,62 @@ export function buildActiveRecordGemBadges(record: RecordDto | null): ActiveReco
   }));
 }
 
-export function buildReclassifyReflectionOptions(): ReclassifyReflectionOption[] {
-  return [{ type: 'question', label: '자기인지 질문' }];
-}
-
-type TodayGemBoxItem = {
-  record: RecordDto;
-  emotionCode: string;
+export type CategoryGemSlot = {
+  category: CategoryCode;
   label: string;
-  status: 'candidate' | 'confirmed';
+  representativeEmotionCode: string;
+  accentColor: string;
+  count: number;
+  records: RecordDto[];
 };
 
-export function buildTodayGemBoxItems(records: RecordDto[], base = new Date()): TodayGemBoxItem[] {
-  return records
-    .filter((record) => isSameLocalDate(record.createdAt, base))
-    .map<TodayGemBoxItem | null>((record) => {
-      if (record.classificationStatus === 'needs_confirmation') {
-        return null;
-      }
-
-      const emotionCode = recordEmotionCode(record);
-      if (!emotionCode) return null;
-      return {
-        record,
-        emotionCode,
-        label: getEmotion(emotionCode)?.nameKo ?? emotionCode,
-        status: 'confirmed',
+export function buildTodayCategoryGemSlots(
+  records: RecordDto[],
+  base = new Date(),
+): CategoryGemSlot[] {
+  const buckets: Record<CategoryCode, CategoryGemSlot> = GEM_BOX_CATEGORY_ORDER.reduce(
+    (acc, category) => {
+      acc[category] = {
+        category,
+        label: CATEGORY_LABELS[category],
+        representativeEmotionCode: REPRESENTATIVE_EMOTION_BY_CATEGORY[category],
+        accentColor: CATEGORY_ACCENT[category],
+        count: 0,
+        records: [],
       };
-    })
-    .filter((item): item is TodayGemBoxItem => Boolean(item))
-    .sort((a, b) => new Date(a.record.createdAt).getTime() - new Date(b.record.createdAt).getTime());
-}
+      return acc;
+    },
+    {} as Record<CategoryCode, CategoryGemSlot>,
+  );
 
-function formatRecordTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('ko-KR', {
-    hour: 'numeric',
-    minute: '2-digit',
+  const todayConfirmed = records.filter(
+    (record) =>
+      isSameLocalDate(record.createdAt, base) &&
+      record.classificationStatus !== 'needs_confirmation',
+  );
+
+  for (const record of todayConfirmed) {
+    const codes = confirmedEmotionCodes(record);
+    if (codes.length === 0) continue;
+    const seen = new Set<CategoryCode>();
+    for (const code of codes) {
+      const category = emotionToCategory(code);
+      if (seen.has(category)) continue;
+      seen.add(category);
+      buckets[category].count += 1;
+      buckets[category].records.push(record);
+    }
+  }
+
+  for (const category of GEM_BOX_CATEGORY_ORDER) {
+    buckets[category].records.sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+  }
+
+  return GEM_BOX_CATEGORY_ORDER.map((category) => buckets[category]).sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return GEM_BOX_CATEGORY_ORDER.indexOf(a.category) - GEM_BOX_CATEGORY_ORDER.indexOf(b.category);
   });
 }
 
@@ -219,11 +262,14 @@ export default function Home() {
   const [recordToast, setRecordToast] = useState<string | null>(null);
   const [emotionPickerOpen, setEmotionPickerOpen] = useState(false);
   const [reflectionMode, setReflectionMode] = useState<ReflectionMode>('idle');
-  const [selectedReflectionType, setSelectedReflectionType] = useState<ReflectionType>('none');
-  const [reclassifyAnswer, setReclassifyAnswer] = useState('');
-  const [reclassifyAnswerSubmitted, setReclassifyAnswerSubmitted] = useState(false);
+  const [meditationRemaining, setMeditationRemaining] = useState(MEDITATION_SECONDS);
   const [activeRecordId, setActiveRecordId] = useState<number | null>(null);
+  const [activeCategory, setActiveCategory] = useState<CategoryCode | null>(null);
   const [pickerSelection, setPickerSelection] = useState<string[]>([]);
+  const [categoryPickerRecordId, setCategoryPickerRecordId] = useState<number | null>(null);
+  const [categoryPickerSelection, setCategoryPickerSelection] = useState<string[]>([]);
+  const [categoryMeditationRemaining, setCategoryMeditationRemaining] = useState(MEDITATION_SECONDS);
+  const [categoryReflectionMode, setCategoryReflectionMode] = useState<'idle' | 'meditation' | 'picker'>('idle');
   const [mascotPosition, setMascotPosition] = useState<FieldPosition>(MASCOT_START);
   const [joystick, setJoystick] = useState({ active: false, x: 0, y: 0 });
   const joystickVectorRef = useRef({ x: 0, y: 0 });
@@ -248,6 +294,39 @@ export default function Home() {
       setPickerSelection(existing);
     }
   }, [reflectionMode, activeRecordId, records]);
+
+  useEffect(() => {
+    if (reflectionMode !== 'meditation') return undefined;
+    if (meditationRemaining <= 0) {
+      setReflectionMode('picker');
+      setEmotionPickerOpen(true);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setMeditationRemaining((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [reflectionMode, meditationRemaining]);
+
+  useEffect(() => {
+    if (categoryReflectionMode !== 'meditation') return undefined;
+    if (categoryMeditationRemaining <= 0) {
+      setCategoryReflectionMode('picker');
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setCategoryMeditationRemaining((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [categoryReflectionMode, categoryMeditationRemaining]);
+
+  useEffect(() => {
+    if (categoryReflectionMode === 'picker' && categoryPickerRecordId) {
+      const target = records.find((r) => r.id === categoryPickerRecordId);
+      const existing = target?.confirmedEmotionCodes ?? [];
+      setCategoryPickerSelection(existing);
+    }
+  }, [categoryReflectionMode, categoryPickerRecordId, records]);
 
 
   useEffect(() => {
@@ -306,9 +385,17 @@ export default function Home() {
       });
   }, [todayRecords]);
 
-  const todayGemBoxItems = useMemo(
-    () => buildTodayGemBoxItems(todayRecords),
+  const todayCategorySlots = useMemo(
+    () => buildTodayCategoryGemSlots(todayRecords),
     [todayRecords],
+  );
+  const todayConfirmedCount = useMemo(
+    () => todayRecords.filter((record) => record.classificationStatus !== 'needs_confirmation').length,
+    [todayRecords],
+  );
+  const activeCategorySlot = useMemo(
+    () => (activeCategory ? todayCategorySlots.find((slot) => slot.category === activeCategory) ?? null : null),
+    [activeCategory, todayCategorySlots],
   );
 
   const activeRecord = activeRecordId
@@ -333,7 +420,6 @@ export default function Home() {
       !activeRecord.webReviewedAt,
   );
   const activeCanReclassify = Boolean(activeRecord && activeStatus === 'confirmed' && activeEmotionCode);
-  const reclassifyFlow = buildReclassifyFlowState(reclassifyAnswer, reclassifyAnswerSubmitted);
   const showEmotionGrid =
     (activeStatus === 'candidate' && (!suggestedEmotion || emotionPickerOpen)) ||
     (activeCanReclassify && reflectionMode === 'picker');
@@ -357,28 +443,21 @@ export default function Home() {
   const resetReviewControls = () => {
     setEmotionPickerOpen(false);
     setReflectionMode('idle');
-    setSelectedReflectionType('none');
-    setReclassifyAnswer('');
-    setReclassifyAnswerSubmitted(false);
+    setMeditationRemaining(MEDITATION_SECONDS);
   };
 
-  const submitReclassifyAnswer = () => {
-    if (!reclassifyAnswer.trim()) return;
-    setReclassifyAnswerSubmitted(true);
-    setSelectedReflectionType('question');
-    setReflectionMode('picker');
-    setEmotionPickerOpen(true);
-  };
-
-  const handleReclassifyAnswerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey) return;
-    event.preventDefault();
-    submitReclassifyAnswer();
+  const resetCategoryReclassify = () => {
+    setCategoryPickerRecordId(null);
+    setCategoryPickerSelection([]);
+    setCategoryReflectionMode('idle');
+    setCategoryMeditationRemaining(MEDITATION_SECONDS);
   };
 
   const openRecordSheet = (recordId: number) => {
     resetReviewControls();
     setRecordToast(null);
+    setActiveCategory(null);
+    resetCategoryReclassify();
     setActiveRecordId(recordId);
     setPickerSelection([]);
   };
@@ -391,13 +470,52 @@ export default function Home() {
     stopJoystick();
   };
 
+  const openCategoryPanel = (category: CategoryCode) => {
+    resetReviewControls();
+    setActiveRecordId(null);
+    resetCategoryReclassify();
+    setRecordToast(null);
+    setActiveCategory(category);
+  };
+
+  const closeCategoryPanel = () => {
+    setActiveCategory(null);
+    resetCategoryReclassify();
+  };
+
+  const handleCategoryReclassifySave = async (record: RecordDto) => {
+    if (categoryPickerSelection.length === 0) return;
+    const codes = categoryPickerSelection;
+    const interaction = buildRecordReclassifyAction(record).interaction;
+    const result = await confirmEmotion(record.id, codes, {
+      interaction,
+      reflectionType: 'meditation',
+    });
+    if (result.ok) {
+      const primary = getEmotion(codes[0]);
+      const multiSuffix = codes.length > 1 ? ` 외 ${codes.length - 1}개` : '';
+      setRecordToast(`${primary?.nameKo ?? '감정'}${multiSuffix} 원석으로 업데이트했어요`);
+      window.setTimeout(() => setRecordToast(null), 2400);
+      resetCategoryReclassify();
+    } else if (result.error) {
+      setRecordToast(result.error);
+      window.setTimeout(() => setRecordToast(null), 2400);
+    }
+  };
+
+  const beginCategoryReclassify = (recordId: number) => {
+    setCategoryPickerRecordId(recordId);
+    setCategoryPickerSelection([]);
+    setCategoryMeditationRemaining(MEDITATION_SECONDS);
+    setCategoryReflectionMode('meditation');
+  };
+
   const handleConfirmRecord = async (
     emotionCode: string,
     opts: {
       interaction?: 'confirm' | 'reclassify';
       reflectionType?: ReflectionType;
       emotionCodes?: string[];
-      reflectionAnswer?: string;
     } = {},
   ) => {
     if (!activeRecord) return;
@@ -407,7 +525,6 @@ export default function Home() {
     const result = await confirmEmotion(activeRecord.id, codes, {
       interaction,
       reflectionType: opts.reflectionType ?? 'none',
-      reflectionAnswer: opts.reflectionAnswer,
     });
     resetReviewControls();
     setPickerSelection([]);
@@ -857,7 +974,7 @@ export default function Home() {
                   lineHeight: 1.3,
                 }}
               >
-                기록한 순서대로 오늘의 감정을 담아둬요.
+                오늘의 감정 분포를 한눈에 살펴봐요.
               </p>
             </div>
             <span
@@ -868,97 +985,93 @@ export default function Home() {
                 fontWeight: 800,
               }}
             >
-              {todayGemBoxItems.length}개
+              {todayConfirmedCount}개
             </span>
           </div>
 
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: `repeat(${GEM_BOX_SLOT_COUNT}, minmax(0, 1fr))`,
+              gridTemplateColumns: `repeat(${GEM_BOX_CATEGORY_ORDER.length}, minmax(0, 1fr))`,
               gap: 8,
               flexShrink: 0,
             }}
           >
-            {Array.from({ length: GEM_BOX_SLOT_COUNT }).map((_, index) => {
-              const item = todayGemBoxItems[index];
-              if (!item) {
-                return (
-                  <div
-                    key={`empty-slot-${index}`}
-                    aria-label={`비어있는 원석 슬롯 ${index + 1}`}
-                    style={{
-                      height: 76,
-                      borderRadius: 14,
-                      border: '1px dashed rgba(126, 104, 66, 0.2)',
-                      background: 'rgba(255,255,255,0.38)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'rgba(126, 104, 66, 0.38)',
-                      fontSize: 10,
-                      fontWeight: 800,
-                    }}
-                  >
-                    빈칸
-                  </div>
-                );
-              }
-              const record = item.record;
+            {todayCategorySlots.map((slot) => {
+              const empty = slot.count === 0;
+              const isActive = activeCategory === slot.category;
               return (
                 <button
-                  key={`gem-box-${record.id}`}
+                  key={`category-slot-${slot.category}`}
                   type="button"
-                  onClick={() => openRecordSheet(record.id)}
-                  aria-label={`${formatRecordTime(record.createdAt)} ${item.label} 원석 기록 열기`}
+                  disabled={empty}
+                  onClick={() => (empty ? undefined : openCategoryPanel(slot.category))}
+                  aria-label={
+                    empty
+                      ? `${slot.label} 원석 없음`
+                      : `${slot.label} 원석 ${slot.count}개 기록 열기`
+                  }
                   style={{
-                    height: 76,
+                    height: 84,
                     borderRadius: 14,
-                    border: '1px solid rgba(86, 71, 48, 0.1)',
-                    background: 'rgba(255,255,255,0.78)',
-                    boxShadow: '0 6px 18px rgba(86, 71, 48, 0.04)',
+                    border: empty
+                      ? '1px dashed rgba(126, 104, 66, 0.2)'
+                      : isActive
+                        ? `1.5px solid ${slot.accentColor}`
+                        : '1px solid rgba(86, 71, 48, 0.1)',
+                    background: empty
+                      ? 'rgba(255,255,255,0.38)'
+                      : isActive
+                        ? `${slot.accentColor}1A`
+                        : 'rgba(255,255,255,0.82)',
+                    boxShadow: empty ? 'none' : '0 6px 18px rgba(86, 71, 48, 0.05)',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: 3,
+                    gap: 2,
                     padding: '6px 4px',
-                    cursor: 'pointer',
+                    cursor: empty ? 'default' : 'pointer',
+                    opacity: empty ? 0.45 : 1,
+                    transition: 'background 0.18s ease, border-color 0.18s ease',
                     WebkitTapHighlightColor: 'transparent',
                   }}
                 >
                   <GemStone
                     gem={{
-                      id: `gem-box-${record.id}`,
-                      emotionCode: item.emotionCode,
+                      id: `category-slot-${slot.category}`,
+                      emotionCode: slot.representativeEmotionCode,
                       tier: 1,
-                      createdAt: record.createdAt,
+                      createdAt: new Date().toISOString(),
                       consumedAt: null,
                     }}
-                    size={30}
+                    size={32}
                   />
                   <strong
                     style={{
-                      maxWidth: '100%',
                       color: 'var(--color-text-main)',
                       fontSize: 10,
                       fontWeight: 800,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
                     }}
                   >
-                    {item.label}
+                    {slot.label}
                   </strong>
-                  <span style={{ color: 'var(--color-text-sub)', fontSize: 9, fontWeight: 700 }}>
-                    {formatRecordTime(record.createdAt)}
+                  <span
+                    style={{
+                      color: empty ? 'rgba(126,104,66,0.55)' : slot.accentColor,
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    ×{slot.count}
                   </span>
                 </button>
               );
             })}
           </div>
 
-          {todayGemBoxItems.length === 0 && (
+          {todayConfirmedCount === 0 && (
             <p
               style={{
                 margin: '7px 0 0',
@@ -968,7 +1081,7 @@ export default function Home() {
               }}
             >
               {candidateCount > 0
-                ? '확인 필요한 원석을 확정하면 이곳에 시간순으로 들어와요.'
+                ? '확인 필요한 원석을 확정하면 카테고리별로 묶여서 보여드릴게요.'
                 : '오늘 확정한 감정 원석이 아직 없어요.'}
             </p>
           )}
@@ -1204,8 +1317,9 @@ export default function Home() {
                 type="button"
                 disabled={savingId === activeRecord.id}
                 onClick={() => {
-                  setReflectionMode('choice');
                   setEmotionPickerOpen(false);
+                  setMeditationRemaining(MEDITATION_SECONDS);
+                  setReflectionMode('meditation');
                 }}
                 style={{
                   minHeight: 44,
@@ -1223,66 +1337,39 @@ export default function Home() {
             </div>
           )}
 
-          {activeCanReclassify && reflectionMode === 'choice' && (
+          {activeCanReclassify && reflectionMode === 'meditation' && (
             <div
               style={{
                 marginTop: 14,
-                padding: 12,
-                borderRadius: 12,
-                background: '#FAF7F0',
+                padding: '18px 14px',
+                borderRadius: 14,
+                background: 'linear-gradient(180deg, rgba(160, 188, 168, 0.18), rgba(247, 242, 234, 0.6))',
                 border: '1px solid rgba(86, 71, 48, 0.08)',
+                textAlign: 'center',
               }}
-              aria-label="감정 재분류 자기인지 질문"
+              aria-label="5초 감상"
             >
-              <span style={{ display: 'block', marginBottom: 4, color: 'var(--color-point-green)', fontSize: 10, fontWeight: 800 }}>
-                자기인지 질문
+              <span style={{ display: 'block', marginBottom: 6, color: 'var(--color-point-green)', fontSize: 10, fontWeight: 800, letterSpacing: '0.04em' }}>
+                🌿 5초 감상
               </span>
-              <p style={{ margin: '0 0 10px', color: 'var(--color-text-main)', fontSize: 12, lineHeight: 1.45, fontWeight: 700 }}>
-                Q. {reclassifyFlow.question}
+              <p style={{ margin: '0 0 10px', color: 'var(--color-text-main)', fontSize: 12, lineHeight: 1.45, fontWeight: 600 }}>
+                잠깐 호흡을 가다듬고, 다시 감정을 골라볼게요.
               </p>
-              <textarea
-                value={reclassifyAnswer}
-                onChange={(event) => {
-                  setReclassifyAnswer(event.target.value);
-                  setReclassifyAnswerSubmitted(false);
-                }}
-                onKeyDown={handleReclassifyAnswerKeyDown}
-                placeholder="짧게 한 문장으로 적어도 괜찮아요."
+              <div
                 style={{
-                  width: '100%',
-                  minHeight: 68,
-                  padding: '9px 10px',
-                  borderRadius: 12,
-                  border: '1px solid rgba(86, 71, 48, 0.14)',
-                  background: '#FFFFFF',
+                  display: 'inline-flex',
+                  alignItems: 'baseline',
+                  gap: 4,
                   color: 'var(--color-text-main)',
-                  fontSize: 12,
-                  lineHeight: 1.45,
-                  resize: 'vertical',
-                  boxSizing: 'border-box',
-                }}
-              />
-              <button
-                type="button"
-                disabled={!reclassifyFlow.canChooseEmotion}
-                onClick={() => {
-                  submitReclassifyAnswer();
-                }}
-                style={{
-                  width: '100%',
-                  minHeight: 40,
-                  marginTop: 10,
-                  border: 'none',
-                  borderRadius: 12,
-                  background: reclassifyFlow.canChooseEmotion ? 'var(--color-point-green)' : '#D9CEB8',
-                  color: '#FFFFFF',
-                  fontSize: 12,
+                  fontSize: 32,
                   fontWeight: 800,
-                  cursor: reclassifyFlow.canChooseEmotion ? 'pointer' : 'wait',
+                  fontVariantNumeric: 'tabular-nums',
                 }}
+                aria-live="polite"
               >
-                {reclassifyFlow.canChooseEmotion ? '감정 다시 선택' : '답변을 적고 Enter를 누르면 감정을 고를 수 있어요'}
-              </button>
+                {meditationRemaining}
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sub)' }}>초</span>
+              </div>
             </div>
           )}
 
@@ -1358,9 +1445,8 @@ export default function Home() {
                     onClick={() =>
                       void handleConfirmRecord(pickerSelection[0], {
                         interaction: 'reclassify',
-                        reflectionType: selectedReflectionType,
+                        reflectionType: 'meditation',
                         emotionCodes: pickerSelection,
-                        reflectionAnswer: reclassifyAnswer,
                       })
                     }
                     style={{
@@ -1392,6 +1478,306 @@ export default function Home() {
           <p style={{ margin: '10px 0 0', fontSize: 11, lineHeight: 1.5, color: 'var(--color-text-sub)' }}>
             저장된 감정은 캘린더에서도 같은 상태로 보여요.
           </p>
+        </section>
+      )}
+
+      {!showBook && activeCategorySlot && (
+        <section
+          aria-label={`${activeCategorySlot.label} 카테고리 기록`}
+          style={{
+            position: 'absolute',
+            left: 16,
+            right: 16,
+            bottom: 76,
+            zIndex: 30,
+            padding: 16,
+            borderRadius: 18,
+            background: '#FFFFFF',
+            border: `1px solid ${activeCategorySlot.accentColor}55`,
+            boxShadow: '0 12px 30px rgba(61, 107, 80, 0.18)',
+            animation: 'sheetUp 0.24s ease-out',
+            maxHeight: 'calc(100% - 200px)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <GemStone
+                gem={{
+                  id: `panel-${activeCategorySlot.category}`,
+                  emotionCode: activeCategorySlot.representativeEmotionCode,
+                  tier: 1,
+                  createdAt: new Date().toISOString(),
+                  consumedAt: null,
+                }}
+                size={28}
+              />
+              <div>
+                <p style={{ margin: 0, color: 'var(--color-text-main)', fontSize: 14, fontWeight: 800 }}>
+                  {activeCategorySlot.label}
+                </p>
+                <p style={{ margin: '2px 0 0', color: activeCategorySlot.accentColor, fontSize: 11, fontWeight: 800 }}>
+                  ×{activeCategorySlot.count}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={closeCategoryPanel}
+              aria-label="카테고리 닫기"
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                border: '1px solid #EDE2CC',
+                background: '#F7F2EA',
+                color: 'var(--color-text-sub)',
+                cursor: 'pointer',
+                flex: '0 0 auto',
+              }}
+            >
+              ×
+            </button>
+          </header>
+
+          <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 2 }}>
+            {activeCategorySlot.records.map((record) => {
+              const isOpen = categoryPickerRecordId === record.id;
+              const recordBadges = buildActiveRecordGemBadges(record);
+              const action = buildRecordReclassifyAction(record);
+              const saving = savingId === record.id;
+              const time = new Date(record.createdAt).toLocaleTimeString('ko-KR', {
+                hour: '2-digit',
+                minute: '2-digit',
+              });
+
+              return (
+                <article
+                  key={`category-card-${record.id}`}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '52px 1fr',
+                    gap: 8,
+                    alignItems: 'flex-start',
+                  }}
+                >
+                  <span style={{ paddingTop: 10, color: 'var(--color-text-sub)', fontSize: 11, fontWeight: 700 }}>
+                    {time}
+                  </span>
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      background: '#FAF7F0',
+                      border: '1px solid rgba(86, 71, 48, 0.08)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minWidth: 0 }}>
+                        {recordBadges.length > 0 ? (
+                          recordBadges.map((badge) => (
+                            <span
+                              key={`${record.id}-${badge.code}`}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                padding: '4px 8px',
+                                borderRadius: 999,
+                                background: '#FFFFFF',
+                                border: '1px solid rgba(86, 71, 48, 0.08)',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: 'var(--color-text-main)',
+                              }}
+                            >
+                              <GemStone
+                                gem={{
+                                  id: `cat-${record.id}-${badge.code}`,
+                                  emotionCode: badge.code,
+                                  tier: 1,
+                                  createdAt: record.createdAt,
+                                  consumedAt: null,
+                                }}
+                                size={18}
+                              />
+                              {badge.label}
+                            </span>
+                          ))
+                        ) : (
+                          <span style={{ fontSize: 11, color: 'var(--color-text-sub)' }}>미분류 원석</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => {
+                          if (isOpen) {
+                            resetCategoryReclassify();
+                          } else {
+                            beginCategoryReclassify(record.id);
+                          }
+                        }}
+                        aria-expanded={isOpen}
+                        aria-label={action.ariaLabel}
+                        style={{
+                          flex: '0 0 auto',
+                          padding: '5px 10px',
+                          borderRadius: 999,
+                          border: '1px solid rgba(86, 71, 48, 0.16)',
+                          background: isOpen ? activeCategorySlot.accentColor : '#F7F2EA',
+                          color: isOpen ? '#FFFFFF' : 'var(--color-text-main)',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: saving ? 'wait' : 'pointer',
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    </div>
+
+                    {record.recordText && (
+                      <p
+                        style={{
+                          margin: '8px 0 0',
+                          color: 'var(--color-text-main)',
+                          fontSize: 12,
+                          lineHeight: 1.5,
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {record.recordText}
+                      </p>
+                    )}
+
+                    {isOpen && (
+                      <div style={{ marginTop: 10 }}>
+                        {categoryReflectionMode === 'meditation' && (
+                          <div
+                            style={{
+                              padding: '14px 12px',
+                              borderRadius: 12,
+                              background: 'linear-gradient(180deg, rgba(160, 188, 168, 0.18), rgba(247, 242, 234, 0.6))',
+                              border: '1px solid rgba(86, 71, 48, 0.08)',
+                              textAlign: 'center',
+                            }}
+                            aria-label="5초 감상"
+                          >
+                            <span style={{ display: 'block', marginBottom: 4, color: 'var(--color-point-green)', fontSize: 10, fontWeight: 800, letterSpacing: '0.04em' }}>
+                              🌿 5초 감상
+                            </span>
+                            <p style={{ margin: '0 0 8px', color: 'var(--color-text-main)', fontSize: 11, lineHeight: 1.45, fontWeight: 600 }}>
+                              잠깐 호흡을 가다듬고, 다시 감정을 골라볼게요.
+                            </p>
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'baseline',
+                                gap: 4,
+                                color: 'var(--color-text-main)',
+                                fontSize: 26,
+                                fontWeight: 800,
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                              aria-live="polite"
+                            >
+                              {categoryMeditationRemaining}
+                              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-sub)' }}>초</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {categoryReflectionMode === 'picker' && (
+                          <>
+                            <p style={{ margin: '0 0 6px', fontSize: 11, lineHeight: 1.45, color: 'var(--color-text-sub)', fontWeight: 700 }}>
+                              여러 감정이 함께 떠오르면 모두 골라주세요.
+                            </p>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+                              {EMOTIONS.map((emotion) => {
+                                const selected = categoryPickerSelection.includes(emotion.code);
+                                return (
+                                  <button
+                                    key={`cat-pick-${emotion.code}`}
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => {
+                                      setCategoryPickerSelection((prev) =>
+                                        prev.includes(emotion.code)
+                                          ? prev.filter((c) => c !== emotion.code)
+                                          : [...prev, emotion.code],
+                                      );
+                                    }}
+                                    style={{
+                                      minHeight: 40,
+                                      border: selected
+                                        ? `2px solid ${emotion.hexColor}`
+                                        : `1px solid ${emotion.hexColor}66`,
+                                      borderRadius: 10,
+                                      background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
+                                      color: 'var(--color-text-main)',
+                                      fontSize: 11,
+                                      fontWeight: selected ? 800 : 700,
+                                      cursor: saving ? 'wait' : 'pointer',
+                                      position: 'relative',
+                                    }}
+                                  >
+                                    {emotion.nameKo}
+                                    {selected && (
+                                      <span
+                                        aria-hidden="true"
+                                        style={{
+                                          position: 'absolute',
+                                          top: 2,
+                                          right: 4,
+                                          fontSize: 10,
+                                          fontWeight: 800,
+                                          color: emotion.hexColor,
+                                        }}
+                                      >
+                                        ✓
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <button
+                              type="button"
+                              disabled={categoryPickerSelection.length === 0 || saving}
+                              onClick={() => void handleCategoryReclassifySave(record)}
+                              style={{
+                                width: '100%',
+                                minHeight: 40,
+                                marginTop: 10,
+                                border: 'none',
+                                borderRadius: 12,
+                                background:
+                                  categoryPickerSelection.length === 0
+                                    ? '#D9CEB8'
+                                    : 'var(--color-point-green)',
+                                color: '#FFFFFF',
+                                fontSize: 12,
+                                fontWeight: 800,
+                                cursor:
+                                  categoryPickerSelection.length === 0 || saving
+                                    ? 'wait'
+                                    : 'pointer',
+                              }}
+                            >
+                              {categoryPickerSelection.length === 0
+                                ? '감정을 골라주세요'
+                                : `감정 ${categoryPickerSelection.length}개 저장`}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </section>
       )}
 

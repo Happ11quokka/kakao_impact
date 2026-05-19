@@ -1,12 +1,12 @@
 // === Calendar 화면 — Figma 월별 캘린더 + 날짜 기록 패널 ===
-import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useInventoryStore } from '../stores/inventory-store';
 import type { Gem } from '../types/gem';
 import type { RecordDto } from '../lib/api';
 import { EMOTIONS, getEmotion } from '../data/emotions';
 import GemStone from '../components/pixel/GemStone';
 import { useRecordsStore } from '../stores/records-store';
-import { buildReclassifyFlowState, buildRecordReclassifyAction } from '../lib/reclassify-flow';
+import { buildRecordReclassifyAction } from '../lib/reclassify-flow';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const CALENDAR_BG = '#F9F4EA';
@@ -268,12 +268,11 @@ export default function Calendar() {
             records={selectedRecords}
             savingId={savingId}
             onClose={() => setSelectedDate(null)}
-            onConfirmEmotion={async (record, emotionCodes, reflectionAnswer) => {
+            onConfirmEmotion={async (record, emotionCodes) => {
               const interaction = buildRecordReclassifyAction(record).interaction;
               const result = await confirmEmotion(record.id, emotionCodes, {
                 interaction,
-                reflectionType: 'question',
-                reflectionAnswer,
+                reflectionType: 'none',
               });
               const primary = getEmotion(emotionCodes[0]);
               const multiSuffix = emotionCodes.length > 1 ? ` 외 ${emotionCodes.length - 1}개` : '';
@@ -374,12 +373,10 @@ function DatePanel({
   records: RecordDto[];
   savingId: number | null;
   onClose: () => void;
-  onConfirmEmotion: (record: RecordDto, emotionCodes: string[], reflectionAnswer: string) => Promise<void>;
+  onConfirmEmotion: (record: RecordDto, emotionCodes: string[]) => Promise<void>;
 }) {
   const [pickerRecordId, setPickerRecordId] = useState<number | null>(null);
   const [pickerSelection, setPickerSelection] = useState<string[]>([]);
-  const [reclassifyAnswer, setReclassifyAnswer] = useState('');
-  const [reclassifyAnswerSubmitted, setReclassifyAnswerSubmitted] = useState(false);
   const pickerRecord = records.find((record) => record.id === pickerRecordId) ?? null;
   const hasContent = gems.length > 0 || records.length > 0;
   const pickerIsReclassify = pickerRecord
@@ -398,8 +395,6 @@ function DatePanel({
   useEffect(() => {
     setPickerRecordId(null);
     setPickerSelection([]);
-    setReclassifyAnswer('');
-    setReclassifyAnswerSubmitted(false);
   }, [dateKey, records]);
 
   useEffect(() => {
@@ -409,21 +404,8 @@ function DatePanel({
       );
     } else {
       setPickerSelection([]);
-      setReclassifyAnswer('');
-      setReclassifyAnswerSubmitted(false);
     }
   }, [pickerRecord, pickerIsReclassify]);
-
-  const submitReclassifyAnswer = () => {
-    if (!reclassifyAnswer.trim()) return;
-    setReclassifyAnswerSubmitted(true);
-  };
-
-  const handleReclassifyAnswerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey) return;
-    event.preventDefault();
-    submitReclassifyAnswer();
-  };
 
   return (
     <section
@@ -466,23 +448,13 @@ function DatePanel({
                     open={pickerRecordId === record.id}
                     onOpenPicker={() => {
                       setPickerRecordId((current) => (current === record.id ? null : record.id));
-                      setReclassifyAnswer('');
-                      setReclassifyAnswerSubmitted(false);
                     }}
                   />
                   {pickerRecordId === record.id && (
                     <ReclassifyAccordion
                       record={record}
-                      answer={reclassifyAnswer}
-                      answerSubmitted={reclassifyAnswerSubmitted}
                       selection={pickerSelection}
                       saving={savingId === record.id}
-                      onAnswerChange={(value) => {
-                        setReclassifyAnswer(value);
-                        setReclassifyAnswerSubmitted(false);
-                      }}
-                      onAnswerSubmit={submitReclassifyAnswer}
-                      onAnswerKeyDown={handleReclassifyAnswerKeyDown}
                       onToggleEmotion={(emotionCode) => {
                         setPickerSelection((prev) =>
                           prev.includes(emotionCode)
@@ -491,11 +463,9 @@ function DatePanel({
                         );
                       }}
                       onSave={() =>
-                        void onConfirmEmotion(record, pickerSelection, reclassifyAnswer).then(() => {
+                        void onConfirmEmotion(record, pickerSelection).then(() => {
                           setPickerRecordId(null);
                           setPickerSelection([]);
-                          setReclassifyAnswer('');
-                          setReclassifyAnswerSubmitted(false);
                         })
                       }
                     />
@@ -624,106 +594,63 @@ function RecordDetail({
 
 function ReclassifyAccordion({
   record,
-  answer,
-  answerSubmitted,
   selection,
   saving,
-  onAnswerChange,
-  onAnswerSubmit,
-  onAnswerKeyDown,
   onToggleEmotion,
   onSave,
 }: {
   record: RecordDto;
-  answer: string;
-  answerSubmitted: boolean;
   selection: string[];
   saving: boolean;
-  onAnswerChange: (value: string) => void;
-  onAnswerSubmit: () => void;
-  onAnswerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onToggleEmotion: (emotionCode: string) => void;
   onSave: () => void;
 }) {
   const action = buildRecordReclassifyAction(record);
-  const flow = buildReclassifyFlowState(answer, answerSubmitted);
-  const canSave = flow.canChooseEmotion && selection.length > 0 && !saving;
+  const canSave = selection.length > 0 && !saving;
 
   return (
     <div style={styles.reclassifyBox} aria-label={`${action.label} 아코디언`}>
-      <div style={styles.recordLabel}>자기인지 질문</div>
-      <p style={styles.reclassifyHint}>Q. {flow.question}</p>
-      {!flow.canChooseEmotion ? (
-        <>
-          <textarea
-            value={answer}
-            disabled={saving}
-            onChange={(event) => onAnswerChange(event.target.value)}
-            onKeyDown={onAnswerKeyDown}
-            placeholder="짧게 한 문장으로 적어도 괜찮아요."
-            style={styles.reclassifyTextarea}
-          />
-          <button
-            type="button"
-            disabled={answer.trim().length === 0 || saving}
-            onClick={onAnswerSubmit}
-            style={{
-              ...styles.reclassifySaveButton,
-              background: answer.trim().length > 0 && !saving ? 'rgba(61, 107, 80, 0.94)' : '#C9C3B7',
-              cursor: answer.trim().length > 0 && !saving ? 'pointer' : 'wait',
-            }}
-          >
-            {answer.trim().length > 0 ? 'Enter를 눌러 감정 다시 고르기' : '답변을 적고 Enter를 누르면 감정을 고를 수 있어요'}
-          </button>
-        </>
-      ) : (
-        <>
-          <p style={styles.reclassifyAnswerCard}>
-            {flow.answer}
-          </p>
-          <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
-          <p style={styles.reclassifyHint}>여러 감정이 함께 떠오르면 모두 골라주세요.</p>
-          <div style={styles.emotionGrid}>
-            {EMOTIONS.map((emotion) => {
-              const selected = selection.includes(emotion.code);
-              return (
-                <button
-                  key={emotion.code}
-                  type="button"
-                  disabled={saving}
-                  onClick={() => onToggleEmotion(emotion.code)}
-                  style={{
-                    ...styles.emotionButton,
-                    border: selected
-                      ? `2px solid ${emotion.hexColor}`
-                      : `1px solid ${emotion.hexColor}66`,
-                    background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
-                    cursor: saving ? 'wait' : 'pointer',
-                    position: 'relative',
-                  }}
-                >
-                  {emotion.nameKo}
-                  {selected && (
-                    <span aria-hidden="true" style={styles.emotionCheckMark}>✓</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          <button
-            type="button"
-            disabled={!canSave}
-            onClick={onSave}
-            style={{
-              ...styles.reclassifySaveButton,
-              background: canSave ? 'rgba(61, 107, 80, 0.94)' : '#C9C3B7',
-              cursor: canSave ? 'pointer' : 'wait',
-            }}
-          >
-            {selection.length === 0 ? '감정을 골라주세요' : `감정 ${selection.length}개 저장`}
-          </button>
-        </>
-      )}
+      <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
+      <p style={styles.reclassifyHint}>여러 감정이 함께 떠오르면 모두 골라주세요.</p>
+      <div style={styles.emotionGrid}>
+        {EMOTIONS.map((emotion) => {
+          const selected = selection.includes(emotion.code);
+          return (
+            <button
+              key={emotion.code}
+              type="button"
+              disabled={saving}
+              onClick={() => onToggleEmotion(emotion.code)}
+              style={{
+                ...styles.emotionButton,
+                border: selected
+                  ? `2px solid ${emotion.hexColor}`
+                  : `1px solid ${emotion.hexColor}66`,
+                background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
+                cursor: saving ? 'wait' : 'pointer',
+                position: 'relative',
+              }}
+            >
+              {emotion.nameKo}
+              {selected && (
+                <span aria-hidden="true" style={styles.emotionCheckMark}>✓</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        disabled={!canSave}
+        onClick={onSave}
+        style={{
+          ...styles.reclassifySaveButton,
+          background: canSave ? 'rgba(61, 107, 80, 0.94)' : '#C9C3B7',
+          cursor: canSave ? 'pointer' : 'wait',
+        }}
+      >
+        {selection.length === 0 ? '감정을 골라주세요' : `감정 ${selection.length}개 저장`}
+      </button>
     </div>
   );
 }
