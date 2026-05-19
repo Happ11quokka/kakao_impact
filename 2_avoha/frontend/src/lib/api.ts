@@ -485,16 +485,7 @@ export const api = {
   ) =>
     request<{
       ok: boolean;
-      record: Pick<
-        RecordDto,
-        | 'id'
-        | 'classificationStatus'
-        | 'confirmedEmotionCode'
-        | 'confirmedEmotionCodes'
-        | 'confirmedAt'
-        | 'webReviewedAt'
-        | 'updatedAt'
-      >;
+      record: RecordDto;
       gem: { id: string; emotionCode: string; tier: 1 | 2 | 3 | 4; createdAt: string };
     }>(`/records/${recordId}/confirm-emotion`, { method: 'POST', json: body }),
 

@@ -267,15 +267,7 @@ async def confirm_record_emotion(
 
     return {
         "ok": True,
-        "record": {
-            "id": record.id,
-            "classificationStatus": record.classification_status,
-            "confirmedEmotionCode": record.confirmed_emotion_code,
-            "confirmedEmotionCodes": codes,
-            "confirmedAt": _iso_utc(record.confirmed_at),
-            "webReviewedAt": _iso_utc(record.web_reviewed_at),
-            "updatedAt": _iso_utc(record.updated_at),
-        },
+        "record": _record_payload(record),
         "gem": {
             "id": str(gem.id),
             "emotionCode": gem.emotion_code,

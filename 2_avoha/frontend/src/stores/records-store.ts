@@ -102,6 +102,8 @@ export const useRecordsStore = create<RecordsState>((set, get) => ({
                 confirmedAt: res.record.confirmedAt,
                 webReviewedAt: res.record.webReviewedAt,
                 updatedAt: res.record.updatedAt,
+                questionText: res.record.questionText ?? null,
+                answerText: res.record.answerText ?? null,
                 gemId: res.gem.id,
                 gemEmotionCode: res.gem.emotionCode,
               }
