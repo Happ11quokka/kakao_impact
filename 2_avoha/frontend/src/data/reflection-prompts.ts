@@ -92,3 +92,15 @@ export function pickDynamicQuestion(category: CategoryCode, weekIndex: number): 
   const idx = ((weekIndex % len) + len) % len;
   return list[idx];
 }
+
+// 충족된 hits 중 최종 카테고리 선택.
+// Why: 화면에 "주 감정 = 복잡" 으로 표시되는데 자기회고가 기쁨 질문이면 인지부조화.
+// preferred(주 감정 1위)가 hits 안에 있으면 그걸 우선, 아니면 hits 중 랜덤.
+export function chooseDynamicCategory(
+  hits: readonly CategoryCode[],
+  preferred: CategoryCode | null | undefined,
+): CategoryCode | null {
+  if (hits.length === 0) return null;
+  if (preferred && hits.includes(preferred)) return preferred;
+  return hits[Math.floor(Math.random() * hits.length)];
+}

@@ -8,6 +8,7 @@ import { getEmotion } from '../data/emotions';
 import { emotionToCategory, resolveCategory, type CategoryCode } from '../lib/emotion-category';
 import { EMOTION_VARIANTS_BY_CATEGORY } from '../data/emotion-variants';
 import {
+  chooseDynamicCategory,
   getWeekIndex,
   pickDynamicCategories,
   pickDynamicQuestion,
@@ -391,11 +392,11 @@ export default function Analysis() {
       prevCounts,
       total: items.length,
     });
-    if (hits.length === 0) return null;
+    const chosen = chooseDynamicCategory(hits, topCategory.code);
+    if (!chosen) return null;
     const weekIndex = getWeekIndex(today);
-    const chosen = hits[Math.floor(Math.random() * hits.length)];
     return pickDynamicQuestion(chosen, weekIndex);
-  }, [gems, items, period, records, today]);
+  }, [gems, items, period, records, today, topCategory.code]);
 
   const reflectionPrompt = useMemo(
     () => pickReflectionPrompt(recordsInPeriod, { dynamicQuestion }),

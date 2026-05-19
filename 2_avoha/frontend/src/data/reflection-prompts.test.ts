@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DYNAMIC_REFLECTION_PROMPTS,
+  chooseDynamicCategory,
   getWeekIndex,
   pickDynamicCategories,
   pickDynamicQuestion,
@@ -166,5 +167,22 @@ describe('pickDynamicQuestion', () => {
 
   it('handles negative week index via modulo wrap', () => {
     expect(pickDynamicQuestion('joy', -1)).toBe(DYNAMIC_REFLECTION_PROMPTS.joy[4]);
+  });
+});
+
+describe('chooseDynamicCategory', () => {
+  it('returns null on empty hits', () => {
+    expect(chooseDynamicCategory([], 'complex')).toBeNull();
+  });
+
+  it('prefers preferred category when it is in hits', () => {
+    expect(chooseDynamicCategory(['joy', 'complex'], 'complex')).toBe('complex');
+    expect(chooseDynamicCategory(['sadness', 'joy'], 'sadness')).toBe('sadness');
+  });
+
+  it('falls back to single hit when preferred is missing or not in hits', () => {
+    expect(chooseDynamicCategory(['anger'], 'complex')).toBe('anger');
+    expect(chooseDynamicCategory(['joy'], null)).toBe('joy');
+    expect(chooseDynamicCategory(['joy'], undefined)).toBe('joy');
   });
 });
