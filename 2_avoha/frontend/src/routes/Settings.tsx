@@ -1,10 +1,12 @@
 // === Settings(마이페이지) 화면 — 로기 톤 통일 + 프로필/통계/단축 ===
-import { useEffect, useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/auth-store';
 import { useInventoryStore } from '../stores/inventory-store';
 import { useRecordsStore } from '../stores/records-store';
 import ChibiAvatar from '../components/field/ChibiAvatar';
+import LegalSheet from '../components/LegalSheet';
+import { LEGAL_EFFECTIVE_DATE, LEGAL_VERSION } from '../content/legal';
 
 const APP_VERSION = '1.0.0';
 
@@ -51,6 +53,7 @@ export default function Settings() {
   const logout = useAuthStore((s) => s.logout);
   const { gems, fetchInventory } = useInventoryStore();
   const { records, fetchRecords } = useRecordsStore();
+  const [legalOpen, setLegalOpen] = useState<'terms' | 'privacy' | null>(null);
 
   useEffect(() => {
     fetchInventory();
@@ -172,19 +175,26 @@ export default function Settings() {
           <ActionRow
             label="이용약관"
             leadingEmoji="📄"
-            trailing={<ComingSoonChip />}
-            disabled
+            onClick={() => setLegalOpen('terms')}
           />
           <ActionRow
             label="개인정보 처리방침"
             leadingEmoji="🔒"
-            trailing={<ComingSoonChip />}
-            disabled
+            onClick={() => setLegalOpen('privacy')}
           />
         </section>
 
         <p style={styles.footerNote}>로기는 너의 감정을 안전하게 지킬게요.</p>
+        <p style={styles.footerMeta}>
+          약관 {LEGAL_VERSION} · 시행 {LEGAL_EFFECTIVE_DATE}
+        </p>
       </div>
+
+      <LegalSheet
+        open={legalOpen !== null}
+        kind={legalOpen ?? 'terms'}
+        onClose={() => setLegalOpen(null)}
+      />
     </div>
   );
 }
@@ -589,5 +599,14 @@ const styles: Record<string, CSSProperties> = {
     color: 'var(--color-text-sub)',
     fontSize: 10,
     fontWeight: 600,
+  },
+  footerMeta: {
+    margin: '4px 0 0',
+    textAlign: 'center',
+    color: 'var(--color-text-sub)',
+    fontSize: 9,
+    fontWeight: 600,
+    letterSpacing: 0.2,
+    opacity: 0.7,
   },
 };
