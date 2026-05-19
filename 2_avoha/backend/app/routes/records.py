@@ -234,7 +234,7 @@ async def confirm_record_emotion(
     record.updated_at = now
     reflection_answer = (body.reflectionAnswer or "").strip()
     if reflection_answer:
-        record.question_text = "지금 다시 보니, 그 순간의 감정을 바꾸고 싶은 이유는 무엇인가요?"
+        record.question_text = "이 기록에 대해서 한줄로 표현한다면 어떤 문장일까요?"
         record.answer_text = reflection_answer
 
     session.add(

@@ -104,6 +104,7 @@ export function dayQuestionStatus(records: RecordDto[]): DayQuestionStatus {
 
 export type CalendarEmotionDot = {
   id: string;
+  emotionCode: string;
   color: string;
   label: string;
 };
@@ -137,6 +138,7 @@ export function buildCalendarEmotionDots(gems: Gem[], maxDots = 4): CalendarEmot
     const emotion = getEmotion(gem.emotionCode);
     return {
       id: gem.id,
+      emotionCode: gem.emotionCode,
       color: emotion?.hexColor ?? getEmotion('unclassified')?.hexColor ?? '#7B95A8',
       label: emotion?.nameKo ?? gem.emotionCode,
     };
@@ -157,6 +159,7 @@ export function buildCalendarDayDots(gems: Gem[], records: RecordDto[], maxDots 
             index === 0 && record.gemId && emotionCode !== 'unclassified'
               ? record.gemId
               : `record-${record.id}-${emotionCode}-${index}`,
+          emotionCode,
           color: emotion?.hexColor ?? getEmotion('unclassified')?.hexColor ?? '#7B95A8',
           label: emotion?.nameKo ?? emotionCode,
         };
@@ -273,11 +276,13 @@ export default function Calendar() {
             records={selectedRecords}
             savingId={savingId}
             onClose={() => setSelectedDate(null)}
-            onConfirmEmotion={async (record, emotionCodes) => {
+            onConfirmEmotion={async (record, emotionCodes, reflectionAnswer) => {
               const interaction = buildRecordReclassifyAction(record).interaction;
+              const trimmedReflection = reflectionAnswer.trim();
               const result = await confirmEmotion(record.id, emotionCodes, {
                 interaction,
-                reflectionType: 'none',
+                reflectionType: trimmedReflection ? 'question' : 'none',
+                reflectionAnswer: trimmedReflection || undefined,
               });
               const primary = getEmotion(emotionCodes[0]);
               const multiSuffix = emotionCodes.length > 1 ? ` 외 ${emotionCodes.length - 1}개` : '';
@@ -339,18 +344,26 @@ function GemDayTile({
       }}
     >
       {emotionDots.length > 0 && (
-        <span style={styles.tileDotRow} aria-label={`감정 ${emotionDots.length}개`}>
-          {emotionDots.map((dot) => (
-            <span
+        <span style={styles.tileGemRow} aria-label={`감정 ${emotionDots.length}개`}>
+          {emotionDots.slice(0, 3).map((dot) => (
+            <GemStone
               key={dot.id}
-              title={dot.label}
-              aria-label={`${dot.label} 감정 점`}
-              style={{
-                ...styles.tileEmotionDot,
-                background: dot.color,
+              gem={{
+                id: dot.id,
+                emotionCode: dot.emotionCode,
+                tier: 1,
+                createdAt: new Date().toISOString(),
+                consumedAt: null,
               }}
+              size={12}
+              variant={dot.label}
             />
           ))}
+          {emotionDots.length > 3 && (
+            <span style={styles.tileGemMore} aria-label={`외 ${emotionDots.length - 3}개`}>
+              +{emotionDots.length - 3}
+            </span>
+          )}
         </span>
       )}
       {questionStatus === 'answered' && (
@@ -378,10 +391,15 @@ function DatePanel({
   records: RecordDto[];
   savingId: number | null;
   onClose: () => void;
-  onConfirmEmotion: (record: RecordDto, emotionCodes: string[]) => Promise<void>;
+  onConfirmEmotion: (
+    record: RecordDto,
+    emotionCodes: string[],
+    reflectionAnswer: string,
+  ) => Promise<void>;
 }) {
   const [pickerRecordId, setPickerRecordId] = useState<number | null>(null);
   const [pickerSelection, setPickerSelection] = useState<string[]>([]);
+  const [pickerReflection, setPickerReflection] = useState<string>('');
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const pickerRecord = records.find((record) => record.id === pickerRecordId) ?? null;
   const hasContent = gems.length > 0 || records.length > 0;
@@ -401,6 +419,7 @@ function DatePanel({
   useEffect(() => {
     setPickerRecordId(null);
     setPickerSelection([]);
+    setPickerReflection('');
   }, [dateKey, records]);
 
   useEffect(() => {
@@ -408,8 +427,10 @@ function DatePanel({
       setPickerSelection(
         pickerIsReclassify ? calendarRecordEmotionCodes(pickerRecord) : [],
       );
+      setPickerReflection('');
     } else {
       setPickerSelection([]);
+      setPickerReflection('');
     }
   }, [pickerRecord, pickerIsReclassify]);
 
@@ -462,6 +483,7 @@ function DatePanel({
                       record={record}
                       selection={pickerSelection}
                       saving={savingId === record.id}
+                      reflection={pickerReflection}
                       onToggleEmotion={(emotionCode) => {
                         setPickerSelection((prev) =>
                           prev.includes(emotionCode)
@@ -469,11 +491,15 @@ function DatePanel({
                             : [...prev, emotionCode],
                         );
                       }}
+                      onReflectionChange={setPickerReflection}
                       onSave={() =>
-                        void onConfirmEmotion(record, pickerSelection).then(() => {
-                          setPickerRecordId(null);
-                          setPickerSelection([]);
-                        })
+                        void onConfirmEmotion(record, pickerSelection, pickerReflection).then(
+                          () => {
+                            setPickerRecordId(null);
+                            setPickerSelection([]);
+                            setPickerReflection('');
+                          },
+                        )
                       }
                     />
                   )}
@@ -613,13 +639,17 @@ function ReclassifyAccordion({
   record,
   selection,
   saving,
+  reflection,
   onToggleEmotion,
+  onReflectionChange,
   onSave,
 }: {
   record: RecordDto;
   selection: string[];
   saving: boolean;
+  reflection: string;
   onToggleEmotion: (emotionCode: string) => void;
+  onReflectionChange: (value: string) => void;
   onSave: () => void;
 }) {
   const action = buildRecordReclassifyAction(record);
@@ -656,6 +686,22 @@ function ReclassifyAccordion({
           );
         })}
       </div>
+
+      <div style={styles.reclassifyReflectionBlock}>
+        <div style={styles.recordLabel}>이 한 줄 회고</div>
+        <p style={styles.reclassifyReflectionQuestion}>
+          Q. 이 기록에 대해서 한줄로 표현한다면 어떤 문장일까요?
+        </p>
+        <textarea
+          value={reflection}
+          maxLength={200}
+          placeholder="짧게 한 문장으로 적어도 괜찮아요. (선택)"
+          disabled={saving}
+          onChange={(event) => onReflectionChange(event.target.value)}
+          style={styles.reclassifyReflectionTextarea}
+        />
+      </div>
+
       <button
         type="button"
         disabled={!canSave}
@@ -867,23 +913,24 @@ const styles: Record<string, CSSProperties> = {
     background: '#D08A48',
     boxShadow: '0 0 0 2px #F9F4EA',
   },
-  tileDotRow: {
+  tileGemRow: {
     position: 'absolute',
-    top: 8,
+    top: 6,
     left: '50%',
     transform: 'translateX(-50%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    maxWidth: 32,
+    gap: 2,
+    maxWidth: 40,
+    pointerEvents: 'none',
   },
-  tileEmotionDot: {
-    width: 7,
-    height: 7,
-    borderRadius: '50%',
-    boxShadow: '0 0 0 1px rgba(249,244,234,0.9)',
-    flex: '0 0 auto',
+  tileGemMore: {
+    marginLeft: 1,
+    color: 'rgba(86, 71, 48, 0.7)',
+    fontSize: 9,
+    fontWeight: 800,
+    lineHeight: 1,
   },
   dayNumber: {
     color: 'rgba(86, 71, 48, 0.62)',
@@ -1229,6 +1276,40 @@ const styles: Record<string, CSSProperties> = {
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: 800,
+  },
+  reclassifyReflectionBlock: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 10,
+    background: 'rgba(255, 255, 255, 0.72)',
+    border: '1px solid rgba(86, 71, 48, 0.08)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+  reclassifyReflectionQuestion: {
+    margin: 0,
+    color: TEXT_MAIN,
+    fontSize: 12,
+    fontWeight: 700,
+    lineHeight: 1.45,
+    wordBreak: 'keep-all',
+  },
+  reclassifyReflectionTextarea: {
+    width: '100%',
+    minHeight: 60,
+    padding: '8px 10px',
+    borderRadius: 8,
+    border: '1px solid rgba(86, 71, 48, 0.14)',
+    background: '#FFFFFF',
+    color: TEXT_MAIN,
+    fontSize: 12,
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    lineHeight: 1.5,
+    resize: 'none',
+    outline: 'none',
+    boxSizing: 'border-box',
   },
   toast: {
     position: 'absolute',

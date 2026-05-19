@@ -213,13 +213,18 @@ describe('Calendar day emotion dots', () => {
     expect(buildCalendarDayDots([], records).map((dot) => dot.label)).toEqual(['기쁨', '뿌듯', '설렘']);
   });
 
-  it('keeps unconfirmed records as unclassified dots instead of using the AI guess', () => {
+  it('keeps unconfirmed records as unclassified entries instead of using the AI guess', () => {
     expect(buildCalendarDayDots([], [baseRecord])).toEqual([
-      { id: 'record-1-unclassified-0', color: '#7B95A8', label: '미분류' },
+      {
+        id: 'record-1-unclassified-0',
+        emotionCode: 'unclassified',
+        color: '#7B95A8',
+        label: '미분류',
+      },
     ]);
   });
 
-  it('represents day gems as small color dots instead of gemstone glyphs', () => {
+  it('represents day gems as gem-shaped entries (id/emotionCode/color/label)', () => {
     const dots = buildCalendarEmotionDots([
       gem('g1', 'sadness'),
       gem('g2', 'pride'),
@@ -229,16 +234,16 @@ describe('Calendar day emotion dots', () => {
     ]);
 
     expect(dots).toEqual([
-      { id: 'g1', color: '#1F3F8C', label: '슬픔' },
-      { id: 'g2', color: '#D6A63A', label: '뿌듯' },
-      { id: 'g3', color: '#BF7D26', label: '설렘' },
-      { id: 'g4', color: '#2F343B', label: '평온' },
+      { id: 'g1', emotionCode: 'sadness', color: '#1F3F8C', label: '슬픔' },
+      { id: 'g2', emotionCode: 'pride', color: '#D6A63A', label: '뿌듯' },
+      { id: 'g3', emotionCode: 'flutter', color: '#BF7D26', label: '설렘' },
+      { id: 'g4', emotionCode: 'serenity', color: '#2F343B', label: '평온' },
     ]);
   });
 
   it('uses the neutral unclassified color when an emotion code is unknown', () => {
     expect(buildCalendarEmotionDots([gem('g1', 'unknown')])).toEqual([
-      { id: 'g1', color: '#7B95A8', label: 'unknown' },
+      { id: 'g1', emotionCode: 'unknown', color: '#7B95A8', label: 'unknown' },
     ]);
   });
 });
