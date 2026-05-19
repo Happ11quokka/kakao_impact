@@ -17,15 +17,6 @@ const CANDIDATE_SLOTS = [
   { x: 50, y: 24 },
 ];
 
-const CONFIRMED_SLOTS = [
-  { x: 73, y: 62 },
-  { x: 26, y: 66 },
-  { x: 50, y: 32 },
-  { x: 76, y: 36 },
-  { x: 25, y: 34 },
-  { x: 62, y: 78 },
-];
-
 const MASCOT_START = { x: 50, y: 66 };
 const LAKE_MOVE_RADIUS = 48;
 const PROXIMITY_PROMPT_RADIUS = 18;
@@ -362,26 +353,16 @@ export default function Home() {
 
   const lakeStones = useMemo<LakeStone[]>(() => {
     let candidateIndex = 0;
-    let confirmedIndex = 0;
-
     return todayRecords
-      .slice(0, CANDIDATE_SLOTS.length + CONFIRMED_SLOTS.length)
+      .filter((record) => record.classificationStatus === 'needs_confirmation')
+      .slice(0, CANDIDATE_SLOTS.length)
       .map<LakeStone>((record) => {
-        const isCandidate = record.classificationStatus === 'needs_confirmation';
-        const slot = isCandidate
-          ? CANDIDATE_SLOTS[candidateIndex++ % CANDIDATE_SLOTS.length]
-          : CONFIRMED_SLOTS[confirmedIndex++ % CONFIRMED_SLOTS.length];
-        const recordCodes = confirmedEmotionCodes(record);
-        const codes: string[] = isCandidate
-          ? [record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret']
-          : recordCodes.length > 0
-            ? recordCodes
-            : [recordEmotionCode(record) ?? 'untroubled'];
+        const slot = CANDIDATE_SLOTS[candidateIndex++ % CANDIDATE_SLOTS.length];
         return {
           record,
           position: slot,
-          emotionCodes: codes,
-          status: isCandidate ? 'candidate' : 'confirmed',
+          emotionCodes: [record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret'],
+          status: 'candidate',
         };
       });
   }, [todayRecords]);
@@ -425,8 +406,7 @@ export default function Home() {
     (activeStatus === 'candidate' && (!suggestedEmotion || emotionPickerOpen)) ||
     (activeCanReclassify && reflectionMode === 'picker');
 
-  const candidateCount = lakeStones.filter((stone) => stone.status === 'candidate').length;
-  const confirmedCount = lakeStones.filter((stone) => stone.status === 'confirmed').length;
+  const candidateCount = lakeStones.length;
   const nearbyStone = useMemo(() => {
     if (activeRecord || showBook) return null;
     return (
@@ -927,7 +907,7 @@ export default function Home() {
               }}
             >
               {candidateCount > 0 && <span>확인 필요 {candidateCount}</span>}
-              {confirmedCount > 0 && <span>저장 완료 {confirmedCount}</span>}
+              {todayConfirmedCount > 0 && <span>저장 완료 {todayConfirmedCount}</span>}
             </div>
           )}
         </section>
