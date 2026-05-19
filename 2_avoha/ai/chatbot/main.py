@@ -176,11 +176,6 @@ def send_alert_email(subject: str, body: str):
         print(f"[email error] {e}")
 
 
-# --- DB 동기화 헬퍼 (collection_tickets 직접 조작) -------------------------
-# Why: chatbot이 인메모리만 쓰면 백엔드 /me 응답(`collection_tickets` SELECT)과
-#      불일치 → 카톡과 웹 화면 채집권 숫자가 어긋남. provider_user_key로
-#      users.id 조회 후 DB 차감을 시도, 실패(미로그인 등)하면 인메모리 fallback.
-
 def is_image_url(text: str) -> bool:
     if " " in text or "\n" in text:
         return False
@@ -1701,7 +1696,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             custom_replies=[{"label": "이대로 저장", "action": "message", "messageText": "이대로 저장"}],
         ))
 
-    # 이대로 저장 (일상 기록만 저장, 채집권 미사용)
+    # 이대로 저장 (일상 기록으로 저장)
     if utterance == "이대로 저장":
         data = _safe_pending_gem(user_id, require_text=True)
         if not data:
