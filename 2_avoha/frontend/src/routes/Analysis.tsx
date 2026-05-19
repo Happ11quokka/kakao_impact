@@ -446,12 +446,18 @@ export default function Analysis() {
             {categoryStats.map((category) => {
               const isOpen = selectedCategory === category.code;
               const categoryItems = items.filter((i) => i.category === category.code);
-              const variantCounts = EMOTION_VARIANTS_BY_CATEGORY[category.code]
-                .map((label) => ({
-                  label,
-                  count: categoryItems.filter((i) => i.label === label).length,
-                }))
-                .filter((v) => v.count > 0);
+              // 카테고리 카운트(53%)와 chip 합계가 어긋나지 않도록, 미리 정해둔 variant
+              // 라벨 목록이 아니라 실제 items에 등장하는 label로 그루핑한다.
+              // (예: solace="위로", untroubled="무탈" 등은 complex variant 라벨 목록과
+              // 글자가 달라서 매칭 0이 되던 회귀를 막음)
+              const variantCountsMap = new Map<string, number>();
+              for (const item of categoryItems) {
+                variantCountsMap.set(item.label, (variantCountsMap.get(item.label) ?? 0) + 1);
+              }
+              const variantCounts = Array.from(variantCountsMap, ([label, count]) => ({
+                label,
+                count,
+              })).sort((a, b) => b.count - a.count);
               const sampleRecords = categoryItems
                 .filter((i) => i.recordText)
                 .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
