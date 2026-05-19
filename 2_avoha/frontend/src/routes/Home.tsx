@@ -24,7 +24,7 @@ const CONFIRMED_SLOTS = [
 ];
 
 const MASCOT_START = { x: 50, y: 66 };
-const LAKE_MOVE_RADIUS = 38;
+const LAKE_MOVE_RADIUS = 44;
 const PROXIMITY_PROMPT_RADIUS = 18;
 const JOYSTICK_KNOB_LIMIT = 24;
 const JOYSTICK_SPEED = 0.036;
@@ -47,8 +47,8 @@ function clampToLake(position: FieldPosition): FieldPosition {
   const d = Math.hypot(dx, dy);
   if (d <= LAKE_MOVE_RADIUS) {
     return {
-      x: Math.max(12, Math.min(88, position.x)),
-      y: Math.max(12, Math.min(88, position.y)),
+      x: Math.max(6, Math.min(94, position.x)),
+      y: Math.max(6, Math.min(94, position.y)),
     };
   }
   const scale = LAKE_MOVE_RADIUS / d;
@@ -708,7 +708,7 @@ export default function Home() {
         <div
           style={{
             position: 'relative',
-            marginTop: 104,
+            marginTop: 8,
             marginBottom: 20,
             marginLeft: -20,
             marginRight: -20,
