@@ -62,6 +62,14 @@ export function calendarRecordEmotionCode(record: RecordDto): string | null {
   return record.confirmedEmotionCode ?? record.gemEmotionCode ?? record.aiEmotionCode ?? null;
 }
 
+export function calendarRecordEmotionCodes(record: RecordDto): string[] {
+  if (record.confirmedEmotionCodes && record.confirmedEmotionCodes.length > 0) {
+    return record.confirmedEmotionCodes;
+  }
+  const primary = calendarRecordEmotionCode(record);
+  return primary ? [primary] : [];
+}
+
 export function calendarRecordNeedsReclassification(record: RecordDto): boolean {
   return record.classificationStatus === 'needs_confirmation' || !calendarRecordEmotionCode(record);
 }
@@ -77,6 +85,16 @@ export function buildRecordReflection(record: RecordDto): RecordReflection | nul
 
   const answer = record.answerText?.trim() || null;
   return { question, answer };
+}
+
+export type DayQuestionStatus = 'none' | 'unanswered' | 'answered';
+
+// 하루에 받은 자기인지 질문 중 하나라도 답하면 answered.
+export function dayQuestionStatus(records: RecordDto[]): DayQuestionStatus {
+  const withQuestion = records.filter((r) => r.questionText?.trim());
+  if (withQuestion.length === 0) return 'none';
+  if (withQuestion.some((r) => r.answerText?.trim())) return 'answered';
+  return 'unanswered';
 }
 
 export default function Calendar() {
@@ -154,6 +172,8 @@ export default function Calendar() {
         <div style={styles.grid}>
           {cells.map((cell) => {
             const dayGems = gemsByDate[cell.key] ?? [];
+            const dayRecords = recordsByDate[cell.key] ?? [];
+            const qStatus = dayQuestionStatus(dayRecords);
             const isSelected = cell.key === selectedDate;
             return (
               <button
@@ -166,7 +186,7 @@ export default function Calendar() {
                   opacity: cell.inCurrentMonth ? 1 : 0.58,
                 }}
               >
-                <GemDayTile gems={dayGems} selected={isSelected} />
+                <GemDayTile gems={dayGems} selected={isSelected} questionStatus={qStatus} />
                 <span style={styles.dayNumber}>{cell.day}</span>
               </button>
             );
@@ -182,18 +202,19 @@ export default function Calendar() {
             records={selectedRecords}
             savingId={savingId}
             onClose={() => setSelectedDate(null)}
-            onConfirmEmotion={async (record, emotionCode) => {
+            onConfirmEmotion={async (record, emotionCodes) => {
               const wasCandidate = calendarRecordNeedsReclassification(record);
-              const result = await confirmEmotion(record.id, emotionCode, {
+              const result = await confirmEmotion(record.id, emotionCodes, {
                 interaction: wasCandidate ? 'confirm' : 'reclassify',
                 reflectionType: 'none',
               });
-              const emotion = getEmotion(emotionCode);
+              const primary = getEmotion(emotionCodes[0]);
+              const multiSuffix = emotionCodes.length > 1 ? ` 외 ${emotionCodes.length - 1}개` : '';
               setRecordToast(
                 result.ok
                   ? wasCandidate
-                    ? `${emotion?.nameKo ?? '감정'} 원석으로 저장했어요`
-                    : `${emotion?.nameKo ?? '감정'} 원석으로 업데이트했어요`
+                    ? `${primary?.nameKo ?? '감정'}${multiSuffix} 원석으로 저장했어요`
+                    : `${primary?.nameKo ?? '감정'}${multiSuffix} 원석으로 업데이트했어요`
                   : result.error ?? '감정 저장에 실패했어요',
               );
               window.setTimeout(() => setRecordToast(null), 2400);
@@ -222,17 +243,19 @@ export default function Calendar() {
         />
       )}
 
-      <style>{`
-        @keyframes calendarCandidatePulse {
-          0%, 100% { transform: scale(1); opacity: 0.78; }
-          50% { transform: scale(1.08); opacity: 1; }
-        }
-      `}</style>
     </div>
   );
 }
 
-function GemDayTile({ gems, selected }: { gems: Gem[]; selected: boolean }) {
+function GemDayTile({
+  gems,
+  selected,
+  questionStatus,
+}: {
+  gems: Gem[];
+  selected: boolean;
+  questionStatus: DayQuestionStatus;
+}) {
   const visibleGems = gems.slice(0, 4);
 
   return (
@@ -242,7 +265,7 @@ function GemDayTile({ gems, selected }: { gems: Gem[]; selected: boolean }) {
         outline: selected ? `1px solid ${DETAIL_PANEL}` : 'none',
       }}
     >
-      {visibleGems.length === 0 ? null : (
+      {visibleGems.length > 0 && (
         <span style={styles.tileGemRow}>
           {visibleGems.map((gem) => (
             <span key={gem.id} style={styles.tileGemStone}>
@@ -250,6 +273,14 @@ function GemDayTile({ gems, selected }: { gems: Gem[]; selected: boolean }) {
             </span>
           ))}
         </span>
+      )}
+      {questionStatus === 'answered' && (
+        <span style={styles.tileMarkDone} aria-label="자기인지 질문 답변 완료">
+          ✓
+        </span>
+      )}
+      {questionStatus === 'unanswered' && (
+        <span style={styles.tileMarkDot} aria-label="자기인지 질문 미답변" />
       )}
     </span>
   );
@@ -268,18 +299,47 @@ function DatePanel({
   records: RecordDto[];
   savingId: number | null;
   onClose: () => void;
-  onConfirmEmotion: (record: RecordDto, emotionCode: string) => Promise<void>;
+  onConfirmEmotion: (record: RecordDto, emotionCodes: string[]) => Promise<void>;
 }) {
-  const [openedRecordId, setOpenedRecordId] = useState<number | null>(records[0]?.id ?? null);
   const [pickerRecordId, setPickerRecordId] = useState<number | null>(null);
-  const primaryRecord = records.find((record) => record.id === openedRecordId) ?? records[0];
+  const [pickerSelection, setPickerSelection] = useState<string[]>([]);
   const pickerRecord = records.find((record) => record.id === pickerRecordId) ?? null;
   const hasContent = gems.length > 0 || records.length > 0;
+  const pickerIsReclassify = Boolean(
+    pickerRecord && !calendarRecordNeedsReclassification(pickerRecord),
+  );
+
+  const questionRecords = records.filter((r) => r.questionText?.trim());
+  const sortedRecords = [...records].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+  // 기록과 원석이 같은 이벤트의 다른 표현이므로 기록이 있으면 기록만, 없으면 원석만 노출.
+  const sortedGems = records.length === 0
+    ? [...gems].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    : [];
 
   useEffect(() => {
-    setOpenedRecordId(records[0]?.id ?? null);
     setPickerRecordId(null);
+    setPickerSelection([]);
   }, [dateKey, records]);
+
+  useEffect(() => {
+    if (pickerRecord) {
+      setPickerSelection(
+        pickerIsReclassify ? calendarRecordEmotionCodes(pickerRecord) : [],
+      );
+    } else {
+      setPickerSelection([]);
+    }
+  }, [pickerRecord, pickerIsReclassify]);
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 
   return (
     <section
@@ -287,127 +347,181 @@ function DatePanel({
       style={styles.panel}
       onClick={(event) => event.stopPropagation()}
     >
-      <button type="button" onClick={onClose} aria-label="팝업 닫기" style={styles.panelClose}>×</button>
+      <header style={styles.sheetHeader}>
+        <div>
+          <span style={styles.sheetDate}>{formatKoreanDate(dateKey)}</span>
+          <span style={styles.sheetCount}>
+            기록 {records.length}개 · 원석 {gems.length}개
+          </span>
+        </div>
+        <button type="button" onClick={onClose} aria-label="팝업 닫기" style={styles.sheetClose}>
+          ×
+        </button>
+      </header>
 
-      <div style={styles.panelTitle}>{formatKoreanDate(dateKey)}</div>
-
-      {!hasContent ? (
+      {!hasContent && (
         <p style={styles.emptyText}>이 날은 기록된 원석이 없어요.</p>
-      ) : (
-        <>
-          <div style={styles.gemSummary}>
-            {records.map((record) => {
-              const needsReclassification = calendarRecordNeedsReclassification(record);
-              const emotionCode = calendarRecordEmotionCode(record) ?? 'regret';
-              const emotion = getEmotion(emotionCode);
-              return (
-                <button
-                  key={`record-gem-${record.id}`}
-                  type="button"
-                  onClick={() => {
-                    setOpenedRecordId(record.id);
-                    if (needsReclassification) setPickerRecordId(record.id);
-                  }}
-                  style={{
-                    ...styles.summaryGemButton,
-                    ...(needsReclassification ? styles.unclassifiedGemButton : {}),
-                  }}
-                  aria-label={needsReclassification ? '미분류 원석 재분류하기' : `${emotion?.nameKo ?? '감정'} 원석 기록 보기`}
-                >
-                  <span style={styles.summaryGemStone}>
-                    <GemStone
-                      gem={{
-                        id: `calendar-record-${record.id}`,
-                        emotionCode,
-                        tier: 1,
-                        createdAt: record.createdAt,
-                        consumedAt: null,
-                      }}
-                      size={needsReclassification ? 30 : 26}
-                      variant={emotion?.nameKo}
-                    />
-                  </span>
-                  <span style={styles.summaryGemLabel}>
-                    {needsReclassification ? '미분류' : emotion?.nameKo ?? emotionCode}
-                  </span>
-                </button>
-              );
-            })}
-            {records.length === 0 && gems.slice(0, 4).map((gem) => {
-              const emotion = getEmotion(gem.emotionCode);
-              return (
-                <button
-                  key={gem.id}
-                  type="button"
-                  onClick={() => setOpenedRecordId(records[0]?.id ?? null)}
-                  style={styles.summaryGemButton}
-                >
-                  <span style={styles.summaryGemStone}>
-                    <GemStone gem={gem} size={24} variant={emotion?.nameKo} />
-                  </span>
-                  <span style={styles.summaryGemLabel}>{emotion?.nameKo ?? gem.emotionCode}</span>
-                </button>
-              );
-            })}
-          </div>
+      )}
 
-          <div style={styles.panelDivider} />
+      {questionRecords.length > 0 && (
+        <section style={styles.questionBlock} aria-label="자기인지 질문">
+          <span style={styles.questionLabel}>오늘의 자기인지 질문</span>
+          {questionRecords.map((qr) => (
+            <div key={`q-${qr.id}`} style={styles.questionItem}>
+              <p style={styles.questionPrompt}>{qr.questionText}</p>
+              {qr.answerText ? (
+                <p style={styles.questionAnswer}>{qr.answerText}</p>
+              ) : (
+                <span style={styles.questionMissing}>아직 답하지 못했어요</span>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
 
-          {records.length > 1 && (
-            <div style={styles.recordTabs}>
-              {records.map((record) => (
-                <button
-                  key={record.id}
-                  type="button"
-                  onClick={() => setOpenedRecordId(record.id)}
-                  style={{
-                    ...styles.recordTab,
-                    background: record.id === openedRecordId ? 'rgba(255, 255, 255, 0.22)' : 'transparent',
-                  }}
-                >
+      {(sortedRecords.length > 0 || sortedGems.length > 0) && (
+        <section style={styles.timeline} aria-label="시간순 기록">
+          {sortedRecords.map((record) => {
+            const needsReclassification = calendarRecordNeedsReclassification(record);
+            return (
+              <article key={`row-${record.id}`} style={styles.timelineRow}>
+                <span style={styles.timelineTime}>
                   {new Date(record.createdAt).toLocaleTimeString('ko-KR', {
                     hour: '2-digit',
                     minute: '2-digit',
                   })}
+                </span>
+                <div
+                  style={{
+                    ...styles.timelineCard,
+                    ...(needsReclassification ? styles.timelineCardCandidate : null),
+                  }}
+                >
+                  <RecordDetail
+                    record={record}
+                    onOpenPicker={() => setPickerRecordId(record.id)}
+                  />
+                </div>
+              </article>
+            );
+          })}
+          {sortedGems.map((gem) => {
+            const emotion = getEmotion(gem.emotionCode);
+            return (
+              <article key={`gem-${gem.id}`} style={styles.timelineRow}>
+                <span style={styles.timelineTime}>
+                  {new Date(gem.createdAt).toLocaleTimeString('ko-KR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+                <div style={styles.timelineCard}>
+                  <div style={styles.gemOnlyRow}>
+                    <GemStone gem={gem} size={28} variant={emotion?.nameKo} />
+                    <span style={styles.gemOnlyLabel}>
+                      {emotion?.nameKo ?? gem.emotionCode} 원석
+                    </span>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      )}
+
+      {pickerRecord && (
+        <div style={styles.reclassifyBox}>
+          <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
+          <p style={styles.reclassifyHint}>
+            {pickerIsReclassify
+              ? '여러 감정이 함께 떠오르면 모두 골라주세요.'
+              : '오늘이 지나도 미분류 원석은 캘린더에서 다시 분류할 수 있어요.'}
+          </p>
+          <div style={styles.emotionGrid}>
+            {EMOTIONS.map((emotion) => {
+              const selected = pickerIsReclassify && pickerSelection.includes(emotion.code);
+              return (
+                <button
+                  key={emotion.code}
+                  type="button"
+                  disabled={savingId === pickerRecord.id}
+                  onClick={() => {
+                    if (pickerIsReclassify) {
+                      setPickerSelection((prev) =>
+                        prev.includes(emotion.code)
+                          ? prev.filter((c) => c !== emotion.code)
+                          : [...prev, emotion.code],
+                      );
+                    } else {
+                      void onConfirmEmotion(pickerRecord, [emotion.code]).then(() =>
+                        setPickerRecordId(null),
+                      );
+                    }
+                  }}
+                  style={{
+                    ...styles.emotionButton,
+                    border: selected
+                      ? `2px solid ${emotion.hexColor}`
+                      : `1px solid ${emotion.hexColor}66`,
+                    background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
+                    cursor: savingId === pickerRecord.id ? 'wait' : 'pointer',
+                    position: 'relative',
+                    fontWeight: 800,
+                  }}
+                >
+                  {emotion.nameKo}
+                  {selected && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute',
+                        top: 2,
+                        right: 4,
+                        fontSize: 9,
+                        fontWeight: 800,
+                        color: emotion.hexColor,
+                      }}
+                    >
+                      ✓
+                    </span>
+                  )}
                 </button>
-              ))}
-            </div>
+              );
+            })}
+          </div>
+          {pickerIsReclassify && (
+            <button
+              type="button"
+              disabled={pickerSelection.length === 0 || savingId === pickerRecord.id}
+              onClick={() =>
+                void onConfirmEmotion(pickerRecord, pickerSelection).then(() => {
+                  setPickerRecordId(null);
+                  setPickerSelection([]);
+                })
+              }
+              style={{
+                width: '100%',
+                minHeight: 38,
+                marginTop: 10,
+                border: 'none',
+                borderRadius: 10,
+                background:
+                  pickerSelection.length === 0 ? '#C9C3B7' : 'rgba(61, 107, 80, 0.94)',
+                color: '#FFFFFF',
+                fontSize: 11,
+                fontWeight: 800,
+                cursor:
+                  pickerSelection.length === 0 || savingId === pickerRecord.id
+                    ? 'wait'
+                    : 'pointer',
+              }}
+            >
+              {pickerSelection.length === 0
+                ? '감정을 골라주세요'
+                : `감정 ${pickerSelection.length}개 저장`}
+            </button>
           )}
-
-          {primaryRecord ? (
-            <RecordDetail
-              record={primaryRecord}
-              onOpenPicker={() => setPickerRecordId(primaryRecord.id)}
-            />
-          ) : (
-            <p style={styles.recordText}>채집한 원석을 캘린더에 담아두었어요.</p>
-          )}
-
-          {pickerRecord && (
-            <div style={styles.reclassifyBox}>
-              <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
-              <p style={styles.reclassifyHint}>오늘이 지나도 미분류 원석은 캘린더에서 다시 분류할 수 있어요.</p>
-              <div style={styles.emotionGrid}>
-                {EMOTIONS.map((emotion) => (
-                  <button
-                    key={emotion.code}
-                    type="button"
-                    disabled={savingId === pickerRecord.id}
-                    onClick={() => void onConfirmEmotion(pickerRecord, emotion.code).then(() => setPickerRecordId(null))}
-                    style={{
-                      ...styles.emotionButton,
-                      border: `1px solid ${emotion.hexColor}66`,
-                      background: `${emotion.hexColor}18`,
-                      cursor: savingId === pickerRecord.id ? 'wait' : 'pointer',
-                    }}
-                  >
-                    {emotion.nameKo}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
+        </div>
       )}
     </section>
   );
@@ -415,8 +529,9 @@ function DatePanel({
 
 function RecordDetail({ record, onOpenPicker }: { record: RecordDto; onOpenPicker: () => void }) {
   const needsReclassification = calendarRecordNeedsReclassification(record);
-  const emotionCode = calendarRecordEmotionCode(record);
-  const emotion = emotionCode ? getEmotion(emotionCode) : undefined;
+  const codes = calendarRecordEmotionCodes(record);
+  const primaryCode = codes[0] ?? null;
+  const emotion = primaryCode ? getEmotion(primaryCode) : undefined;
   const reflection = buildRecordReflection(record);
 
   return (
@@ -433,7 +548,11 @@ function RecordDetail({ record, onOpenPicker }: { record: RecordDto; onOpenPicke
 
       <div style={styles.recordMetaRow}>
         <span style={styles.recordMetaPill}>
-          {needsReclassification ? '미분류 원석' : emotion?.nameKo ?? '감정 원석'}
+          {needsReclassification
+            ? '미분류 원석'
+            : codes.length > 1
+              ? `${emotion?.nameKo ?? primaryCode ?? '감정'} 외 ${codes.length - 1}개 감정`
+              : (emotion?.nameKo ?? '감정 원석')}
         </span>
         {needsReclassification && (
           <button type="button" onClick={onOpenPicker} style={styles.reclassifyOpenButton}>
@@ -615,6 +734,7 @@ const styles: Record<string, CSSProperties> = {
     outline: 'none',
   },
   dayTile: {
+    position: 'relative',
     width: 'min(42px, 10.5vw)',
     height: 'min(42px, 10.5vw)',
     borderRadius: 12,
@@ -622,6 +742,32 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  tileMarkDone: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    width: 13,
+    height: 13,
+    borderRadius: '50%',
+    background: '#FFFFFF',
+    color: '#3D6050',
+    fontSize: 9,
+    fontWeight: 900,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+  },
+  tileMarkDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 7,
+    height: 7,
+    borderRadius: '50%',
+    background: '#D08A48',
+    boxShadow: '0 0 0 2px #F9F4EA',
   },
   tileGemRow: {
     display: 'grid',
@@ -642,103 +788,148 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1,
   },
   modalLayer: {
-    position: 'absolute',
+    position: 'fixed',
     inset: 0,
-    zIndex: 30,
+    zIndex: 40,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '20px 18px calc(90px + env(safe-area-inset-bottom))',
-    background: 'rgba(30, 51, 40, 0.18)',
+    alignItems: 'stretch',
+    justifyContent: 'stretch',
+    padding: 0,
+    background: 'rgba(30, 51, 40, 0.32)',
     backdropFilter: 'blur(2px)',
   },
   panel: {
     position: 'relative',
-    width: 'min(330px, 100%)',
-    maxHeight: 'min(72vh, 520px)',
-    zIndex: 31,
+    width: '100%',
+    height: '100vh',
+    maxHeight: '100vh',
+    zIndex: 41,
     overflow: 'auto',
     background: DETAIL_PANEL,
-    borderRadius: 22,
-    padding: '18px 18px 18px',
+    borderRadius: 0,
+    padding: 'calc(20px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom))',
     color: TEXT_MAIN,
-    boxShadow: '0 18px 42px rgba(30, 51, 40, 0.22)',
   },
-  panelClose: {
-    position: 'absolute',
-    top: 10,
-    right: 12,
-    width: 28,
-    height: 28,
-    border: 0,
-    borderRadius: 99,
-    background: 'rgba(255, 255, 255, 0.28)',
+  sheetHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    marginBottom: 16,
+    borderBottom: '1px solid rgba(255,255,255,0.22)',
+    gap: 12,
+  },
+  sheetDate: {
+    display: 'block',
     color: TEXT_MAIN,
-    fontSize: 18,
+    fontSize: 16,
+    fontWeight: 900,
+    letterSpacing: 0.2,
+  },
+  sheetCount: {
+    display: 'block',
+    marginTop: 4,
+    color: TEXT_SUB,
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  sheetClose: {
+    flexShrink: 0,
+    width: 36,
+    height: 36,
+    border: 0,
+    borderRadius: 999,
+    background: 'rgba(255,255,255,0.32)',
+    color: TEXT_MAIN,
+    fontSize: 20,
     fontWeight: 800,
     cursor: 'pointer',
     outline: 'none',
   },
-  panelTitle: {
+  questionBlock: {
+    marginBottom: 18,
+    padding: 14,
+    borderRadius: 14,
+    background: 'rgba(255,255,255,0.24)',
+    border: '1px solid rgba(255,255,255,0.28)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+  },
+  questionLabel: {
+    color: TEXT_SUB,
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: 0.2,
+  },
+  questionItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+  questionPrompt: {
+    margin: 0,
+    color: TEXT_MAIN,
+    fontSize: 14,
+    fontWeight: 800,
+    lineHeight: 1.45,
+    wordBreak: 'keep-all',
+  },
+  questionAnswer: {
+    margin: 0,
+    color: TEXT_MAIN,
+    fontSize: 13,
+    lineHeight: 1.5,
+    wordBreak: 'keep-all',
+    overflowWrap: 'anywhere',
+  },
+  questionMissing: {
+    color: '#A65E1B',
+    fontSize: 12,
+    fontWeight: 800,
+  },
+  timeline: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+    marginBottom: 16,
+  },
+  timelineRow: {
+    display: 'grid',
+    gridTemplateColumns: '56px 1fr',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  timelineTime: {
+    color: TEXT_SUB,
+    fontSize: 11,
+    fontWeight: 800,
+    paddingTop: 10,
+  },
+  timelineCard: {
+    background: 'rgba(255,255,255,0.22)',
+    borderRadius: 14,
+    padding: 12,
+  },
+  timelineCardCandidate: {
+    background: 'rgba(244, 232, 205, 0.55)',
+    border: '1px solid rgba(208, 138, 72, 0.45)',
+  },
+  gemOnlyRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+  },
+  gemOnlyLabel: {
     color: TEXT_MAIN,
     fontSize: 13,
     fontWeight: 800,
-    marginBottom: 12,
-    paddingRight: 28,
   },
   emptyText: {
     color: TEXT_SUB,
-    fontSize: 11,
-    margin: '18px 0 4px',
+    fontSize: 12,
+    margin: '22px 0 4px',
     textAlign: 'center',
-  },
-  gemSummary: {
-    display: 'flex',
-    gap: 11,
-    flexWrap: 'wrap',
-    alignItems: 'flex-start',
-  },
-  summaryGemButton: {
-    border: 0,
-    background: 'transparent',
-    padding: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 4,
-    cursor: 'pointer',
-    outline: 'none',
-  },
-  summaryGemStone: {
-    width: 24,
-    height: 24,
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  summaryGemLabel: {
-    color: TEXT_SUB,
-    fontSize: 9,
-    fontWeight: 600,
-  },
-  panelDivider: {
-    height: 1,
-    background: 'rgba(61, 96, 80, 0.34)',
-    margin: '8px 0 10px',
-  },
-  recordTabs: {
-    display: 'flex',
-    gap: 6,
-    marginBottom: 8,
-  },
-  recordTab: {
-    border: '1px solid rgba(61, 96, 80, 0.18)',
-    borderRadius: 99,
-    color: TEXT_SUB,
-    fontSize: 9,
-    padding: '4px 8px',
-    cursor: 'pointer',
-    outline: 'none',
   },
   photoBox: {
     width: '100%',
@@ -801,15 +992,6 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.5,
     wordBreak: 'keep-all',
     overflowWrap: 'anywhere',
-  },
-  emotionPicker: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(5, 1fr)',
-    gap: 5,
-    marginTop: 8,
-  },
-  unclassifiedGemButton: {
-    animation: 'calendarCandidatePulse 1.8s ease-in-out infinite',
   },
   recordMetaRow: {
     display: 'flex',

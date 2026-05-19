@@ -139,6 +139,7 @@ export interface RecordDto extends ChatbotRecordDto {
   classificationStatus: RecordClassificationStatus;
   aiEmotionCode: string | null;
   confirmedEmotionCode: string | null;
+  confirmedEmotionCodes: string[];
   confirmedAt: string | null;
   webReviewedAt: string | null;
   updatedAt: string;
@@ -163,6 +164,7 @@ let mockRecords: RecordDto[] = [
     classificationStatus: 'needs_confirmation',
     aiEmotionCode: 'regret',
     confirmedEmotionCode: null,
+    confirmedEmotionCodes: [],
     confirmedAt: null,
     webReviewedAt: null,
     updatedAt: mockPlainRecordTime,
@@ -181,6 +183,7 @@ let mockRecords: RecordDto[] = [
     classificationStatus: 'user_confirmed',
     aiEmotionCode: 'joy',
     confirmedEmotionCode: 'joy',
+    confirmedEmotionCodes: ['joy'],
     confirmedAt: mockEmotionRecordTime,
     webReviewedAt: null,
     updatedAt: mockEmotionRecordTime,
@@ -203,6 +206,7 @@ let mockRecords: RecordDto[] = [
     classificationStatus: 'user_confirmed',
     aiEmotionCode: 'joy',
     confirmedEmotionCode: 'joy',
+    confirmedEmotionCodes: ['joy', 'pride'],
     confirmedAt: mockYesterday,
     webReviewedAt: mockYesterday,
     updatedAt: mockYesterday,
@@ -328,28 +332,34 @@ function mockRequest<T>(path: string, init: JsonInit): T | undefined {
     const recordId = Number(confirmMatch[1]);
     const body = init.json as {
       emotionCode?: string;
+      emotionCodes?: string[];
       interaction?: 'confirm' | 'reclassify';
     };
     const target = mockRecords.find((record) => record.id === recordId);
     if (!target || !body?.emotionCode) {
       throw new ApiError(404, 'RECORD_NOT_FOUND', { error: { code: 'RECORD_NOT_FOUND' } });
     }
+    const codes = body.emotionCodes && body.emotionCodes.length > 0
+      ? body.emotionCodes
+      : [body.emotionCode];
+    const primary = codes[0];
 
     const now = new Date().toISOString();
     const status: RecordClassificationStatus =
       body.interaction === 'reclassify' ? 'reclassified' : 'user_confirmed';
     const gemId = target.gemId ?? `mock-gem-${target.id}`;
     target.classificationStatus = status;
-    target.confirmedEmotionCode = body.emotionCode;
+    target.confirmedEmotionCode = primary;
+    target.confirmedEmotionCodes = codes;
     target.confirmedAt = now;
     target.webReviewedAt = now;
     target.updatedAt = now;
     target.gemId = gemId;
-    target.gemEmotionCode = body.emotionCode;
+    target.gemEmotionCode = primary;
 
     const gem: GemDto = {
       id: gemId,
-      emotionCode: body.emotionCode,
+      emotionCode: primary,
       tier: 1,
       source: 'chatbot_record',
       sourceMessageId: String(target.id),
@@ -365,6 +375,7 @@ function mockRequest<T>(path: string, init: JsonInit): T | undefined {
         id: target.id,
         classificationStatus: target.classificationStatus,
         confirmedEmotionCode: target.confirmedEmotionCode,
+        confirmedEmotionCodes: target.confirmedEmotionCodes,
         confirmedAt: target.confirmedAt,
         webReviewedAt: target.webReviewedAt,
         updatedAt: target.updatedAt,
@@ -432,6 +443,7 @@ export const api = {
     recordId: number,
     body: {
       emotionCode: string;
+      emotionCodes?: string[];
       interaction?: 'confirm' | 'reclassify';
       reflectionType?: 'question' | 'meditation' | 'none';
     },
@@ -443,6 +455,7 @@ export const api = {
         | 'id'
         | 'classificationStatus'
         | 'confirmedEmotionCode'
+        | 'confirmedEmotionCodes'
         | 'confirmedAt'
         | 'webReviewedAt'
         | 'updatedAt'

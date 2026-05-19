@@ -37,7 +37,7 @@ type ReflectionMode = 'idle' | 'choice' | 'question' | 'meditation' | 'picker';
 type LakeStone = {
   record: RecordDto;
   position: FieldPosition;
-  emotionCode: string;
+  emotionCodes: string[];
   status: 'candidate' | 'confirmed';
 };
 
@@ -120,6 +120,7 @@ export default function Home() {
   const [selectedReflectionType, setSelectedReflectionType] = useState<ReflectionType>('none');
   const [meditationRemaining, setMeditationRemaining] = useState(5);
   const [activeRecordId, setActiveRecordId] = useState<number | null>(null);
+  const [pickerSelection, setPickerSelection] = useState<string[]>([]);
   const [mascotPosition, setMascotPosition] = useState<FieldPosition>(MASCOT_START);
   const [joystick, setJoystick] = useState({ active: false, x: 0, y: 0 });
   const joystickVectorRef = useRef({ x: 0, y: 0 });
@@ -136,6 +137,14 @@ export default function Home() {
       setActiveRecordId(null);
     }
   }, [activeRecordId, records]);
+
+  useEffect(() => {
+    if (reflectionMode === 'picker' && activeRecordId) {
+      const target = records.find((r) => r.id === activeRecordId);
+      const existing = target?.confirmedEmotionCodes ?? [];
+      setPickerSelection(existing);
+    }
+  }, [reflectionMode, activeRecordId, records]);
 
   useEffect(() => {
     if (reflectionMode !== 'meditation' || meditationRemaining <= 0) return undefined;
@@ -182,17 +191,20 @@ export default function Home() {
     return todayRecords
       .filter((record) => record.classificationStatus === 'needs_confirmation' || Boolean(recordEmotionCode(record)))
       .slice(0, CANDIDATE_SLOTS.length + CONFIRMED_SLOTS.length)
-      .map((record) => {
+      .map<LakeStone>((record) => {
         const isCandidate = record.classificationStatus === 'needs_confirmation';
         const slot = isCandidate
           ? CANDIDATE_SLOTS[candidateIndex++ % CANDIDATE_SLOTS.length]
           : CONFIRMED_SLOTS[confirmedIndex++ % CONFIRMED_SLOTS.length];
+        const codes: string[] = isCandidate
+          ? [record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret']
+          : record.confirmedEmotionCodes && record.confirmedEmotionCodes.length > 0
+            ? record.confirmedEmotionCodes
+            : [recordEmotionCode(record) ?? 'regret'];
         return {
           record,
           position: slot,
-          emotionCode: isCandidate
-            ? record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret'
-            : recordEmotionCode(record) ?? 'regret',
+          emotionCodes: codes,
           status: isCandidate ? 'candidate' : 'confirmed',
         };
       });
@@ -245,7 +257,7 @@ export default function Home() {
         .sort((a, b) => a.distance - b.distance)[0]?.stone ?? null
     );
   }, [activeRecord, lakeStones, mascotPosition, showBook]);
-  const nearbyEmotion = nearbyStone ? getEmotion(nearbyStone.emotionCode) : undefined;
+  const nearbyEmotion = nearbyStone ? getEmotion(nearbyStone.emotionCodes[0]) : undefined;
 
   const resetReviewControls = () => {
     setEmotionPickerOpen(false);
@@ -258,38 +270,47 @@ export default function Home() {
     resetReviewControls();
     setRecordToast(null);
     setActiveRecordId(recordId);
+    setPickerSelection([]);
   };
 
   const closeRecordSheet = () => {
     setActiveRecordId(null);
     resetReviewControls();
+    setPickerSelection([]);
     setMascotPosition(MASCOT_START);
     stopJoystick();
   };
 
   const handleConfirmRecord = async (
     emotionCode: string,
-    opts: { interaction?: 'confirm' | 'reclassify'; reflectionType?: ReflectionType } = {},
+    opts: {
+      interaction?: 'confirm' | 'reclassify';
+      reflectionType?: ReflectionType;
+      emotionCodes?: string[];
+    } = {},
   ) => {
     if (!activeRecord) return;
     const wasCandidate = activeRecord.classificationStatus === 'needs_confirmation';
     const interaction = opts.interaction ?? (wasCandidate ? 'confirm' : 'reclassify');
-    const result = await confirmEmotion(activeRecord.id, emotionCode, {
+    const codes = opts.emotionCodes && opts.emotionCodes.length > 0 ? opts.emotionCodes : [emotionCode];
+    const result = await confirmEmotion(activeRecord.id, codes, {
       interaction,
       reflectionType: opts.reflectionType ?? 'none',
     });
     resetReviewControls();
+    setPickerSelection([]);
     if (result.ok) {
       closeRecordSheet();
     }
-    const emotion = getEmotion(emotionCode);
+    const primaryEmotion = getEmotion(codes[0]);
+    const multiSuffix = codes.length > 1 ? ` 외 ${codes.length - 1}개` : '';
     setRecordToast(
       result.ok
         ? interaction === 'confirm' && wasCandidate
-          ? `${emotion?.nameKo ?? '감정'} 원석으로 저장했어요`
+          ? `${primaryEmotion?.nameKo ?? '감정'}${multiSuffix} 원석으로 저장했어요`
           : interaction === 'confirm'
-            ? `${emotion?.nameKo ?? '감정'} 원석으로 확정했어요`
-          : `${emotion?.nameKo ?? '감정'} 원석으로 업데이트했어요`
+            ? `${primaryEmotion?.nameKo ?? '감정'}${multiSuffix} 원석으로 확정했어요`
+          : `${primaryEmotion?.nameKo ?? '감정'}${multiSuffix} 원석으로 업데이트했어요`
         : result.error ?? '저장에 실패했어요',
     );
     window.setTimeout(() => setRecordToast(null), 2400);
@@ -424,8 +445,33 @@ export default function Home() {
             }}
           >
             {lakeStones.map((stone) => {
-              const emotion = getEmotion(stone.emotionCode);
+              const primaryCode = stone.emotionCodes[0];
+              const emotion = getEmotion(primaryCode);
               const isCandidate = stone.status === 'candidate';
+              const isPlainConfirmed =
+                !isCandidate && stone.record.entryMode === 'plain_record';
+              const isEmotionConfirmed =
+                !isCandidate && stone.record.entryMode === 'emotion_classification';
+              const primaryHex = emotion?.hexColor ?? '#9AA89A';
+              const stoneSize = isCandidate ? 54 : 58;
+              const gemSize = isCandidate ? 34 : 38;
+              const visibleCodes = stone.emotionCodes.slice(0, 5);
+              const extraCount = stone.emotionCodes.length - visibleCodes.length;
+              const border = isCandidate
+                ? '1px dashed rgba(61, 96, 80, 0.38)'
+                : isPlainConfirmed
+                  ? 'none'
+                  : `1.5px solid ${primaryHex}AA`;
+              const background = isCandidate
+                ? 'rgba(255, 255, 255, 0.22)'
+                : isPlainConfirmed
+                  ? 'transparent'
+                  : `radial-gradient(circle, ${primaryHex}26 0%, ${primaryHex}10 55%, transparent 82%)`;
+              const boxShadow = isEmotionConfirmed
+                ? `0 0 22px 6px ${primaryHex}55, 0 8px 20px rgba(86,71,48,0.09)`
+                : isPlainConfirmed
+                  ? '0 4px 10px rgba(86,71,48,0.06)'
+                  : '0 10px 24px rgba(61, 96, 80, 0.08)';
               return (
                 <button
                   key={`${stone.status}-${stone.record.id}`}
@@ -436,30 +482,30 @@ export default function Home() {
                       ? '확인 필요한 기록 원석 열기'
                       : isCandidate
                       ? `${emotion?.nameKo ?? '감정'} 후보 원석 기록 확인하기`
-                      : `${emotion?.nameKo ?? stone.emotionCode} 원석 기록 열기`
+                      : stone.emotionCodes.length > 1
+                        ? `${emotion?.nameKo ?? primaryCode} 외 ${stone.emotionCodes.length - 1}개 감정 원석 기록 열기`
+                        : `${emotion?.nameKo ?? primaryCode} 원석 기록 열기`
                   }
                   title={
                     isCandidate && stone.record.entryMode === 'plain_record'
                       ? '기록의 원석'
                       : isCandidate
                         ? '확인 필요한 감정'
-                        : `${emotion?.nameKo ?? stone.emotionCode} 원석`
+                        : stone.emotionCodes.length > 1
+                          ? `${emotion?.nameKo ?? primaryCode} 외 ${stone.emotionCodes.length - 1}개 감정`
+                          : `${emotion?.nameKo ?? primaryCode} 원석`
                   }
                   style={{
                     position: 'absolute',
                     left: `${stone.position.x}%`,
                     top: `${stone.position.y}%`,
                     transform: 'translate(-50%, -50%)',
-                    width: isCandidate ? 54 : 58,
-                    height: isCandidate ? 54 : 58,
+                    width: stoneSize,
+                    height: stoneSize,
                     borderRadius: '50%',
-                    border: isCandidate
-                      ? '1px dashed rgba(61, 96, 80, 0.38)'
-                      : '1px solid rgba(86, 71, 48, 0.1)',
-                    background: isCandidate ? 'rgba(255, 255, 255, 0.46)' : 'rgba(255, 255, 255, 0.78)',
-                    boxShadow: isCandidate
-                      ? '0 10px 24px rgba(61, 96, 80, 0.08)'
-                      : '0 8px 20px rgba(86, 71, 48, 0.09)',
+                    border,
+                    background,
+                    boxShadow,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -471,22 +517,59 @@ export default function Home() {
                   <span
                     aria-hidden="true"
                     style={{
-                      display: 'flex',
+                      position: 'relative',
+                      width: gemSize,
+                      height: gemSize,
                       animation: isCandidate
                         ? 'candidateGemPulse 1.8s ease-in-out infinite'
                         : 'gemFloat 3s ease-in-out infinite',
                     }}
                   >
-                    <GemStone
-                      gem={{
-                        id: `${stone.status}-${stone.record.id}`,
-                        emotionCode: stone.emotionCode,
-                        tier: 1,
-                        createdAt: stone.record.createdAt,
-                        consumedAt: null,
-                      }}
-                      size={isCandidate ? 34 : 38}
-                    />
+                    {visibleCodes.map((code, i) => (
+                      <span
+                        key={`${code}-${i}`}
+                        style={{
+                          position: 'absolute',
+                          left: '50%',
+                          top: '50%',
+                          transform: `translate(calc(-50% + ${i * 4}px), calc(-50% + ${-i * 5}px))`,
+                          zIndex: i + 1,
+                        }}
+                      >
+                        <GemStone
+                          gem={{
+                            id: `${stone.status}-${stone.record.id}-${code}-${i}`,
+                            emotionCode: code,
+                            tier: 1,
+                            createdAt: stone.record.createdAt,
+                            consumedAt: null,
+                          }}
+                          size={gemSize}
+                        />
+                      </span>
+                    ))}
+                    {extraCount > 0 && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          right: -8,
+                          top: -6,
+                          minWidth: 16,
+                          height: 16,
+                          padding: '0 4px',
+                          borderRadius: 999,
+                          background: 'rgba(61,107,80,0.92)',
+                          color: '#FFFFFF',
+                          fontSize: 9,
+                          fontWeight: 800,
+                          lineHeight: '16px',
+                          textAlign: 'center',
+                          zIndex: 10,
+                        }}
+                      >
+                        +{extraCount}
+                      </span>
+                    )}
                   </span>
                 </button>
               );
@@ -498,7 +581,7 @@ export default function Home() {
                   width: 148,
                   padding: '14px 12px',
                   borderRadius: 18,
-                  background: 'rgba(255,255,255,0.46)',
+                  background: 'rgba(255,255,255,0.24)',
                   border: '1px solid rgba(126,104,66,0.08)',
                   textAlign: 'center',
                   color: 'var(--color-text-sub)',
@@ -546,12 +629,14 @@ export default function Home() {
                 width: 64,
                 height: 64,
                 borderRadius: '50%',
-                background: 'rgba(255, 255, 255, 0.56)',
-                border: '1px solid rgba(126, 104, 66, 0.12)',
-                boxShadow: '0 10px 24px rgba(86, 71, 48, 0.08)',
+                background:
+                  'radial-gradient(circle at 50% 28%, #F7EFDA 0%, #DCC9A0 58%, #B89A6A 100%)',
+                border: '1px solid rgba(86, 71, 48, 0.22)',
+                boxShadow:
+                  'inset 0 -3px 6px rgba(86,71,48,0.28), inset 0 2px 4px rgba(255,255,255,0.62), 0 10px 22px rgba(86,71,48,0.22)',
                 zIndex: 8,
                 touchAction: 'none',
-                cursor: 'grab',
+                cursor: joystick.active ? 'grabbing' : 'grab',
               }}
             >
               <div
@@ -563,8 +648,11 @@ export default function Home() {
                   width: 28,
                   height: 28,
                   borderRadius: '50%',
-                  background: 'var(--color-point-green)',
-                  boxShadow: '0 4px 12px rgba(61, 107, 80, 0.18)',
+                  background:
+                    'radial-gradient(circle at 32% 28%, #80C297 0%, var(--color-point-green) 55%, #285238 100%)',
+                  boxShadow: joystick.active
+                    ? 'inset 0 3px 6px rgba(0,0,0,0.35), 0 1px 3px rgba(61,107,80,0.20)'
+                    : 'inset 0 2px 4px rgba(255,255,255,0.55), inset 0 -2px 4px rgba(0,0,0,0.20), 0 8px 14px rgba(61,107,80,0.35)',
                   transform: `translate(calc(-50% + ${joystick.x}px), calc(-50% + ${joystick.y}px))`,
                   transition: joystick.active ? 'none' : 'transform 0.16s ease',
                 }}
@@ -1009,7 +1097,7 @@ export default function Home() {
                   cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
                 }}
               >
-                이대로 확정
+                수집하기
               </button>
               <button
                 type="button"
@@ -1029,7 +1117,7 @@ export default function Home() {
                   cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
                 }}
               >
-                다시 생각해보기
+                감정 재분류하기
               </button>
             </div>
           )}
@@ -1170,35 +1258,107 @@ export default function Home() {
             </div>
           )}
 
-          {showEmotionGrid && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, marginTop: 10 }}>
-              {EMOTIONS.map((emotion) => (
-                <button
-                  key={emotion.code}
-                  type="button"
-                  disabled={savingId === activeRecord.id}
-                  onClick={() =>
-                    void handleConfirmRecord(emotion.code, {
-                      interaction: activeStatus === 'candidate' ? 'confirm' : 'reclassify',
-                      reflectionType: activeStatus === 'candidate' ? 'none' : selectedReflectionType,
-                    })
-                  }
-                  style={{
-                    minHeight: 40,
-                    border: `1px solid ${emotion.hexColor}66`,
-                    borderRadius: 10,
-                    background: `${emotion.hexColor}18`,
-                    color: 'var(--color-text-main)',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
-                  }}
-                >
-                  {emotion.nameKo}
-                </button>
-              ))}
-            </div>
-          )}
+          {showEmotionGrid && (() => {
+            const isReclassify = activeStatus === 'confirmed' && reflectionMode === 'picker';
+            return (
+              <>
+                {isReclassify && (
+                  <p style={{ margin: '10px 0 6px', fontSize: 11, lineHeight: 1.45, color: 'var(--color-text-sub)', fontWeight: 700 }}>
+                    여러 감정이 함께 떠오르면 모두 골라주세요.
+                  </p>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, marginTop: isReclassify ? 0 : 10 }}>
+                  {EMOTIONS.map((emotion) => {
+                    const selected = isReclassify && pickerSelection.includes(emotion.code);
+                    return (
+                      <button
+                        key={emotion.code}
+                        type="button"
+                        disabled={savingId === activeRecord.id}
+                        onClick={() => {
+                          if (isReclassify) {
+                            setPickerSelection((prev) =>
+                              prev.includes(emotion.code)
+                                ? prev.filter((c) => c !== emotion.code)
+                                : [...prev, emotion.code],
+                            );
+                          } else {
+                            void handleConfirmRecord(emotion.code, {
+                              interaction: 'confirm',
+                              reflectionType: 'none',
+                            });
+                          }
+                        }}
+                        style={{
+                          minHeight: 40,
+                          border: selected
+                            ? `2px solid ${emotion.hexColor}`
+                            : `1px solid ${emotion.hexColor}66`,
+                          borderRadius: 10,
+                          background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
+                          color: 'var(--color-text-main)',
+                          fontSize: 11,
+                          fontWeight: selected ? 800 : 700,
+                          cursor: savingId === activeRecord.id ? 'wait' : 'pointer',
+                          position: 'relative',
+                        }}
+                      >
+                        {emotion.nameKo}
+                        {selected && (
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              position: 'absolute',
+                              top: 2,
+                              right: 4,
+                              fontSize: 10,
+                              fontWeight: 800,
+                              color: emotion.hexColor,
+                            }}
+                          >
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {isReclassify && (
+                  <button
+                    type="button"
+                    disabled={pickerSelection.length === 0 || savingId === activeRecord.id}
+                    onClick={() =>
+                      void handleConfirmRecord(pickerSelection[0], {
+                        interaction: 'reclassify',
+                        reflectionType: selectedReflectionType,
+                        emotionCodes: pickerSelection,
+                      })
+                    }
+                    style={{
+                      width: '100%',
+                      minHeight: 42,
+                      marginTop: 10,
+                      border: 'none',
+                      borderRadius: 12,
+                      background:
+                        pickerSelection.length === 0 ? '#D9CEB8' : 'var(--color-point-green)',
+                      color: '#FFFFFF',
+                      fontSize: 13,
+                      fontWeight: 800,
+                      cursor:
+                        pickerSelection.length === 0 || savingId === activeRecord.id
+                          ? 'wait'
+                          : 'pointer',
+                    }}
+                  >
+                    {pickerSelection.length === 0
+                      ? '감정을 골라주세요'
+                      : `감정 ${pickerSelection.length}개 저장`}
+                  </button>
+                )}
+              </>
+            );
+          })()}
 
           <p style={{ margin: '10px 0 0', fontSize: 11, lineHeight: 1.5, color: 'var(--color-text-sub)' }}>
             저장된 감정은 캘린더에서도 같은 상태로 보여요.

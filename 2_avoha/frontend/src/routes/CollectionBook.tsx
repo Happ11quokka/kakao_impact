@@ -1,14 +1,15 @@
-// === CollectionBook 화면 — Figma 도감 오버레이 ===
+// === CollectionBook 화면 — Figma 도감 오버레이 + 미분류 원석 스크롤 영역 ===
 import GemStone from '../components/pixel/GemStone';
 import { ALL_EMOTION_VARIANT_LABELS, VARIANT_TO_EMOTION_CODE } from '../data/emotion-variants';
+import { UNCLASSIFIED_EMOTION_CODE } from '../data/unclassified-gem';
 import type { Gem } from '../types/gem';
 
 const FIGMA_WIDTH = 391;
 const FIGMA_HEIGHT = 540;
 
-/** 5열 × 5행 (계열당 5종) */
-const GRID_X = [18, 99, 180, 261, 318] as const;
-const GRID_Y = [41, 144, 242, 335, 431] as const;
+/** 5열 × 5행 (계열당 5종) — 좌우 22px 여백 + 균등 74px column gap */
+const GRID_X = [21, 95, 169, 243, 317] as const;
+const GRID_Y = [44, 144, 240, 332, 426] as const;
 
 const FIGMA_EMOTIONS = ALL_EMOTION_VARIANT_LABELS.map((label, idx) => ({
   label,
@@ -27,78 +28,204 @@ function toBookGem(label: string, idx: number): Gem {
   };
 }
 
+const UNCLASSIFIED_SLOTS = [
+  { tier: 1 as const, label: '미분류 · 일상 기록' },
+  { tier: 2 as const, label: '미분류 · 짧은 기록' },
+  { tier: 3 as const, label: '미분류 · 사진 기록' },
+  { tier: 4 as const, label: '미분류 · 긴 기록' },
+];
+
+function toUnclassifiedGem(tier: 1 | 2 | 3 | 4, idx: number): Gem {
+  return {
+    id: `book-unclassified-${idx}`,
+    emotionCode: UNCLASSIFIED_EMOTION_CODE,
+    tier,
+    createdAt: new Date().toISOString(),
+    consumedAt: null,
+  };
+}
+
 export default function CollectionBook({ onClose }: { onClose?: () => void }) {
   return (
-    <section
-      aria-label="도감"
+    <div
       style={{
         width: '100%',
         height: '100%',
-        aspectRatio: `${FIGMA_WIDTH} / ${FIGMA_HEIGHT}`,
-        position: 'relative',
+        overflowY: 'auto',
+        overflowX: 'hidden',
         background: 'var(--color-point-green-light)',
-        overflow: 'hidden',
-        flexShrink: 0,
+        WebkitOverflowScrolling: 'touch',
       }}
     >
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="도감 닫기"
+      <section
+        aria-label="도감"
         style={{
-          position: 'absolute',
-          top: 0,
-          right: 2,
-          width: 24,
-          height: 45,
-          border: 0,
-          background: 'transparent',
-          color: '#000000',
-          fontSize: 18,
-          fontWeight: 400,
-          lineHeight: '45px',
-          padding: 0,
-          cursor: 'pointer',
-          outline: 'none',
+          width: '100%',
+          aspectRatio: `${FIGMA_WIDTH} / ${FIGMA_HEIGHT}`,
+          position: 'relative',
+          background: 'var(--color-point-green-light)',
+          flexShrink: 0,
         }}
       >
-        X
-      </button>
-
-      {FIGMA_EMOTIONS.map((item, idx) => (
-        <div
-          key={item.label}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="도감 닫기"
           style={{
             position: 'absolute',
-            left: `${(item.x / FIGMA_WIDTH) * 100}%`,
-            top: `${(item.y / FIGMA_HEIGHT) * 100}%`,
-            width: `${(52 / FIGMA_WIDTH) * 100}%`,
-            height: `${(92 / FIGMA_HEIGHT) * 100}%`,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
+            top: 0,
+            right: 2,
+            width: 24,
+            height: 45,
+            border: 0,
+            background: 'transparent',
+            color: '#000000',
+            fontSize: 18,
+            fontWeight: 400,
+            lineHeight: '45px',
+            padding: 0,
+            cursor: 'pointer',
+            outline: 'none',
+            zIndex: 2,
           }}
         >
-          <div style={{ width: '100%', height: `${(62 / 92) * 100}%`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <GemStone gem={toBookGem(item.label, idx)} size={50} variant={item.label} />
-          </div>
-          <span
+          X
+        </button>
+
+        {FIGMA_EMOTIONS.map((item, idx) => (
+          <div
+            key={item.label}
             style={{
-              display: 'block',
-              width: '100%',
-              marginTop: -2,
+              position: 'absolute',
+              left: `${(item.x / FIGMA_WIDTH) * 100}%`,
+              top: `${(item.y / FIGMA_HEIGHT) * 100}%`,
+              width: `${(52 / FIGMA_WIDTH) * 100}%`,
+              height: `${(92 / FIGMA_HEIGHT) * 100}%`,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+            }}
+          >
+            <div style={{ width: '100%', height: `${(62 / 92) * 100}%`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <GemStone gem={toBookGem(item.label, idx)} size={50} variant={item.label} />
+            </div>
+            <span
+              style={{
+                display: 'block',
+                width: '100%',
+                marginTop: -2,
+                color: '#5A4A32',
+                fontSize: 'clamp(9px, 2.8vw, 12px)',
+                fontWeight: 400,
+                lineHeight: '32px',
+                textAlign: 'center',
+                wordBreak: 'keep-all',
+              }}
+            >
+              {item.label}
+            </span>
+          </div>
+        ))}
+
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: 4,
+            transform: 'translateX(-50%)',
+            color: 'rgba(86, 71, 48, 0.45)',
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            pointerEvents: 'none',
+          }}
+        >
+          ▾ 아래로 미분류 원석 ▾
+        </span>
+      </section>
+
+      <section
+        aria-label="미분류 원석"
+        style={{
+          width: '100%',
+          padding: '22px 22px 28px',
+          background: 'var(--color-point-green-light)',
+          borderTop: '1px dashed rgba(86, 71, 48, 0.22)',
+        }}
+      >
+        <div style={{ marginBottom: 14 }}>
+          <p
+            style={{
+              margin: 0,
               color: '#5A4A32',
-              fontSize: 'clamp(9px, 2.8vw, 12px)',
-              fontWeight: 400,
-              lineHeight: '32px',
-              textAlign: 'center',
+              fontSize: 13,
+              fontWeight: 800,
+              letterSpacing: '0.01em',
+            }}
+          >
+            미분류 원석
+          </p>
+          <p
+            style={{
+              margin: '4px 0 0',
+              color: 'rgba(86, 71, 48, 0.7)',
+              fontSize: 11,
+              lineHeight: 1.5,
               wordBreak: 'keep-all',
             }}
           >
-            {item.label}
-          </span>
+            아직 감정이 정해지지 않은 기록의 원석이에요. 캘린더에서 다시 골라 분류할 수 있어요.
+          </p>
         </div>
-      ))}
-    </section>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: 10,
+            justifyItems: 'center',
+          }}
+        >
+          {UNCLASSIFIED_SLOTS.map((slot, idx) => (
+            <div
+              key={slot.label}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                width: '100%',
+              }}
+            >
+              <div
+                style={{
+                  width: 60,
+                  height: 60,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <GemStone gem={toUnclassifiedGem(slot.tier, idx)} size={52} />
+              </div>
+              <span
+                style={{
+                  display: 'block',
+                  marginTop: 2,
+                  color: '#5A4A32',
+                  fontSize: 'clamp(9px, 2.6vw, 11px)',
+                  fontWeight: 500,
+                  lineHeight: 1.35,
+                  textAlign: 'center',
+                  wordBreak: 'keep-all',
+                }}
+              >
+                {slot.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }

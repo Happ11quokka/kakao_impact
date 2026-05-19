@@ -11,7 +11,7 @@ interface RecordsState {
   fetchRecords: () => Promise<void>;
   confirmEmotion: (
     recordId: number,
-    emotionCode: string,
+    emotionCodes: string[],
     opts?: { interaction?: 'confirm' | 'reclassify'; reflectionType?: 'question' | 'meditation' | 'none' },
   ) => Promise<{ ok: boolean; error?: string }>;
 }
@@ -39,11 +39,16 @@ export const useRecordsStore = create<RecordsState>((set, get) => ({
     }
   },
 
-  confirmEmotion: async (recordId, emotionCode, opts) => {
+  confirmEmotion: async (recordId, emotionCodes, opts) => {
     const prev = get().records;
     const now = new Date().toISOString();
     const target = prev.find((r) => r.id === recordId);
     const interaction = opts?.interaction ?? 'confirm';
+    const codes = emotionCodes.length > 0 ? emotionCodes : [];
+    if (codes.length === 0) {
+      return { ok: false, error: '감정을 1개 이상 선택해주세요' };
+    }
+    const primary = codes[0];
 
     set({
       savingId: recordId,
@@ -53,7 +58,8 @@ export const useRecordsStore = create<RecordsState>((set, get) => ({
               ...r,
               classificationStatus:
                 interaction === 'reclassify' ? 'reclassified' : 'user_confirmed',
-              confirmedEmotionCode: emotionCode,
+              confirmedEmotionCode: primary,
+              confirmedEmotionCodes: codes,
               confirmedAt: now,
               webReviewedAt: now,
               updatedAt: now,
@@ -64,7 +70,8 @@ export const useRecordsStore = create<RecordsState>((set, get) => ({
 
     try {
       const res = await api.confirmRecordEmotion(recordId, {
-        emotionCode,
+        emotionCode: primary,
+        emotionCodes: codes,
         interaction,
         reflectionType: opts?.reflectionType ?? 'none',
       });
@@ -76,6 +83,10 @@ export const useRecordsStore = create<RecordsState>((set, get) => ({
                 ...r,
                 classificationStatus: res.record.classificationStatus,
                 confirmedEmotionCode: res.record.confirmedEmotionCode,
+                confirmedEmotionCodes:
+                  res.record.confirmedEmotionCodes && res.record.confirmedEmotionCodes.length > 0
+                    ? res.record.confirmedEmotionCodes
+                    : codes,
                 confirmedAt: res.record.confirmedAt,
                 webReviewedAt: res.record.webReviewedAt,
                 updatedAt: res.record.updatedAt,

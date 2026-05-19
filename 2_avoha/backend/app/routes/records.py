@@ -56,6 +56,13 @@ def _record_payload(r: object) -> dict[str, object]:
         inferred_emotion if r.classification_status != "needs_confirmation" else None
     )
     gem_emotion = getattr(r, "gem_emotion_code", None) or confirmed_emotion
+    raw_codes = getattr(r, "confirmed_emotion_codes", None)
+    if raw_codes:
+        confirmed_emotion_codes = list(raw_codes)
+    elif confirmed_emotion:
+        confirmed_emotion_codes = [confirmed_emotion]
+    else:
+        confirmed_emotion_codes = []
     return {
         "id": r.id,
         "gem": r.gem,
@@ -71,6 +78,7 @@ def _record_payload(r: object) -> dict[str, object]:
         "classificationStatus": r.classification_status,
         "aiEmotionCode": r.ai_emotion_code or inferred_emotion,
         "confirmedEmotionCode": confirmed_emotion,
+        "confirmedEmotionCodes": confirmed_emotion_codes,
         "confirmedAt": _iso_utc(r.confirmed_at),
         "webReviewedAt": _iso_utc(r.web_reviewed_at),
         "createdAt": _iso_utc(r.created_at),
@@ -82,6 +90,7 @@ def _record_payload(r: object) -> dict[str, object]:
 
 class ConfirmEmotionBody(BaseModel):
     emotionCode: str = Field(min_length=1)
+    emotionCodes: list[str] | None = Field(default=None)
     interaction: Literal["confirm", "reclassify"] = "confirm"
     reflectionType: Literal["question", "meditation", "none"] = "none"
 
@@ -117,6 +126,7 @@ async def list_records(
             ChatbotRecord.classification_status,
             ChatbotRecord.ai_emotion_code,
             ChatbotRecord.confirmed_emotion_code,
+            ChatbotRecord.confirmed_emotion_codes,
             ChatbotRecord.confirmed_at,
             ChatbotRecord.web_reviewed_at,
             ChatbotRecord.created_at,
@@ -168,6 +178,18 @@ async def confirm_record_emotion(
             detail={"error": {"message": "RECORD_NOT_FOUND", "code": "RECORD_NOT_FOUND"}},
         )
 
+    codes: list[str] = (
+        [c for c in body.emotionCodes if c]
+        if body.emotionCodes
+        else [body.emotionCode]
+    )
+    if not codes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": {"message": "EMOTION_CODE_REQUIRED", "code": "EMOTION_CODE_REQUIRED"}},
+        )
+    primary_code = codes[0]
+
     gem = (
         await session.execute(
             select(Gem)
@@ -182,7 +204,7 @@ async def confirm_record_emotion(
     if gem is None:
         gem = Gem(
             user_id=user_id,
-            emotion_code=body.emotionCode,
+            emotion_code=primary_code,
             tier=1,
             source="chatbot",
             source_chatbot_id=record_id,
@@ -190,9 +212,10 @@ async def confirm_record_emotion(
         session.add(gem)
         await session.flush()
     else:
-        gem.emotion_code = body.emotionCode
+        gem.emotion_code = primary_code
 
-    record.confirmed_emotion_code = body.emotionCode
+    record.confirmed_emotion_code = primary_code
+    record.confirmed_emotion_codes = codes
     if not record.ai_emotion_code:
         record.ai_emotion_code = CHATBOT_GEM_TO_EMOTION_CODE.get(record.gem)
     record.classification_status = (
@@ -209,7 +232,8 @@ async def confirm_record_emotion(
             event_type="record_emotion_confirmed",
             props={
                 "recordId": record_id,
-                "emotionCode": body.emotionCode,
+                "emotionCode": primary_code,
+                "emotionCodes": codes,
                 "interaction": body.interaction,
                 "reflectionType": body.reflectionType,
             },
@@ -223,7 +247,8 @@ async def confirm_record_emotion(
         {
             "type": "record_updated",
             "recordId": record_id,
-            "emotionCode": body.emotionCode,
+            "emotionCode": primary_code,
+            "emotionCodes": codes,
             "classificationStatus": record.classification_status,
         },
     )
@@ -234,6 +259,7 @@ async def confirm_record_emotion(
             "id": record.id,
             "classificationStatus": record.classification_status,
             "confirmedEmotionCode": record.confirmed_emotion_code,
+            "confirmedEmotionCodes": codes,
             "confirmedAt": _iso_utc(record.confirmed_at),
             "webReviewedAt": _iso_utc(record.web_reviewed_at),
             "updatedAt": _iso_utc(record.updated_at),

@@ -222,6 +222,7 @@ class ChatbotRecord(Base):
     )
     ai_emotion_code: Mapped[str | None] = mapped_column(Text)
     confirmed_emotion_code: Mapped[str | None] = mapped_column(Text)
+    confirmed_emotion_codes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     confirmed_at: Mapped[datetime | None]
     web_reviewed_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(

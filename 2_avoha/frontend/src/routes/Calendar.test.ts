@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildRecordReflection, calendarRecordEmotionCode, calendarRecordNeedsReclassification } from './Calendar';
+import {
+  buildRecordReflection,
+  calendarRecordEmotionCode,
+  calendarRecordEmotionCodes,
+  calendarRecordNeedsReclassification,
+  dayQuestionStatus,
+} from './Calendar';
 import type { RecordDto } from '../lib/api';
 
 const baseRecord: RecordDto = {
@@ -14,6 +20,7 @@ const baseRecord: RecordDto = {
   classificationStatus: 'needs_confirmation',
   aiEmotionCode: 'regret',
   confirmedEmotionCode: null,
+  confirmedEmotionCodes: [],
   confirmedAt: null,
   webReviewedAt: null,
   updatedAt: '2026-05-18T10:00:00.000Z',
@@ -25,6 +32,7 @@ describe('Calendar record reclassification helpers', () => {
   it('treats past unconfirmed/plain records as reclassification candidates', () => {
     expect(calendarRecordNeedsReclassification(baseRecord)).toBe(true);
     expect(calendarRecordEmotionCode(baseRecord)).toBe('regret');
+    expect(calendarRecordEmotionCodes(baseRecord)).toEqual(['regret']);
   });
 
   it('does not require reclassification after a record has been confirmed', () => {
@@ -32,12 +40,27 @@ describe('Calendar record reclassification helpers', () => {
       ...baseRecord,
       classificationStatus: 'user_confirmed',
       confirmedEmotionCode: 'joy',
+      confirmedEmotionCodes: ['joy'],
       gemEmotionCode: 'joy',
       gemId: 'gem-1',
     };
 
     expect(calendarRecordNeedsReclassification(confirmed)).toBe(false);
     expect(calendarRecordEmotionCode(confirmed)).toBe('joy');
+    expect(calendarRecordEmotionCodes(confirmed)).toEqual(['joy']);
+  });
+
+  it('returns every confirmed emotion code for multi-emotion records', () => {
+    const multi: RecordDto = {
+      ...baseRecord,
+      classificationStatus: 'reclassified',
+      confirmedEmotionCode: 'joy',
+      confirmedEmotionCodes: ['joy', 'pride', 'flutter'],
+      gemEmotionCode: 'joy',
+      gemId: 'gem-multi',
+    };
+
+    expect(calendarRecordEmotionCodes(multi)).toEqual(['joy', 'pride', 'flutter']);
   });
 
   it('keeps chatbot self-awareness question and answer with the calendar record detail', () => {
@@ -55,5 +78,38 @@ describe('Calendar record reclassification helpers', () => {
 
   it('does not render an empty reflection block when the record has no question', () => {
     expect(buildRecordReflection(baseRecord)).toBeNull();
+  });
+});
+
+describe('Calendar day question status', () => {
+  it('returns none when no record has a question', () => {
+    expect(dayQuestionStatus([baseRecord])).toBe('none');
+    expect(dayQuestionStatus([])).toBe('none');
+  });
+
+  it('returns answered when at least one question is answered', () => {
+    const answered: RecordDto = {
+      ...baseRecord,
+      id: 2,
+      questionText: '오늘 가장 또렷한 감정은?',
+      answerText: '잔잔한 안도',
+    };
+    const unanswered: RecordDto = {
+      ...baseRecord,
+      id: 3,
+      questionText: '다른 질문',
+      answerText: null,
+    };
+
+    expect(dayQuestionStatus([answered])).toBe('answered');
+    expect(dayQuestionStatus([answered, unanswered])).toBe('answered');
+  });
+
+  it('returns unanswered when all questions are still empty', () => {
+    const q1: RecordDto = { ...baseRecord, id: 2, questionText: '질문 1', answerText: null };
+    const q2: RecordDto = { ...baseRecord, id: 3, questionText: '질문 2', answerText: '   ' };
+
+    expect(dayQuestionStatus([q1])).toBe('unanswered');
+    expect(dayQuestionStatus([q1, q2])).toBe('unanswered');
   });
 });
