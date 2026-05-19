@@ -397,6 +397,7 @@ function DatePanel({
     reflectionAnswer: string,
   ) => Promise<void>;
 }) {
+  const [detailRecordId, setDetailRecordId] = useState<number | null>(null);
   const [pickerRecordId, setPickerRecordId] = useState<number | null>(null);
   const [pickerSelection, setPickerSelection] = useState<string[]>([]);
   const [pickerReflection, setPickerReflection] = useState<string>('');
@@ -417,20 +418,23 @@ function DatePanel({
     : [];
 
   useEffect(() => {
+    setDetailRecordId(null);
     setPickerRecordId(null);
     setPickerSelection([]);
     setPickerReflection('');
   }, [dateKey, records]);
 
   useEffect(() => {
+    setPickerReflection('');
+  }, [detailRecordId]);
+
+  useEffect(() => {
     if (pickerRecord) {
       setPickerSelection(
         pickerIsReclassify ? calendarRecordEmotionCodes(pickerRecord) : [],
       );
-      setPickerReflection('');
     } else {
       setPickerSelection([]);
-      setPickerReflection('');
     }
   }, [pickerRecord, pickerIsReclassify]);
 
@@ -472,18 +476,25 @@ function DatePanel({
                 >
                   <RecordDetail
                     record={record}
-                    open={pickerRecordId === record.id}
-                    onOpenPicker={() => {
-                      setPickerRecordId((current) => (current === record.id ? null : record.id));
+                    detailOpen={detailRecordId === record.id}
+                    onToggleDetail={() => {
+                      if (detailRecordId === record.id) {
+                        setDetailRecordId(null);
+                        setPickerRecordId(null);
+                      } else {
+                        setDetailRecordId(record.id);
+                        setPickerRecordId(null);
+                      }
                     }}
                     onPhotoClick={setLightboxUrl}
                   />
-                  {pickerRecordId === record.id && (
+                  {detailRecordId === record.id && (
                     <ReclassifyAccordion
                       record={record}
                       selection={pickerSelection}
                       saving={savingId === record.id}
                       reflection={pickerReflection}
+                      pickerOpen={pickerRecordId === record.id}
                       onToggleEmotion={(emotionCode) => {
                         setPickerSelection((prev) =>
                           prev.includes(emotionCode)
@@ -492,9 +503,11 @@ function DatePanel({
                         );
                       }}
                       onReflectionChange={setPickerReflection}
+                      onOpenPicker={() => setPickerRecordId(record.id)}
                       onSave={() =>
                         void onConfirmEmotion(record, pickerSelection, pickerReflection).then(
                           () => {
+                            setDetailRecordId(null);
                             setPickerRecordId(null);
                             setPickerSelection([]);
                             setPickerReflection('');
@@ -556,18 +569,20 @@ function DatePanel({
 
 function RecordDetail({
   record,
-  open,
-  onOpenPicker,
+  detailOpen,
+  onToggleDetail,
   onPhotoClick,
 }: {
   record: RecordDto;
-  open: boolean;
-  onOpenPicker: () => void;
+  detailOpen: boolean;
+  onToggleDetail: () => void;
   onPhotoClick?: (url: string) => void;
 }) {
   const reflection = buildRecordReflection(record);
   const gemBadges = buildRecordGemBadges(record);
   const action = buildRecordReclassifyAction(record);
+  const topButtonLabel = detailOpen ? '닫기' : action.label;
+  const topButtonAria = detailOpen ? '감정 자세히보기 닫기' : action.ariaLabel;
 
   return (
     <div>
@@ -603,12 +618,12 @@ function RecordDetail({
         </div>
         <button
           type="button"
-          onClick={onOpenPicker}
-          aria-label={action.ariaLabel}
-          aria-expanded={open}
+          onClick={onToggleDetail}
+          aria-label={topButtonAria}
+          aria-expanded={detailOpen}
           style={styles.reclassifyOpenButton}
         >
-          {action.label}
+          {topButtonLabel}
         </button>
       </div>
 
@@ -631,16 +646,6 @@ function RecordDetail({
           <p style={styles.recordText}>{record.recordText}</p>
         </>
       )}
-
-      <button
-        type="button"
-        onClick={onOpenPicker}
-        aria-label="감정 재분류 아코디언 열기"
-        aria-expanded={open}
-        style={styles.reclassifyBottomTab}
-      >
-        감정 재분류하기
-      </button>
     </div>
   );
 }
@@ -650,16 +655,20 @@ function ReclassifyAccordion({
   selection,
   saving,
   reflection,
+  pickerOpen,
   onToggleEmotion,
   onReflectionChange,
+  onOpenPicker,
   onSave,
 }: {
   record: RecordDto;
   selection: string[];
   saving: boolean;
   reflection: string;
+  pickerOpen: boolean;
   onToggleEmotion: (emotionCode: string) => void;
   onReflectionChange: (value: string) => void;
+  onOpenPicker: () => void;
   onSave: () => void;
 }) {
   const action = buildRecordReclassifyAction(record);
@@ -667,36 +676,6 @@ function ReclassifyAccordion({
 
   return (
     <div style={styles.reclassifyBox} aria-label={`${action.label} 아코디언`}>
-      <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
-      <p style={styles.reclassifyHint}>여러 감정이 함께 떠오르면 모두 골라주세요.</p>
-      <div style={styles.emotionGrid}>
-        {EMOTIONS.map((emotion) => {
-          const selected = selection.includes(emotion.code);
-          return (
-            <button
-              key={emotion.code}
-              type="button"
-              disabled={saving}
-              onClick={() => onToggleEmotion(emotion.code)}
-              style={{
-                ...styles.emotionButton,
-                border: selected
-                  ? `2px solid ${emotion.hexColor}`
-                  : `1px solid ${emotion.hexColor}66`,
-                background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
-                cursor: saving ? 'wait' : 'pointer',
-                position: 'relative',
-              }}
-            >
-              {emotion.nameKo}
-              {selected && (
-                <span aria-hidden="true" style={styles.emotionCheckMark}>✓</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
       <div style={styles.reclassifyReflectionBlock}>
         <div style={styles.recordLabel}>이 한 줄 회고</div>
         <p style={styles.reclassifyReflectionQuestion}>
@@ -712,18 +691,61 @@ function ReclassifyAccordion({
         />
       </div>
 
-      <button
-        type="button"
-        disabled={!canSave}
-        onClick={onSave}
-        style={{
-          ...styles.reclassifySaveButton,
-          background: canSave ? 'rgba(61, 107, 80, 0.94)' : '#C9C3B7',
-          cursor: canSave ? 'pointer' : 'wait',
-        }}
-      >
-        {selection.length === 0 ? '감정을 골라주세요' : `감정 ${selection.length}개 저장`}
-      </button>
+      {!pickerOpen ? (
+        <button
+          type="button"
+          onClick={onOpenPicker}
+          aria-label="감정 재분류 펼치기"
+          style={styles.reclassifyBottomTab}
+        >
+          감정 재분류하기
+        </button>
+      ) : (
+        <>
+          <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
+          <p style={styles.reclassifyHint}>여러 감정이 함께 떠오르면 모두 골라주세요.</p>
+          <div style={styles.emotionGrid}>
+            {EMOTIONS.map((emotion) => {
+              const selected = selection.includes(emotion.code);
+              return (
+                <button
+                  key={emotion.code}
+                  type="button"
+                  disabled={saving}
+                  onClick={() => onToggleEmotion(emotion.code)}
+                  style={{
+                    ...styles.emotionButton,
+                    border: selected
+                      ? `2px solid ${emotion.hexColor}`
+                      : `1px solid ${emotion.hexColor}66`,
+                    background: selected ? `${emotion.hexColor}55` : `${emotion.hexColor}18`,
+                    cursor: saving ? 'wait' : 'pointer',
+                    position: 'relative',
+                  }}
+                >
+                  {emotion.nameKo}
+                  {selected && (
+                    <span aria-hidden="true" style={styles.emotionCheckMark}>✓</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            disabled={!canSave}
+            onClick={onSave}
+            style={{
+              ...styles.reclassifySaveButton,
+              background: canSave ? 'rgba(61, 107, 80, 0.94)' : '#C9C3B7',
+              cursor: canSave ? 'pointer' : 'wait',
+            }}
+          >
+            {selection.length === 0 ? '감정을 골라주세요' : `감정 ${selection.length}개 저장`}
+          </button>
+        </>
+      )}
     </div>
   );
 }
