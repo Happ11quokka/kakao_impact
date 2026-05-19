@@ -9,6 +9,7 @@ import GemStone from '../components/pixel/GemStone';
 import type { RecordDto } from '../lib/api';
 import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
 import { buildRecordReclassifyAction } from '../lib/reclassify-flow';
+import { dedupeLogicalRecords } from '../lib/logical-record';
 
 const CANDIDATE_SLOTS = [
   { x: 30, y: 48 },
@@ -355,7 +356,7 @@ export default function Home() {
   }, [joystick.active]);
 
   const todayRecords = useMemo(
-    () => records.filter((record) => isSameLocalDate(record.createdAt)),
+    () => dedupeLogicalRecords(records.filter((record) => isSameLocalDate(record.createdAt))),
     [records],
   );
 

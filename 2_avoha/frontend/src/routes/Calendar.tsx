@@ -8,6 +8,7 @@ import GemStone from '../components/pixel/GemStone';
 import PhotoLightbox from '../components/PhotoLightbox';
 import { useRecordsStore } from '../stores/records-store';
 import { buildRecordReclassifyAction } from '../lib/reclassify-flow';
+import { dedupeLogicalRecords } from '../lib/logical-record';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const CALENDAR_BG = '#F9F4EA';
@@ -197,6 +198,9 @@ export default function Calendar() {
       if (!map[key]) map[key] = [];
       map[key].push(record);
     });
+    for (const key of Object.keys(map)) {
+      map[key] = dedupeLogicalRecords(map[key]);
+    }
     return map;
   }, [records]);
 

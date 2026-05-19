@@ -9,6 +9,7 @@ import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
 import { EMOTION_VARIANTS_BY_CATEGORY } from '../data/emotion-variants';
 import GemStone from '../components/pixel/GemStone';
 import PhotoLightbox from '../components/PhotoLightbox';
+import { logicalKeyForChatbotRecord } from '../lib/logical-record';
 
 export type Period = 'weekly' | 'monthly' | 'custom';
 
@@ -34,7 +35,9 @@ export type AnalysisItem = {
   createdAt: string;
   recordText?: string | null;
   imageUrl?: string | null;
+  hasPhoto?: boolean;
   sourceMessageId?: string;
+  logicalKey?: string;
   emotionBadges?: Array<{ code: string; label: string }>;
 };
 
@@ -168,42 +171,98 @@ export function buildAnalysisItems(
   customRange?: CustomRange,
 ): AnalysisItem[] {
   const recordDataByDate = recordToDataByDate(records);
+  const recordsBySourceMessageId = new Map<string, ChatbotRecordDto>();
+  for (const record of records) {
+    recordsBySourceMessageId.set(String(record.id), record);
+  }
   const filteredItems = gems
     .map(gemToItem)
     .filter((item) => dateInAnalysisPeriod(new Date(item.createdAt), period, today, customRange));
-  const badgesBySourceMessageId = filteredItems.reduce<Record<string, Array<{ code: string; label: string }>>>((acc, item) => {
-    if (!item.sourceMessageId) return acc;
-    if (!acc[item.sourceMessageId]) acc[item.sourceMessageId] = [];
-    acc[item.sourceMessageId].push({ code: item.emotionCode, label: getEmotion(item.emotionCode)?.nameKo ?? item.label });
+
+  const itemsWithRecord = filteredItems.map((item) => {
+    const sourceRecord = item.sourceMessageId
+      ? recordsBySourceMessageId.get(item.sourceMessageId)
+      : undefined;
+    const dateRecord = recordDataByDate[toDateKey(new Date(item.createdAt))];
+    const recordText = item.recordText ?? sourceRecord?.recordText ?? dateRecord?.recordText ?? null;
+    const imageUrl = sourceRecord?.imageUrl ?? dateRecord?.imageUrl ?? null;
+    const hasPhoto = sourceRecord?.hasPhoto ?? dateRecord?.hasPhoto ?? false;
+    const logicalKey = sourceRecord
+      ? logicalKeyForChatbotRecord(sourceRecord)
+      : item.sourceMessageId
+        ? `msg|${item.sourceMessageId}`
+        : `solo|${item.id}`;
+    return {
+      ...item,
+      recordText,
+      imageUrl,
+      hasPhoto,
+      logicalKey,
+    };
+  });
+
+  const badgesByLogicalKey = itemsWithRecord.reduce<Record<string, Array<{ code: string; label: string }>>>((acc, item) => {
+    const key = item.logicalKey ?? `solo|${item.id}`;
+    if (!acc[key]) acc[key] = [];
+    const label = getEmotion(item.emotionCode)?.nameKo ?? item.label;
+    if (!acc[key].some((badge) => badge.code === item.emotionCode)) {
+      acc[key].push({ code: item.emotionCode, label });
+    }
     return acc;
   }, {});
 
-  return filteredItems
-    .map((item) => {
-      const recordData = recordDataByDate[toDateKey(new Date(item.createdAt))];
-      const emotionBadges = item.sourceMessageId ? badgesBySourceMessageId[item.sourceMessageId] : undefined;
-      return {
-        ...item,
-        recordText: item.recordText ?? recordData?.recordText,
-        imageUrl: recordData?.imageUrl ?? null,
-        emotionBadges: emotionBadges && emotionBadges.length > 1 ? emotionBadges : undefined,
-      };
-    });
+  return itemsWithRecord.map((item) => {
+    const badges = item.logicalKey ? badgesByLogicalKey[item.logicalKey] : undefined;
+    return {
+      ...item,
+      emotionBadges: badges && badges.length > 1 ? badges : undefined,
+    };
+  });
 }
 
 // 카테고리별 리캡 슬라이드: 긍정(joy) → 부정 순. 데이터 없는 카테고리는 스킵.
+// 같은 사용자 메시지에서 비롯된 sibling 행(같은 logicalKey)은 1개의 "순간" 으로 묶고,
+// 그 안의 감정 라벨들을 합쳐서(`기쁨·뿌듯`) 보여준다.
 export function buildRecapThemes(items: AnalysisItem[]): RecapTheme[] {
+  const itemsByLogicalKey = new Map<string, AnalysisItem[]>();
+  for (const item of items) {
+    const key = item.logicalKey ?? item.sourceMessageId ?? item.id;
+    const bucket = itemsByLogicalKey.get(key);
+    if (bucket) bucket.push(item);
+    else itemsByLogicalKey.set(key, [item]);
+  }
+
   return RECAP_ORDER.reduce<RecapTheme[]>((acc, code) => {
-    const sortedRecords = items
-      .filter((item) => item.category === code)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    const seenSources = new Set<string>();
-    const records = sortedRecords.filter((item) => {
-      const key = item.sourceMessageId ?? item.id;
-      if (seenSources.has(key)) return false;
-      seenSources.add(key);
-      return true;
+    const matchingGroups = Array.from(itemsByLogicalKey.values()).filter((group) =>
+      group.some((item) => item.category === code),
+    );
+
+    matchingGroups.sort((a, b) => {
+      const aTime = Math.max(...a.map((it) => new Date(it.createdAt).getTime()));
+      const bTime = Math.max(...b.map((it) => new Date(it.createdAt).getTime()));
+      return bTime - aTime;
     });
+
+    const records = matchingGroups.map((group) => {
+      const canonical = group.find((it) => it.category === code) ?? group[0];
+      const badges: Array<{ code: string; label: string }> = [];
+      const seenCodes = new Set<string>();
+      for (const it of group) {
+        if (seenCodes.has(it.emotionCode)) continue;
+        seenCodes.add(it.emotionCode);
+        badges.push({
+          code: it.emotionCode,
+          label: getEmotion(it.emotionCode)?.nameKo ?? it.label,
+        });
+      }
+      const combinedLabel = badges.map((badge) => badge.label).join('·');
+      return {
+        ...canonical,
+        label: combinedLabel || canonical.label,
+        emotionBadges: badges.length > 1 ? badges : undefined,
+      };
+    });
+
     if (records.length === 0) return acc;
     acc.push({
       id: `recap-${code}`,
@@ -604,59 +663,69 @@ export default function Analysis() {
 
             {activeRecapTheme && (
               <ul style={styles.recapSheetList}>
-                {activeRecapTheme.records.map((record) => (
-                  <li key={record.id} style={styles.recapSheetRow}>
-                    {record.imageUrl ? (
-                      <button
-                        type="button"
-                        onClick={() => setLightboxUrl(record.imageUrl!)}
-                        aria-label="사진 크게 보기"
-                        style={styles.recapSheetPhotoButton}
-                      >
-                        <img src={record.imageUrl} alt="" style={styles.recapSheetPhoto} />
-                      </button>
-                    ) : (
-                      <span style={styles.recapSheetGemSlot}>
-                        <GemStone
-                          gem={{
-                            id: `recap-${record.id}`,
-                            emotionCode: record.emotionCode,
-                            tier: 2,
-                            createdAt: record.createdAt,
-                          }}
-                          size={28}
-                          variant={record.label}
-                        />
-                      </span>
-                    )}
-                    <div style={styles.recapSheetRowBody}>
-                      <span style={styles.recapSheetMeta}>
-                        {toDateKey(new Date(record.createdAt))} · {record.label}
-                      </span>
-                      {record.emotionBadges && (
-                        <div style={styles.recapSheetBadgeRow}>
-                          {record.emotionBadges.map((badge) => (
-                            <span key={`${record.id}-${badge.code}`} style={styles.recapSheetBadge}>
+                {activeRecapTheme.records.map((record) => {
+                  const slotCodes = record.emotionBadges?.length
+                    ? record.emotionBadges.map((b) => b.code)
+                    : [record.emotionCode];
+                  const stackSize = slotCodes.length >= 3 ? 18 : slotCodes.length === 2 ? 22 : 28;
+                  return (
+                    <li key={record.id} style={styles.recapSheetRow}>
+                      {record.imageUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => setLightboxUrl(record.imageUrl!)}
+                          aria-label="사진 크게 보기"
+                          style={styles.recapSheetPhotoButton}
+                        >
+                          <img src={record.imageUrl} alt="" style={styles.recapSheetPhoto} />
+                        </button>
+                      ) : (
+                        <span style={styles.recapSheetGemSlot}>
+                          <span style={styles.recapSheetGemStack}>
+                            {slotCodes.slice(0, 4).map((code, idx) => (
                               <GemStone
+                                key={`${record.id}-slot-${code}-${idx}`}
                                 gem={{
-                                  id: `recap-badge-${record.id}-${badge.code}`,
-                                  emotionCode: badge.code,
-                                  tier: 1,
+                                  id: `recap-${record.id}-${code}`,
+                                  emotionCode: code,
+                                  tier: 2,
                                   createdAt: record.createdAt,
                                 }}
-                                size={16}
+                                size={stackSize}
                               />
-                              {badge.label}
-                            </span>
-                          ))}
-                        </div>
+                            ))}
+                          </span>
+                        </span>
                       )}
-                      <p style={styles.recapSheetText}>
-                        {record.recordText ?? '텍스트 없이 원석만 남은 순간이에요.'}
-                      </p>
-                    </div>
-                  </li>
-                ))}
+                      <div style={styles.recapSheetRowBody}>
+                        <span style={styles.recapSheetMeta}>
+                          {toDateKey(new Date(record.createdAt))} · {record.label}
+                        </span>
+                        {record.emotionBadges && (
+                          <div style={styles.recapSheetBadgeRow}>
+                            {record.emotionBadges.map((badge) => (
+                              <span key={`${record.id}-${badge.code}`} style={styles.recapSheetBadge}>
+                                <GemStone
+                                  gem={{
+                                    id: `recap-badge-${record.id}-${badge.code}`,
+                                    emotionCode: badge.code,
+                                    tier: 1,
+                                    createdAt: record.createdAt,
+                                  }}
+                                  size={16}
+                                />
+                                {badge.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <p style={styles.recapSheetText}>
+                          {record.recordText ?? '텍스트 없이 원석만 남은 순간이에요.'}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -1131,6 +1200,15 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'center',
     background: '#EFE8D9',
     borderRadius: 10,
+  },
+  recapSheetGemStack: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    maxWidth: 50,
+    maxHeight: 50,
   },
   recapSheetRowBody: {
     minWidth: 0,
