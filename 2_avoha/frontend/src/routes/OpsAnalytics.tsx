@@ -247,10 +247,41 @@ export default function OpsAnalytics() {
   }, [reload]);
 
   // theme.css 가 전역 overflow:hidden + height:100dvh 라 페이지 스크롤 불가.
-  // body 에 클래스 토글 → CSS 가 !important 로 풀어줌 (specificity 명확, StrictMode 무관).
+  // 두 가지 동시 적용 (어느 한 쪽 실패해도 다른 쪽이 보장):
+  //  1) body classList → CSS !important 규칙 (모던 브라우저)
+  //  2) html/body/#root 에 inline style 직접 (CSS :has 미지원 인앱 브라우저 대비)
   useEffect(() => {
-    document.body.classList.add('ops-analytics-fullscreen');
-    return () => document.body.classList.remove('ops-analytics-fullscreen');
+    const html = document.documentElement;
+    const body = document.body;
+    const root = document.getElementById('root');
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      htmlHeight: html.style.height,
+      bodyOverflow: body.style.overflow,
+      bodyHeight: body.style.height,
+      rootOverflow: root?.style.overflow,
+      rootHeight: root?.style.height,
+    };
+    body.classList.add('ops-analytics-fullscreen');
+    html.style.setProperty('overflow', 'auto', 'important');
+    html.style.setProperty('height', 'auto', 'important');
+    body.style.setProperty('overflow', 'auto', 'important');
+    body.style.setProperty('height', 'auto', 'important');
+    if (root) {
+      root.style.setProperty('overflow', 'visible', 'important');
+      root.style.setProperty('height', 'auto', 'important');
+    }
+    return () => {
+      body.classList.remove('ops-analytics-fullscreen');
+      html.style.overflow = prev.htmlOverflow;
+      html.style.height = prev.htmlHeight;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.height = prev.bodyHeight;
+      if (root) {
+        root.style.overflow = prev.rootOverflow ?? '';
+        root.style.height = prev.rootHeight ?? '';
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -1314,11 +1345,13 @@ function DowEmotionChart({ items }: { items: EmotionBucket[] }) {
 
 const styles: Record<string, CSSProperties> = {
   viewport: {
-    minHeight: '100vh',
+    minHeight: '100dvh',
     width: '100%',
     background: '#F4EDDF',
     color: '#5A4A32',
-    overflowY: 'auto',
+    // overflowY: auto 를 두면 페이지 스크롤이 이 컨테이너 내부로 갇힘.
+    // body 가 스크롤되도록 visible 로 둔다.
+    overflow: 'visible',
   },
   container: {
     maxWidth: 1480,
