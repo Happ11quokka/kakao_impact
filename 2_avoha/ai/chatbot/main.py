@@ -1470,6 +1470,15 @@ def _prepend_greeting(response: dict, greeting: str) -> dict:
     return response
 
 
+def _prepend_today_record_count(response: dict, user_id: str) -> dict:
+    today_count = _db_get_today_count(user_id) + 1
+    outputs = response.get("template", {}).get("outputs", [])
+    response.setdefault("template", {})["outputs"] = [
+        {"simpleText": {"text": f"오늘 {today_count}번째 기록이에요!"}}
+    ] + outputs
+    return response
+
+
 def _check_and_update_visit(user_id: str) -> str | None:
     """Returns greeting message on first-ever or first-of-day visit, else None."""
     today = _today_kst()
@@ -1576,6 +1585,8 @@ def _callback_task(
     response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
     if greeting:
         response = _prepend_greeting(response, greeting)
+    if result not in ("NOT_RECORD", "TIMEOUT") and result is not None:
+        response = _prepend_today_record_count(response, user_id)
     log_message(trace_id=trace_id or new_trace_id(), user_id=user_id,
                 direction="outbound", raw_body=response,
                 callback_url=callback_url, mode="callback")
@@ -1594,6 +1605,8 @@ def _callback_task_retry(
 ):
     result = classify_emotion_with_supervisor(utterance, trace_id=trace_id, user_id=user_id)
     response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
+    if result not in ("NOT_RECORD", "TIMEOUT") and result is not None:
+        response = _prepend_today_record_count(response, user_id)
     log_message(trace_id=trace_id or new_trace_id(), user_id=user_id,
                 direction="outbound", raw_body=response,
                 callback_url=callback_url, mode="callback_retry")
