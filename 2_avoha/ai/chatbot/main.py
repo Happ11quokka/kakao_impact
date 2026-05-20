@@ -2046,7 +2046,19 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     reflection = _safe_pending_reflection(user_id)
     if reflection and utterance in ("건너뛰기", "건너뛸게요"):
         pending_reflection.pop(user_id, None)
-        return JSONResponse(kakao_response("알겠어요 :)", custom_replies=BASE_QUICK_REPLIES))
+        link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
+        return JSONResponse({
+            "version": "2.0",
+            "template": {
+                "outputs": [{"basicCard": {
+                    "title": "좋아요. 지금 느낀 만큼만 담아둘게요.",
+                    "description": "더 얘기하고 싶어질 때 언제든 다시 찾아와 주세요.",
+                    "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                    "buttons": [{"action": "webLink", "label": "웹에서 기록 보기", "webLinkUrl": link_url}],
+                }}],
+                "quickReplies": BASE_QUICK_REPLIES,
+            },
+        })
 
     if reflection and utterance == "질문 받을게요":
         reflection["stage"] = "question_shown"
