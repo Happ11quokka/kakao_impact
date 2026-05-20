@@ -1758,7 +1758,7 @@ def _check_and_update_visit(user_id: str) -> str | None:
     user_last_active[user_id] = today
 
     if last is None:
-        return "닥토공방에 처음 오셨군요! 반가워요 😊"
+        return "유로그에 처음 오셨군요! 반가워요 😊"
     if last < today:
         return "오늘도 돌아오셨군요! 🌟"
     return None
@@ -1825,10 +1825,10 @@ def _callback_task(
     image_url = str(photo_url) if has_photo else None
     result = classify_emotion_with_supervisor(utterance, trace_id=trace_id, user_id=user_id)
     response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
-    if greeting:
-        response = _prepend_greeting(response, greeting)
     if result not in ("NOT_RECORD", "TIMEOUT") and result is not None:
         response = _prepend_today_record_count(response, user_id)
+    if greeting:
+        response = _prepend_greeting(response, greeting)
     log_message(trace_id=trace_id or new_trace_id(), user_id=user_id,
                 direction="outbound", raw_body=response,
                 callback_url=callback_url, mode="callback")
@@ -2200,11 +2200,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     )
 
     if any(kw in utterance for kw in DANGER_KEYWORDS):
-        background_tasks.add_task(send_alert_email, "[닥토공방] 위험 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
+        background_tasks.add_task(send_alert_email, "[유로그] 위험 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
         return JSONResponse(kakao_response(DANGER_MESSAGE))
 
     if any(kw in utterance for kw in HARMFUL_KEYWORDS):
-        background_tasks.add_task(send_alert_email, "[닥토공방] 유해 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
+        background_tasks.add_task(send_alert_email, "[유로그] 유해 기록 감지", f"유저 ID: {user_id}\n내용: {utterance}")
         return JSONResponse(kakao_response(HARMFUL_MESSAGE))
 
     reflection = _safe_pending_reflection(user_id)
@@ -2790,6 +2790,8 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
     result = classify_emotion_with_supervisor(utterance, trace_id=trace_id, user_id=user_id)
     response = _build_ai_response(user_id, utterance, has_photo, image_url, result)
+    if result not in ("NOT_RECORD", "TIMEOUT") and result is not None:
+        response = _prepend_today_record_count(response, user_id)
     if greeting:
         response = _prepend_greeting(response, greeting)
     return JSONResponse(response)
