@@ -142,6 +142,10 @@ def _today_kst() -> date:
     return datetime.now(tz=ZoneInfo("Asia/Seoul")).date()
 
 
+def _week_start(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
 def _safe_count(value) -> int:
     try:
         return max(0, int(value))
@@ -1176,6 +1180,8 @@ def _select_reflection_question(user_id: str, category: str) -> dict | None:
         return None
 
     today = _today_kst()
+    week_start = _week_start(today)
+    next_week_start = week_start + timedelta(days=7)
     week_ago = today - timedelta(days=6)
     conn = None
     cur = None
@@ -1183,8 +1189,15 @@ def _select_reflection_question(user_id: str, category: str) -> dict | None:
         conn = psycopg2.connect(RAILWAY_DATABASE_URL)
         cur = conn.cursor()
         cur.execute(
-            "SELECT 1 FROM questions_log WHERE user_id = %s AND asked_date = %s LIMIT 1",
-            (user_id, today),
+            """
+            SELECT 1
+            FROM questions_log
+            WHERE user_id = %s
+              AND asked_date >= %s
+              AND asked_date < %s
+            LIMIT 1
+            """,
+            (user_id, week_start, next_week_start),
         )
         if cur.fetchone():
             return None
@@ -1245,11 +1258,16 @@ def _select_reflection_question(user_id: str, category: str) -> dict | None:
                 pass
 
 
-def _has_negative_reflection_trigger(user_id: str) -> bool:
-    if not RAILWAY_DATABASE_URL:
+def _has_negative_reflection_trigger(user_id: str, current_gem: str) -> bool:
+    if not RAILWAY_DATABASE_URL or current_gem not in NEGATIVE_GEMS:
         return False
 
-    week_ago = _today_kst() - timedelta(days=6)
+    today = _today_kst()
+    week_start = _week_start(today)
+    current_category = GEM_TO_REFLECTION_CATEGORY.get(current_gem)
+    if not current_category:
+        return False
+
     conn = None
     cur = None
     try:
@@ -1265,7 +1283,7 @@ def _has_negative_reflection_trigger(user_id: str) -> bool:
               AND (created_at AT TIME ZONE 'Asia/Seoul')::date >= %s
             ORDER BY created_at
             """,
-            (user_id, week_ago),
+            (user_id, today - timedelta(days=60)),
         )
         rows = cur.fetchall()
     except Exception as e:
@@ -1283,15 +1301,27 @@ def _has_negative_reflection_trigger(user_id: str) -> bool:
             except Exception:
                 pass
 
-    negative_days = {day for gem, day in rows if gem in NEGATIVE_GEMS}
-    if sum(1 for gem, _ in rows if gem in NEGATIVE_GEMS) >= 7:
+    history = [
+        (gem, day, GEM_TO_REFLECTION_CATEGORY.get(gem))
+        for gem, day in rows
+        if gem in NEGATIVE_GEMS and GEM_TO_REFLECTION_CATEGORY.get(gem)
+    ]
+
+    if not any(category == current_category and day >= week_start for _, day, category in history):
         return True
 
-    today = _today_kst()
-    for offset in range(0, 5):
-        end_day = today - timedelta(days=offset)
-        if all((end_day - timedelta(days=i)) in negative_days for i in range(3)):
-            return True
+    negative_days = {day for _, day, _ in history}
+    negative_days.add(today)
+    if all((today - timedelta(days=i)) in negative_days for i in range(3)):
+        return True
+
+    previous_category_days = [
+        day for _, day, category in history
+        if category == current_category and day < today
+    ]
+    if previous_category_days and (today - max(previous_category_days)).days >= 7:
+        return True
+
     return False
 
 
@@ -1306,9 +1336,10 @@ def check_reflection_question(
         return {"should_ask": False}
 
     category = _normalize_reflection_category(emotion, emotion_category)
-    if text_length < 15 or category == POSITIVE_REFLECTION_CATEGORY:
+    gem = EMOTION_TO_GEM.get(emotion, emotion)
+    if text_length > 30 or gem not in NEGATIVE_GEMS or category == POSITIVE_REFLECTION_CATEGORY:
         return {"should_ask": False}
-    if not _has_negative_reflection_trigger(user_id):
+    if not _has_negative_reflection_trigger(user_id, gem):
         return {"should_ask": False}
 
     question = _select_reflection_question(user_id, category)
@@ -1365,7 +1396,7 @@ def _maybe_attach_reflection_invite(response: dict, user_id: str, gem: str, reco
         user_id=user_id,
         emotion=emotion,
         emotion_category=GEM_TO_REFLECTION_CATEGORY.get(gem, ""),
-        text_length=len(record_text or ""),
+        text_length=len(str(record_text or "").strip()),
         record_mode=record_mode,
     )
     if not result.get("should_ask"):
