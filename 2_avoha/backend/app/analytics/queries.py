@@ -30,8 +30,11 @@ def _since(rng: Range) -> datetime:
 
 
 def _since_aware(rng: Range) -> datetime:
-    # chatbot_* 테이블들은 모두 timestamptz → aware datetime 그대로 사용.
-    return datetime.now(timezone.utc) - _range_to_delta(rng)
+    # 과거 가정: chatbot_* 가 timestamptz. 실제론 ORM Mapped[datetime] 가 type 명시
+    # 없어 SQLAlchemy 기본인 naive TIMESTAMP 로 매핑됨 → asyncpg 가 aware 인자 받으면
+    # "can't subtract offset-naive and offset-aware datetimes" 에러.
+    # 안전하게 naive 로 통일 (events 와 동일 패턴).
+    return (datetime.now(timezone.utc) - _range_to_delta(rng)).replace(tzinfo=None)
 
 
 async def page_breakdown(session: AsyncSession, rng: Range) -> list[dict]:
