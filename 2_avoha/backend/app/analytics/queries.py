@@ -24,7 +24,9 @@ def _range_to_delta(rng: Range) -> timedelta:
 
 
 def _since(rng: Range) -> datetime:
-    return datetime.now(timezone.utc) - _range_to_delta(rng)
+    # events.occurred_at 컬럼이 timezone-naive TIMESTAMP 라서 비교 인자도 naive 여야 함.
+    # UTC 기준 wall-clock 으로 동일한 시점을 표현.
+    return (datetime.now(timezone.utc) - _range_to_delta(rng)).replace(tzinfo=None)
 
 
 async def page_breakdown(session: AsyncSession, rng: Range) -> list[dict]:

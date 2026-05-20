@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -81,7 +81,12 @@ async def ingest_events(
             props=merged_props or None,
         )
         if item.occurredAt is not None:
-            event.occurred_at = item.occurredAt
+            # events.occurred_at 컬럼은 timezone-naive TIMESTAMP.
+            # FE 가 ISO Z 로 보낸 aware datetime 을 UTC 기준 naive 로 정규화.
+            occurred = item.occurredAt
+            if occurred.tzinfo is not None:
+                occurred = occurred.astimezone(timezone.utc).replace(tzinfo=None)
+            event.occurred_at = occurred
         session.add(event)
         event_types.append(item.eventType)
         publish_queue.append((item.eventType, merged_props))
