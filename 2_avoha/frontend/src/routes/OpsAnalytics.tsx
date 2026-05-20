@@ -1,6 +1,6 @@
 // === OpsAnalytics — 운영자 전용 사용자 행동 분석 대시보드 (데스크탑) ===
 // phone-frame 밖, full viewport. 각 패널마다 "무엇을 보는가 / 어떻게 읽는가" 캡션.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   CartesianGrid,
   Line,
@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { openAnalyticsStream, type StreamEvent } from '../lib/analytics-stream';
 import { clearOpsBasicAuth, getOpsBasicAuth } from '../components/RequireOpsUser';
+import { humanizeEvent } from '../lib/event-humanize';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000';
 
@@ -42,7 +43,20 @@ type Summary = {
   activeSessions: number;
   date?: string;
 };
-type Page = { path: string; views: number; uniq: number; avgDwellMs: number };
+type Page = { path: string; views: number; uniq: number; avgDwellMs: number; avgScrollPct: number };
+type DeviceRow = { device: string; uniq: number; views: number; pct: number };
+type NewVsReturning = {
+  new: number;
+  returning: number;
+  newPct: number;
+  returningPct: number;
+};
+type WebVitalRow = {
+  metric: string;
+  p75: number;
+  samples: number;
+  rating: 'good' | 'needs' | 'poor' | 'unknown';
+};
 type Funnel = {
   inbound: number;
   classified: number;
@@ -176,6 +190,10 @@ export default function OpsAnalytics() {
   const [emoByHour, setEmoByHour] = useState<EmotionBucket[]>([]);
   const [emoByDow, setEmoByDow] = useState<EmotionBucket[]>([]);
   const [emoByUser, setEmoByUser] = useState<EmotionByUser[]>([]);
+  // 신규 시각화 4개
+  const [devices, setDevices] = useState<DeviceRow[]>([]);
+  const [newRet, setNewRet] = useState<NewVsReturning | null>(null);
+  const [webVitals, setWebVitals] = useState<WebVitalRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
@@ -187,6 +205,7 @@ export default function OpsAnalytics() {
       cs, ch, cl, ce, cg, cu,
       fEntry, fExit, fEdges, fSeq,
       emD, emH, emW, emU,
+      dv, nr, wv,
     ] = await Promise.all([
       get<Summary>('/ops/analytics/summary'),
       get<{ pages: Page[] }>(`/ops/analytics/pages?range=${range}`),
@@ -213,6 +232,10 @@ export default function OpsAnalytics() {
       get<{ items: EmotionBucket[] }>(`/ops/analytics/emotions/by-hour?range=${range}`),
       get<{ items: EmotionBucket[] }>(`/ops/analytics/emotions/by-dow?range=${range}`),
       get<{ users: EmotionByUser[] }>(`/ops/analytics/emotions/by-user?range=${range}`),
+      // 신규 4개
+      get<{ items: DeviceRow[] }>(`/ops/analytics/devices?range=${range}`),
+      get<NewVsReturning>(`/ops/analytics/new-vs-returning?range=${range}`),
+      get<{ items: WebVitalRow[] }>(`/ops/analytics/web-vitals?range=${range}`),
     ]);
     if (s) setSummary(s);
     setPages(p?.pages ?? []);
@@ -237,6 +260,9 @@ export default function OpsAnalytics() {
     setEmoByHour(emH?.items ?? []);
     setEmoByDow(emW?.items ?? []);
     setEmoByUser(emU?.users ?? []);
+    setDevices(dv?.items ?? []);
+    if (nr) setNewRet(nr);
+    setWebVitals(wv?.items ?? []);
     setLoading(false);
     setLastRefreshed(new Date());
   }, [range]);
@@ -538,8 +564,8 @@ export default function OpsAnalytics() {
           {/* 페이지 표 */}
           <Panel
             title="페이지별 사용"
-            caption="PV · 고유 사용자 · 평균 체류"
-            help="어느 페이지가 인기인지, 사용자가 거기서 얼마나 머무는지. avg dwell 이 0초면 → 그 페이지를 사실상 거치기만 함."
+            caption="PV · 고유 사용자 · 평균 체류 · 스크롤"
+            help="어느 페이지가 인기인지, 사용자가 거기서 얼마나 머무는지 + 평균 스크롤 깊이. dwell 0초나 스크롤 0% 면 → 그 페이지를 사실상 거치기만 함."
             span={3}
           >
             {pages.length === 0 ? (
@@ -550,8 +576,9 @@ export default function OpsAnalytics() {
                   <tr>
                     <Th>경로</Th>
                     <Th align="right">조회수</Th>
-                    <Th align="right">고유 사용자</Th>
-                    <Th align="right">평균 체류</Th>
+                    <Th align="right">고유</Th>
+                    <Th align="right">체류</Th>
+                    <Th align="right">스크롤</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -561,6 +588,21 @@ export default function OpsAnalytics() {
                       <Td align="right">{p.views.toLocaleString()}</Td>
                       <Td align="right">{p.uniq.toLocaleString()}</Td>
                       <Td align="right">{(p.avgDwellMs / 1000).toFixed(1)}초</Td>
+                      <Td align="right">
+                        <span style={styles.scrollCell}>
+                          <span style={styles.scrollTrack}>
+                            <span
+                              style={{
+                                ...styles.scrollFill,
+                                width: `${Math.min(100, Math.max(0, p.avgScrollPct))}%`,
+                              }}
+                            />
+                          </span>
+                          <span style={styles.scrollVal}>
+                            {Math.round(p.avgScrollPct)}%
+                          </span>
+                        </span>
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -652,13 +694,53 @@ export default function OpsAnalytics() {
                     <span style={styles.streamUser}>
                       {ev.userId ? ev.userId.slice(0, 8) : 'anon'}
                     </span>
-                    <span style={styles.streamProps}>
-                      {ev.props ? JSON.stringify(ev.props) : ''}
+                    <span
+                      style={styles.streamProps}
+                      title={ev.props ? JSON.stringify(ev.props) : ''}
+                    >
+                      {humanizeEvent(ev.eventType, ev.props)}
                     </span>
                   </div>
                 ))
               )}
             </div>
+          </Panel>
+        </section>
+
+        {/* ─── 👥 방문자 구성 + ⚡ 성능 ─── */}
+        <section style={styles.sectionDivider}>
+          <h2 style={styles.sectionDividerTitle}>👥 방문자 구성 · 성능</h2>
+          <p style={styles.sectionDividerCaption}>
+            어떤 디바이스로 접속하는지, 신규/재방문 비율, 그리고 Core Web Vitals 성능 지표. 사용자가 어떤 환경에서 서비스를 경험하는지.
+          </p>
+        </section>
+
+        <section style={styles.grid}>
+          <Panel
+            title="디바이스 분포"
+            caption="모바일 · 태블릿 · PC"
+            help="page.view 의 deviceType 기준 고유 사용자 점유율. 모바일 비중이 높으면 → 모바일 UX 우선 투자."
+            span={2}
+          >
+            <DeviceDonut items={devices} />
+          </Panel>
+
+          <Panel
+            title="신규 vs 재방문"
+            caption="anonId 첫 등장 기준"
+            help={`기간(${rangeLabel}) 내 첫 page.view 가 발생한 사용자 = 신규. 이전부터 있던 사용자 = 재방문. 신규가 많을수록 → 마케팅 효과, 재방문이 많을수록 → 리텐션 양호.`}
+            span={2}
+          >
+            <NewVsReturningBar data={newRet} />
+          </Panel>
+
+          <Panel
+            title="Core Web Vitals"
+            caption="p75 · Google 임계값 기준"
+            help="LCP/FCP/INP/TTFB/CLS — Google 표준 웹 성능 지표. 신호등 색이 빨갛게 (poor) 떨어지면 → 그 페이지의 UX 가 느리거나 끊김."
+            span={2}
+          >
+            <WebVitalsCards items={webVitals} />
           </Panel>
         </section>
 
@@ -834,7 +916,7 @@ export default function OpsAnalytics() {
             help="언제 어떤 감정이 많이 기록되는지. 새벽=우울/불안 vs 저녁=기쁨/뿌듯 같은 패턴 추출."
             span={3}
           >
-            <HourEmotionChart items={emoByHour} />
+            <EmotionHeatmap items={emoByHour} axis="hour" />
           </Panel>
 
           <Panel
@@ -843,7 +925,7 @@ export default function OpsAnalytics() {
             help="주말 vs 평일 감정 분포 차이. 월요일 우울증 / 금요일 기쁨 같은 일주일 리듬."
             span={3}
           >
-            <DowEmotionChart items={emoByDow} />
+            <EmotionHeatmap items={emoByDow} axis="dow" />
           </Panel>
 
           <Panel
@@ -1201,144 +1283,346 @@ function Td({ children, align }: { children: React.ReactNode; align?: 'right' })
   return <td style={{ ...styles.td, textAlign: align ?? 'left' }}>{children}</td>;
 }
 
-// === 감정 × 시간 / 요일 stacked bar (Recharts 대신 자체 SVG) ===
-function HourEmotionChart({ items }: { items: EmotionBucket[] }) {
-  // 24시간 × 감정 stacked bar
-  const codes = Array.from(new Set(items.map((it) => it.code)));
-  const colors: Record<string, string> = {};
-  codes.forEach((c) => {
-    const found = items.find((it) => it.code === c);
-    if (found) colors[c] = found.hexColor;
-  });
-  const labels: Record<string, string> = {};
-  codes.forEach((c) => {
-    const found = items.find((it) => it.code === c);
-    if (found) labels[c] = found.nameKo;
-  });
+// === 감정 × (시간|요일) heatmap ===
+// 행 = 감정 (count 내림차순 Top 10), 열 = 0-23시 또는 일-토.
+// 셀 색 = 해당 감정 hexColor + opacity (count / 전체 최댓값) — 진할수록 빈도 높음.
+// 비어있는 셀도 옅은 회색으로 표시해서 "데이터 없음"을 시각적으로 인지 가능.
+function EmotionHeatmap({
+  items,
+  axis,
+}: {
+  items: EmotionBucket[];
+  axis: 'hour' | 'dow';
+}) {
+  if (items.length === 0) {
+    return (
+      <p style={styles.empty}>
+        {axis === 'hour' ? '아직 시간대 데이터 부족' : '아직 요일 데이터 부족'}
+      </p>
+    );
+  }
 
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const byHour = hours.map((h) => {
-    const row: Record<string, number> = {};
-    let total = 0;
-    for (const c of codes) {
-      const v = items.find((it) => it.hour === h && it.code === c)?.count ?? 0;
-      row[c] = v;
-      total += v;
+  const colSize = axis === 'hour' ? 24 : 7;
+  const colKeys = Array.from({ length: colSize }, (_, i) => i);
+  const colLabel = (i: number) => (axis === 'hour' ? `${i}` : DOW_KO[i]);
+  // 시간 축은 24개 빼곡하면 잘 안 보이니 3시간 간격만 표시.
+  const showColLabel = (i: number) =>
+    axis === 'hour' ? i % 3 === 0 : true;
+
+  // 감정별 총합 계산 → Top 10
+  const totalByCode = new Map<string, number>();
+  const metaByCode = new Map<string, { nameKo: string; hexColor: string }>();
+  for (const it of items) {
+    totalByCode.set(it.code, (totalByCode.get(it.code) ?? 0) + it.count);
+    if (!metaByCode.has(it.code)) {
+      metaByCode.set(it.code, { nameKo: it.nameKo, hexColor: it.hexColor });
     }
-    return { hour: h, row, total };
-  });
-  const maxTotal = Math.max(...byHour.map((b) => b.total), 1);
+  }
+  const topCodes = Array.from(totalByCode.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([code]) => code);
 
-  if (items.length === 0) return <p style={styles.empty}>아직 시간대 데이터 부족</p>;
+  // (code, colIdx) → count lookup
+  const cellCount = new Map<string, number>();
+  for (const it of items) {
+    const k = axis === 'hour' ? it.hour : it.dow;
+    if (k == null) continue;
+    if (!topCodes.includes(it.code)) continue;
+    cellCount.set(`${it.code}|${k}`, (cellCount.get(`${it.code}|${k}`) ?? 0) + it.count);
+  }
+  const maxCell = Math.max(...Array.from(cellCount.values()), 1);
 
   return (
-    <div>
-      <div style={styles.hourChart}>
-        {byHour.map((b) => (
-          <div key={b.hour} style={styles.hourCol}>
-            <div style={styles.hourStackTrack}>
-              <div style={styles.hourStackInner}>
-                {codes.map((c) => {
-                  const v = b.row[c];
-                  if (!v) return null;
-                  const h = (v / maxTotal) * 100;
-                  return (
-                    <div
-                      key={c}
-                      title={`${b.hour}시 · ${labels[c]} · ${v}`}
-                      style={{
-                        height: `${h}%`,
-                        background: colors[c],
-                        width: '100%',
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-            <span style={styles.hourLabel}>{b.hour}</span>
+    <div style={styles.heatmapWrap}>
+      <div
+        style={{
+          ...styles.heatmapGrid,
+          gridTemplateColumns: `64px repeat(${colSize}, 1fr)`,
+        }}
+      >
+        {/* Top-left corner */}
+        <div style={styles.heatmapCorner} />
+        {/* Column labels (top row) */}
+        {colKeys.map((i) => (
+          <div key={`th-${i}`} style={styles.heatmapColHeader}>
+            {showColLabel(i) ? colLabel(i) : ''}
           </div>
         ))}
+        {/* Body rows */}
+        {topCodes.map((code) => {
+          const meta = metaByCode.get(code);
+          if (!meta) return null;
+          return (
+            <Fragment key={code}>
+              <div style={styles.heatmapRowLabel}>
+                <span
+                  style={{
+                    ...styles.heatmapRowDot,
+                    background: meta.hexColor,
+                  }}
+                />
+                <span>{meta.nameKo}</span>
+              </div>
+              {colKeys.map((i) => {
+                const cnt = cellCount.get(`${code}|${i}`) ?? 0;
+                const alpha = cnt === 0 ? 0 : 0.18 + 0.82 * (cnt / maxCell);
+                const tooltipBucket =
+                  axis === 'hour' ? `${i}시` : `${DOW_KO[i]}요일`;
+                return (
+                  <div
+                    key={`${code}-${i}`}
+                    title={`${tooltipBucket} · ${meta.nameKo} · ${cnt}건`}
+                    style={{
+                      ...styles.heatmapCell,
+                      background:
+                        cnt === 0
+                          ? '#F2EAD6'
+                          : hexWithAlpha(meta.hexColor, alpha),
+                    }}
+                  />
+                );
+              })}
+            </Fragment>
+          );
+        })}
       </div>
-      <div style={styles.legend}>
-        {codes.map((c) => (
-          <span key={c} style={styles.legendItem}>
-            <span style={{ ...styles.legendDot, background: colors[c] }} />
-            {labels[c]}
-          </span>
-        ))}
+      <div style={styles.heatmapLegend}>
+        <span style={styles.heatmapLegendLabel}>덜 자주</span>
+        <span style={styles.heatmapLegendBar} />
+        <span style={styles.heatmapLegendLabel}>자주</span>
       </div>
     </div>
   );
 }
 
-function DowEmotionChart({ items }: { items: EmotionBucket[] }) {
-  const codes = Array.from(new Set(items.map((it) => it.code)));
-  const colors: Record<string, string> = {};
-  codes.forEach((c) => {
-    const found = items.find((it) => it.code === c);
-    if (found) colors[c] = found.hexColor;
-  });
-  const labels: Record<string, string> = {};
-  codes.forEach((c) => {
-    const found = items.find((it) => it.code === c);
-    if (found) labels[c] = found.nameKo;
-  });
+// "#A0BCA8" + alpha(0~1) → "#A0BCA8XX" (CSS rgba 호환 8자리 hex).
+function hexWithAlpha(hex: string, alpha: number): string {
+  const a = Math.max(0, Math.min(1, alpha));
+  const hh = Math.round(a * 255).toString(16).padStart(2, '0');
+  return `${hex}${hh}`;
+}
 
-  // 일=0~토=6
-  const dows = [0, 1, 2, 3, 4, 5, 6];
-  const byDow = dows.map((d) => {
-    const row: Record<string, number> = {};
-    let total = 0;
-    for (const c of codes) {
-      const v = items.find((it) => it.dow === d && it.code === c)?.count ?? 0;
-      row[c] = v;
-      total += v;
-    }
-    return { dow: d, row, total };
-  });
-  const maxTotal = Math.max(...byDow.map((b) => b.total), 1);
+// === 디바이스 분포 도넛 (자체 SVG, recharts 없이) ===
+const DEVICE_COLORS: Record<string, string> = {
+  mobile: '#A0BCA8',
+  tablet: '#D6A63A',
+  desktop: '#5A4A32',
+  '(unknown)': '#C8B89D',
+};
+const DEVICE_LABELS: Record<string, string> = {
+  mobile: '모바일',
+  tablet: '태블릿',
+  desktop: 'PC',
+  '(unknown)': '미상',
+};
+function DeviceDonut({ items }: { items: DeviceRow[] }) {
+  if (items.length === 0)
+    return <p style={styles.empty}>—</p>;
+  const total = items.reduce((acc, d) => acc + d.uniq, 0);
+  if (total === 0) return <p style={styles.empty}>—</p>;
 
-  if (items.length === 0) return <p style={styles.empty}>아직 요일 데이터 부족</p>;
+  // SVG donut — 라이브러리 의존 줄이려고 stroke-dasharray 트릭.
+  const R = 38;
+  const C = 2 * Math.PI * R;
+  let offset = 0;
+  const arcs = items.map((d) => {
+    const frac = d.uniq / total;
+    const len = C * frac;
+    const arc = {
+      color: DEVICE_COLORS[d.device] ?? '#7B95A8',
+      length: len,
+      offset: offset,
+    };
+    offset += len;
+    return arc;
+  });
 
   return (
-    <div>
-      <div style={styles.dowChart}>
-        {byDow.map((b) => (
-          <div key={b.dow} style={styles.dowCol}>
-            <div style={styles.dowTotal}>{b.total || ''}</div>
-            <div style={styles.dowStackTrack}>
-              <div style={styles.hourStackInner}>
-                {codes.map((c) => {
-                  const v = b.row[c];
-                  if (!v) return null;
-                  const h = (v / maxTotal) * 100;
-                  return (
-                    <div
-                      key={c}
-                      title={`${DOW_KO[b.dow]} · ${labels[c]} · ${v}`}
-                      style={{
-                        height: `${h}%`,
-                        background: colors[c],
-                        width: '100%',
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-            <span style={styles.dowLabel}>{DOW_KO[b.dow]}</span>
+    <div style={styles.donutWrap}>
+      <div style={styles.donutChart}>
+        <svg viewBox="0 0 100 100" width="120" height="120">
+          <circle
+            cx="50"
+            cy="50"
+            r={R}
+            fill="none"
+            stroke="#F2EAD6"
+            strokeWidth="16"
+          />
+          {arcs.map((a, i) => (
+            <circle
+              key={i}
+              cx="50"
+              cy="50"
+              r={R}
+              fill="none"
+              stroke={a.color}
+              strokeWidth="16"
+              strokeDasharray={`${a.length} ${C - a.length}`}
+              strokeDashoffset={-a.offset}
+              transform="rotate(-90 50 50)"
+            />
+          ))}
+          <text
+            x="50"
+            y="48"
+            textAnchor="middle"
+            fontSize="9"
+            fill="#8B7355"
+            fontWeight="700"
+          >
+            고유 사용자
+          </text>
+          <text
+            x="50"
+            y="60"
+            textAnchor="middle"
+            fontSize="14"
+            fill="#1E3328"
+            fontWeight="800"
+          >
+            {total}
+          </text>
+        </svg>
+      </div>
+      <ul style={styles.donutLegend}>
+        {items.map((d) => (
+          <li key={d.device} style={styles.donutLegendRow}>
+            <span
+              style={{
+                ...styles.donutLegendDot,
+                background: DEVICE_COLORS[d.device] ?? '#7B95A8',
+              }}
+            />
+            <span style={styles.donutLegendName}>
+              {DEVICE_LABELS[d.device] ?? d.device}
+            </span>
+            <span style={styles.donutLegendVal}>{d.uniq}명</span>
+            <span style={styles.donutLegendPct}>{d.pct}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// === 신규 vs 재방문 막대 ===
+function NewVsReturningBar({ data }: { data: NewVsReturning | null }) {
+  if (!data) return <p style={styles.empty}>—</p>;
+  const total = data.new + data.returning;
+  if (total === 0)
+    return <p style={styles.empty}>아직 page.view 데이터 부족</p>;
+  return (
+    <div style={styles.newRetWrap}>
+      <div style={styles.newRetBar}>
+        {data.new > 0 && (
+          <div
+            style={{
+              ...styles.newRetSegment,
+              width: `${data.newPct}%`,
+              background: '#B23A3A',
+            }}
+            title={`신규 ${data.new}명 (${data.newPct}%)`}
+          >
+            {data.newPct >= 12 ? `신규 ${data.newPct}%` : ''}
           </div>
-        ))}
+        )}
+        {data.returning > 0 && (
+          <div
+            style={{
+              ...styles.newRetSegment,
+              width: `${data.returningPct}%`,
+              background: '#A0BCA8',
+              color: '#1E3328',
+            }}
+            title={`재방문 ${data.returning}명 (${data.returningPct}%)`}
+          >
+            {data.returningPct >= 12 ? `재방문 ${data.returningPct}%` : ''}
+          </div>
+        )}
       </div>
-      <div style={styles.legend}>
-        {codes.map((c) => (
-          <span key={c} style={styles.legendItem}>
-            <span style={{ ...styles.legendDot, background: colors[c] }} />
-            {labels[c]}
-          </span>
-        ))}
+      <div style={styles.newRetLegend}>
+        <span style={styles.newRetLegendItem}>
+          <span style={{ ...styles.newRetLegendDot, background: '#B23A3A' }} />
+          신규 <strong>{data.new}</strong>명
+        </span>
+        <span style={styles.newRetLegendItem}>
+          <span style={{ ...styles.newRetLegendDot, background: '#A0BCA8' }} />
+          재방문 <strong>{data.returning}</strong>명
+        </span>
       </div>
+    </div>
+  );
+}
+
+// === Web Vitals 카드 (LCP/FCP/INP/TTFB/CLS p75) ===
+const WV_LABEL: Record<string, string> = {
+  LCP: '최대 콘텐츠 표시',
+  FCP: '첫 콘텐츠 표시',
+  INP: '상호작용 응답',
+  TTFB: '서버 응답',
+  CLS: '레이아웃 안정성',
+};
+const WV_UNIT: Record<string, (v: number) => string> = {
+  LCP: (v) => (v < 1000 ? `${Math.round(v)}ms` : `${(v / 1000).toFixed(1)}초`),
+  FCP: (v) => (v < 1000 ? `${Math.round(v)}ms` : `${(v / 1000).toFixed(1)}초`),
+  INP: (v) => `${Math.round(v)}ms`,
+  TTFB: (v) => `${Math.round(v)}ms`,
+  CLS: (v) => v.toFixed(3),
+};
+const WV_THRESH_DESC: Record<string, string> = {
+  LCP: 'good ≤ 2.5초',
+  FCP: 'good ≤ 1.8초',
+  INP: 'good ≤ 200ms',
+  TTFB: 'good ≤ 800ms',
+  CLS: 'good ≤ 0.1',
+};
+const WV_RATING_COLOR: Record<string, string> = {
+  good: '#A0BCA8',
+  needs: '#D6A63A',
+  poor: '#B23A3A',
+  unknown: '#C8B89D',
+};
+const WV_RATING_KO: Record<string, string> = {
+  good: '좋음',
+  needs: '개선 필요',
+  poor: '나쁨',
+  unknown: '데이터 없음',
+};
+const WV_ORDER = ['LCP', 'FCP', 'INP', 'TTFB', 'CLS'];
+
+function WebVitalsCards({ items }: { items: WebVitalRow[] }) {
+  if (items.length === 0)
+    return <p style={styles.empty}>아직 web-vitals 데이터 없음</p>;
+  const byMetric = new Map(items.map((it) => [it.metric, it]));
+  return (
+    <div style={styles.wvGrid}>
+      {WV_ORDER.map((m) => {
+        const it = byMetric.get(m);
+        const ratingColor = WV_RATING_COLOR[it?.rating ?? 'unknown'];
+        return (
+          <div key={m} style={{ ...styles.wvCard, borderColor: ratingColor }}>
+            <div style={styles.wvCardHeader}>
+              <span style={styles.wvCardMetric}>{m}</span>
+              <span
+                style={{
+                  ...styles.wvCardDot,
+                  background: ratingColor,
+                }}
+              />
+            </div>
+            <div style={styles.wvCardValue}>
+              {it ? WV_UNIT[m](it.p75) : '—'}
+            </div>
+            <div style={styles.wvCardLabel}>{WV_LABEL[m]}</div>
+            <div style={styles.wvCardRating}>
+              {it ? WV_RATING_KO[it.rating] : '—'} · {WV_THRESH_DESC[m]}
+            </div>
+            {it && <div style={styles.wvCardSamples}>{it.samples}회 측정</div>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1604,96 +1888,237 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: 1.4,
     wordBreak: 'keep-all',
   },
-  // 시간대별 stacked bar
-  hourChart: {
+  // 감정 heatmap (감정 × 시간|요일)
+  heatmapWrap: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  },
+  heatmapGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(24, 1fr)',
     gap: 2,
-    height: 180,
-    alignItems: 'flex-end',
-  },
-  hourCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 4,
-    height: '100%',
-    justifyContent: 'flex-end',
-  },
-  hourStackTrack: {
-    width: '100%',
-    flex: 1,
-    background: '#F2EAD6',
-    borderRadius: 3,
-    display: 'flex',
-    alignItems: 'flex-end',
-    overflow: 'hidden',
-  },
-  hourStackInner: {
-    width: '100%',
-    display: 'flex',
-    flexDirection: 'column-reverse',
-  },
-  hourLabel: {
-    fontSize: 9,
-    color: '#8B7355',
-    fontWeight: 700,
-  },
-  // 요일별 stacked bar
-  dowChart: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(7, 1fr)',
-    gap: 8,
-    height: 180,
-    alignItems: 'flex-end',
-  },
-  dowCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 4,
-    height: '100%',
-    justifyContent: 'flex-end',
-  },
-  dowStackTrack: {
-    width: '100%',
-    flex: 1,
-    background: '#F2EAD6',
-    borderRadius: 6,
-    display: 'flex',
-    alignItems: 'flex-end',
-    overflow: 'hidden',
-  },
-  dowTotal: {
-    fontSize: 11,
-    fontWeight: 800,
-    color: '#5A4A32',
-    minHeight: 14,
-  },
-  dowLabel: {
-    fontSize: 11,
-    color: '#8B7355',
-    fontWeight: 800,
-  },
-  // 범례
-  legend: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
     fontSize: 10,
-    color: '#5A4A32',
-    fontWeight: 700,
   },
-  legendItem: {
+  heatmapCorner: {
+    background: 'transparent',
+  },
+  heatmapColHeader: {
+    textAlign: 'center',
+    fontSize: 9,
+    fontWeight: 700,
+    color: '#8B7355',
+    minHeight: 14,
+    lineHeight: '14px',
+  },
+  heatmapRowLabel: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 4,
+    fontSize: 10,
+    fontWeight: 700,
+    color: '#5A4A32',
+    paddingRight: 4,
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
   },
-  legendDot: {
+  heatmapRowDot: {
     display: 'inline-block',
     width: 8,
     height: 8,
     borderRadius: 999,
+    flexShrink: 0,
+  },
+  heatmapCell: {
+    height: 18,
+    borderRadius: 3,
+    transition: 'transform 80ms',
+  },
+  heatmapLegend: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    fontSize: 10,
+    color: '#8B7355',
+    fontWeight: 700,
+    justifyContent: 'flex-end',
+  },
+  heatmapLegendLabel: {
+    fontSize: 9,
+  },
+  heatmapLegendBar: {
+    display: 'inline-block',
+    width: 80,
+    height: 8,
+    borderRadius: 2,
+    background:
+      'linear-gradient(90deg, #F2EAD6 0%, #5A4A32 100%)',
+  },
+  // 페이지 테이블 스크롤 깊이 셀
+  scrollCell: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 90,
+    justifyContent: 'flex-end',
+  },
+  scrollTrack: {
+    display: 'inline-block',
+    width: 50,
+    height: 6,
+    background: '#F2EAD6',
+    borderRadius: 3,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  scrollFill: {
+    display: 'block',
+    height: '100%',
+    background: '#7AA088',
+    borderRadius: 3,
+  },
+  scrollVal: {
+    fontSize: 11,
+    color: '#5A4A32',
+    fontWeight: 700,
+    minWidth: 32,
+    textAlign: 'right',
+  },
+  // 디바이스 도넛
+  donutWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 16,
+  },
+  donutChart: {
+    flexShrink: 0,
+  },
+  donutLegend: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    listStyle: 'none',
+    padding: 0,
+    margin: 0,
+    flex: 1,
+  },
+  donutLegendRow: {
+    display: 'grid',
+    gridTemplateColumns: '12px 1fr auto auto',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 12,
+    color: '#5A4A32',
+  },
+  donutLegendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+  },
+  donutLegendName: {
+    fontWeight: 700,
+  },
+  donutLegendVal: {
+    color: '#8B7355',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  donutLegendPct: {
+    fontWeight: 800,
+    fontVariantNumeric: 'tabular-nums',
+    minWidth: 36,
+    textAlign: 'right',
+  },
+  // 신규 vs 재방문 막대
+  newRetWrap: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    paddingTop: 8,
+  },
+  newRetBar: {
+    display: 'flex',
+    height: 36,
+    borderRadius: 8,
+    overflow: 'hidden',
+    background: '#F2EAD6',
+  },
+  newRetSegment: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#FFFFFF',
+    fontWeight: 800,
+    fontSize: 12,
+    transition: 'width 200ms',
+  },
+  newRetLegend: {
+    display: 'flex',
+    gap: 16,
+    fontSize: 12,
+    color: '#5A4A32',
+  },
+  newRetLegendItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  newRetLegendDot: {
+    display: 'inline-block',
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+  },
+  // Web Vitals 카드
+  wvGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: 8,
+  },
+  wvCard: {
+    border: '2px solid',
+    borderRadius: 10,
+    padding: '10px 8px',
+    background: '#FFFFFF',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    minHeight: 110,
+  },
+  wvCardHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  wvCardMetric: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: '#8B7355',
+    letterSpacing: 0.5,
+  },
+  wvCardDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  wvCardValue: {
+    fontSize: 20,
+    fontWeight: 800,
+    color: '#1E3328',
+    lineHeight: 1.1,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  wvCardLabel: {
+    fontSize: 10,
+    color: '#5A4A32',
+    fontWeight: 700,
+  },
+  wvCardRating: {
+    fontSize: 9,
+    color: '#8B7355',
+    marginTop: 'auto',
+  },
+  wvCardSamples: {
+    fontSize: 9,
+    color: '#A89779',
   },
 };

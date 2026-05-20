@@ -1,7 +1,9 @@
 """운영자 전용 분석 대시보드 API.
 
-모든 엔드포인트는 require_ops (OPS_ALLOWED_KAKAO_IDS 기반) 게이트.
+모든 엔드포인트는 require_admin_basic (Basic Auth) 게이트.
 KPI 카드는 Redis 카운터 즉시 응답, 시계열·랭킹·funnel 은 Postgres 집계.
+모든 집계 쿼리는 OPS_ALLOWED_KAKAO_IDS 운영자 본인 데이터를 제외해서
+운영자가 대시보드 보면서 만든 트래픽이 통계를 오염시키지 않게 함.
 """
 
 from __future__ import annotations
@@ -35,7 +37,8 @@ async def get_pages(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    rows = await queries.page_breakdown(session, rng)
+    ops_ids = await queries.get_ops_user_ids(session)
+    rows = await queries.page_breakdown(session, rng, ops_ids)
     return {"range": rng, "pages": rows}
 
 
@@ -55,7 +58,8 @@ async def get_recent_events(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "events": await queries.recent_events(session, rng, limit)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "events": await queries.recent_events(session, rng, limit, ops_ids)}
 
 
 @router.get("/event-types")
@@ -64,7 +68,8 @@ async def get_event_type_distribution(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "types": await queries.event_type_distribution(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "types": await queries.event_type_distribution(session, rng, ops_ids)}
 
 
 @router.get("/timeseries")
@@ -73,7 +78,8 @@ async def get_timeseries(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "buckets": await queries.hourly_timeseries(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "buckets": await queries.hourly_timeseries(session, rng, ops_ids)}
 
 
 @router.get("/users")
@@ -82,7 +88,8 @@ async def get_users(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "users": await queries.users_ranking(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "users": await queries.users_ranking(session, rng, ops_ids)}
 
 
 @router.get("/errors")
@@ -91,10 +98,13 @@ async def get_errors(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "errors": await queries.error_ranking(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "errors": await queries.error_ranking(session, rng, ops_ids)}
 
 
 # ─── 챗봇 (ai/chatbot/) 전용 통계 — 같은 Postgres 의 chatbot_* 테이블 직접 SELECT ───
+# 챗봇 inbound 은 실제 카카오 사용자 트래픽이라 ops 제외 안 함 (운영자는 보통 카카오에서
+# 챗봇 안 씀, 그리고 chatbot.user_id 는 provider_user_key 라 매핑 비용 큼).
 
 
 @router.get("/chatbot/summary")
@@ -160,7 +170,8 @@ async def get_flow_transitions(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "transitions": await queries.page_transitions(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "transitions": await queries.page_transitions(session, rng, ops_ids)}
 
 
 @router.get("/flow/entry")
@@ -169,7 +180,8 @@ async def get_flow_entry(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "pages": await queries.entry_pages(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "pages": await queries.entry_pages(session, rng, ops_ids)}
 
 
 @router.get("/flow/exit")
@@ -178,7 +190,8 @@ async def get_flow_exit(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "pages": await queries.exit_pages(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "pages": await queries.exit_pages(session, rng, ops_ids)}
 
 
 @router.get("/flow/sequences")
@@ -187,7 +200,8 @@ async def get_flow_sequences(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "sequences": await queries.session_paths_top(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "sequences": await queries.session_paths_top(session, rng, ops_ids)}
 
 
 # ─── 감정 기록 분석 (gems × emotions) ───
@@ -199,7 +213,8 @@ async def get_emotion_distribution(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "items": await queries.emotion_distribution(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "items": await queries.emotion_distribution(session, rng, ops_ids)}
 
 
 @router.get("/emotions/by-hour")
@@ -208,7 +223,8 @@ async def get_emotion_by_hour(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "items": await queries.emotion_by_hour(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "items": await queries.emotion_by_hour(session, rng, ops_ids)}
 
 
 @router.get("/emotions/by-dow")
@@ -217,7 +233,8 @@ async def get_emotion_by_dow(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "items": await queries.emotion_by_dow(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "items": await queries.emotion_by_dow(session, rng, ops_ids)}
 
 
 @router.get("/emotions/by-user")
@@ -226,7 +243,41 @@ async def get_emotion_by_user(
     _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
-    return {"range": rng, "users": await queries.emotion_by_user(session, rng)}
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "users": await queries.emotion_by_user(session, rng, ops_ids)}
+
+
+# ─── 신규 시각화: 디바이스 / 신규-재방문 / Web Vitals ───
+
+
+@router.get("/devices")
+async def get_devices(
+    rng: Range = Query(default="7d", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "items": await queries.device_distribution(session, rng, ops_ids)}
+
+
+@router.get("/new-vs-returning")
+async def get_new_vs_returning(
+    rng: Range = Query(default="7d", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, **(await queries.new_vs_returning(session, rng, ops_ids))}
+
+
+@router.get("/web-vitals")
+async def get_web_vitals(
+    rng: Range = Query(default="7d", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"range": rng, "items": await queries.web_vitals_summary(session, rng, ops_ids)}
 
 
 @router.get("/sse")

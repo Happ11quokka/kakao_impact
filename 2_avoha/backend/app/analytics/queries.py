@@ -7,10 +7,12 @@ funnel 등) 쿼리만 여기서 처리. 단순 합계/DAU 는 counters.read_kpi_
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Literal, Sequence
 
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
 
 Range = Literal["24h", "7d", "30d"]
 
@@ -37,11 +39,42 @@ def _since_aware(rng: Range) -> datetime:
     return (datetime.now(timezone.utc) - _range_to_delta(rng)).replace(tzinfo=None)
 
 
-async def page_breakdown(session: AsyncSession, rng: Range) -> list[dict]:
-    """페이지별 PV / unique users / 평균 dwell ms."""
+# ─── 운영자 통계 제외 (operator self-exclusion) ───
+# OPS_ALLOWED_KAKAO_IDS 에 등록된 운영자가 본인 대시보드를 보면서 발생시킨 트래픽이
+# DAU/페이지·이벤트 분포·사용자 랭킹을 오염시키지 않도록 모든 분석 쿼리에서 제외.
+
+
+async def get_ops_user_ids(session: AsyncSession) -> list[str]:
+    """OPS_ALLOWED_KAKAO_IDS → users.id UUID 리스트로 변환. 비어있으면 []."""
+    kakao_ids = list(settings.ops_allowed_kakao_ids)
+    if not kakao_ids:
+        return []
+    rows = await session.execute(
+        sql_text("SELECT id::text AS id FROM users WHERE kakao_id = ANY(:ids)"),
+        {"ids": kakao_ids},
+    )
+    return [r.id for r in rows]
+
+
+# WHERE 절 추가용 — events / gems 등에 user_id 컬럼이 있을 때 사용.
+# 빈 배열일 때 `<> ALL(ARRAY[])` 는 모든 row 통과시키므로 안전.
+# CAST(:ops_ids AS text[]) — asyncpg 가 빈 list 의 array 타입 추론 못 하는 케이스 대비.
+_EXCLUDE_OPS_EVENTS = (
+    "AND (user_id IS NULL OR user_id::text <> ALL(CAST(:ops_ids AS text[]))) "
+    "AND (props->>'path' IS NULL OR props->>'path' NOT LIKE '/ops/%')"
+)
+_EXCLUDE_OPS_GEMS = (
+    "AND (g.user_id IS NULL OR g.user_id::text <> ALL(CAST(:ops_ids AS text[])))"
+)
+
+
+async def page_breakdown(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
+    """페이지별 PV / unique users / 평균 dwell ms / 평균 스크롤 깊이."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             WITH views AS (
               SELECT
                 COALESCE(props->>'path', '/(unknown)') AS path,
@@ -49,26 +82,30 @@ async def page_breakdown(session: AsyncSession, rng: Range) -> list[dict]:
                 COALESCE(props->>'anonId', '') AS anon
               FROM events
               WHERE event_type = 'page.view' AND occurred_at >= :since
+                {_EXCLUDE_OPS_EVENTS}
             ),
             dwells AS (
               SELECT
                 COALESCE(props->>'path', '/(unknown)') AS path,
-                NULLIF((props->>'durationMs')::numeric, 0) AS d
+                NULLIF((props->>'durationMs')::numeric, 0) AS d,
+                NULLIF((props->>'scrollDepthPct')::numeric, 0) AS s
               FROM events
               WHERE event_type = 'page.dwell' AND occurred_at >= :since
+                {_EXCLUDE_OPS_EVENTS}
             )
             SELECT
               v.path,
               COUNT(*)::int AS views,
               COUNT(DISTINCT COALESCE(v.user_id::text, v.anon))::int AS uniq,
-              (SELECT COALESCE(AVG(d), 0)::int FROM dwells WHERE dwells.path = v.path) AS avg_dwell_ms
+              (SELECT COALESCE(AVG(d), 0)::int FROM dwells WHERE dwells.path = v.path) AS avg_dwell_ms,
+              (SELECT COALESCE(AVG(s), 0)::numeric(5,1) FROM dwells WHERE dwells.path = v.path) AS avg_scroll_pct
             FROM views v
             GROUP BY v.path
             ORDER BY views DESC
             LIMIT 50
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [
         {
@@ -76,6 +113,7 @@ async def page_breakdown(session: AsyncSession, rng: Range) -> list[dict]:
             "views": r.views,
             "uniq": r.uniq,
             "avgDwellMs": r.avg_dwell_ms,
+            "avgScrollPct": float(r.avg_scroll_pct or 0),
         }
         for r in rows
     ]
@@ -120,11 +158,13 @@ async def chatbot_funnel(session: AsyncSession, rng: Range) -> dict[str, object]
 # ─── 사용자 플로우 — events 의 page.view 시퀀스 ───
 
 
-async def page_transitions(session: AsyncSession, rng: Range) -> list[dict]:
+async def page_transitions(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     """from → to 페이지 이동 페어 빈도 (LAG window)."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             WITH pv AS (
               SELECT
                 props->>'sessionId' AS sid,
@@ -138,6 +178,7 @@ async def page_transitions(session: AsyncSession, rng: Range) -> list[dict]:
               WHERE event_type = 'page.view'
                 AND occurred_at >= :since
                 AND props->>'sessionId' IS NOT NULL
+                {_EXCLUDE_OPS_EVENTS}
             )
             SELECT prev_path AS from_path, path AS to_path, count(*)::int AS cnt
             FROM pv
@@ -147,16 +188,18 @@ async def page_transitions(session: AsyncSession, rng: Range) -> list[dict]:
             LIMIT 30
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [{"from": r.from_path, "to": r.to_path, "count": r.cnt} for r in rows]
 
 
-async def entry_pages(session: AsyncSession, rng: Range) -> list[dict]:
+async def entry_pages(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     """각 세션의 첫 page.view = 진입 페이지."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             WITH ranked AS (
               SELECT
                 props->>'sessionId' AS sid,
@@ -168,6 +211,7 @@ async def entry_pages(session: AsyncSession, rng: Range) -> list[dict]:
               WHERE event_type = 'page.view'
                 AND occurred_at >= :since
                 AND props->>'sessionId' IS NOT NULL
+                {_EXCLUDE_OPS_EVENTS}
             )
             SELECT path, count(*)::int AS sessions
             FROM ranked WHERE rn = 1 AND path IS NOT NULL
@@ -176,16 +220,18 @@ async def entry_pages(session: AsyncSession, rng: Range) -> list[dict]:
             LIMIT 15
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [{"path": r.path, "sessions": r.sessions} for r in rows]
 
 
-async def exit_pages(session: AsyncSession, rng: Range) -> list[dict]:
+async def exit_pages(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     """각 세션의 마지막 page.view = 이탈 페이지."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             WITH ranked AS (
               SELECT
                 props->>'sessionId' AS sid,
@@ -197,6 +243,7 @@ async def exit_pages(session: AsyncSession, rng: Range) -> list[dict]:
               WHERE event_type = 'page.view'
                 AND occurred_at >= :since
                 AND props->>'sessionId' IS NOT NULL
+                {_EXCLUDE_OPS_EVENTS}
             )
             SELECT path, count(*)::int AS sessions
             FROM ranked WHERE rn = 1 AND path IS NOT NULL
@@ -205,16 +252,18 @@ async def exit_pages(session: AsyncSession, rng: Range) -> list[dict]:
             LIMIT 15
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [{"path": r.path, "sessions": r.sessions} for r in rows]
 
 
-async def session_paths_top(session: AsyncSession, rng: Range) -> list[dict]:
+async def session_paths_top(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     """세션별 page.view 시퀀스를 화살표로 묶어 동일 시퀀스 빈도."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             WITH seq AS (
               SELECT
                 props->>'sessionId' AS sid,
@@ -225,6 +274,7 @@ async def session_paths_top(session: AsyncSession, rng: Range) -> list[dict]:
               WHERE event_type = 'page.view'
                 AND occurred_at >= :since
                 AND props->>'sessionId' IS NOT NULL
+                {_EXCLUDE_OPS_EVENTS}
               GROUP BY props->>'sessionId'
               HAVING count(*) BETWEEN 2 AND 12
             )
@@ -235,7 +285,7 @@ async def session_paths_top(session: AsyncSession, rng: Range) -> list[dict]:
             LIMIT 20
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [
         {"sequence": r.path_seq, "steps": r.steps, "sessions": r.sessions}
@@ -246,11 +296,13 @@ async def session_paths_top(session: AsyncSession, rng: Range) -> list[dict]:
 # ─── 감정 기록 분석 — gems × emotions JOIN ───
 
 
-async def emotion_distribution(session: AsyncSession, rng: Range) -> list[dict]:
+async def emotion_distribution(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     """전체 감정 분포 — emotion_code 별 카운트 + 한글명 + hex_color."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             SELECT
               g.emotion_code AS code,
               COALESCE(e.name_ko, g.emotion_code) AS name_ko,
@@ -259,12 +311,13 @@ async def emotion_distribution(session: AsyncSession, rng: Range) -> list[dict]:
             FROM gems g
             LEFT JOIN emotions e ON e.code = g.emotion_code
             WHERE g.created_at >= :since
+              {_EXCLUDE_OPS_GEMS}
             GROUP BY g.emotion_code, e.name_ko, e.hex_color
             ORDER BY cnt DESC
             LIMIT 30
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     items = [
         {
@@ -281,11 +334,13 @@ async def emotion_distribution(session: AsyncSession, rng: Range) -> list[dict]:
     return items
 
 
-async def emotion_by_hour(session: AsyncSession, rng: Range) -> list[dict]:
-    """KST 시간대(0-23)별 감정 분포 — stacked bar 용."""
+async def emotion_by_hour(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
+    """KST 시간대(0-23)별 감정 분포 — heatmap 용."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             SELECT
               date_part('hour', g.created_at AT TIME ZONE 'Asia/Seoul')::int AS hour,
               g.emotion_code AS code,
@@ -295,11 +350,12 @@ async def emotion_by_hour(session: AsyncSession, rng: Range) -> list[dict]:
             FROM gems g
             LEFT JOIN emotions e ON e.code = g.emotion_code
             WHERE g.created_at >= :since
+              {_EXCLUDE_OPS_GEMS}
             GROUP BY 1, g.emotion_code, e.name_ko, e.hex_color
             ORDER BY 1 ASC
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [
         {
@@ -313,11 +369,13 @@ async def emotion_by_hour(session: AsyncSession, rng: Range) -> list[dict]:
     ]
 
 
-async def emotion_by_dow(session: AsyncSession, rng: Range) -> list[dict]:
+async def emotion_by_dow(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     """요일(0=일~6=토)별 감정 분포."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             SELECT
               EXTRACT(DOW FROM g.created_at AT TIME ZONE 'Asia/Seoul')::int AS dow,
               g.emotion_code AS code,
@@ -327,11 +385,12 @@ async def emotion_by_dow(session: AsyncSession, rng: Range) -> list[dict]:
             FROM gems g
             LEFT JOIN emotions e ON e.code = g.emotion_code
             WHERE g.created_at >= :since
+              {_EXCLUDE_OPS_GEMS}
             GROUP BY 1, g.emotion_code, e.name_ko, e.hex_color
             ORDER BY 1 ASC
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [
         {
@@ -345,11 +404,13 @@ async def emotion_by_dow(session: AsyncSession, rng: Range) -> list[dict]:
     ]
 
 
-async def emotion_by_user(session: AsyncSession, rng: Range) -> list[dict]:
+async def emotion_by_user(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     """사용자별 Top 감정 (가장 많이 기록한 감정 1위)."""
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             WITH per_user_emo AS (
               SELECT
                 g.user_id,
@@ -367,6 +428,7 @@ async def emotion_by_user(session: AsyncSession, rng: Range) -> list[dict]:
               LEFT JOIN users u ON u.id = g.user_id
               LEFT JOIN emotions e ON e.code = g.emotion_code
               WHERE g.created_at >= :since
+                {_EXCLUDE_OPS_GEMS}
               GROUP BY g.user_id, u.nickname, g.emotion_code, e.name_ko, e.hex_color
             )
             SELECT
@@ -383,7 +445,7 @@ async def emotion_by_user(session: AsyncSession, rng: Range) -> list[dict]:
             LIMIT 30
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [
         {
@@ -399,42 +461,50 @@ async def emotion_by_user(session: AsyncSession, rng: Range) -> list[dict]:
     ]
 
 
-async def event_type_distribution(session: AsyncSession, rng: Range) -> list[dict]:
+async def event_type_distribution(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             SELECT event_type AS type, COUNT(*)::int AS cnt
             FROM events
             WHERE occurred_at >= :since
+              {_EXCLUDE_OPS_EVENTS}
             GROUP BY event_type
             ORDER BY cnt DESC
             LIMIT 30
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [{"type": r.type, "count": r.cnt} for r in rows]
 
 
-async def hourly_timeseries(session: AsyncSession, rng: Range) -> list[dict]:
+async def hourly_timeseries(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             SELECT
               date_trunc('hour', occurred_at) AS bucket,
               COUNT(*)::int AS cnt
             FROM events
             WHERE occurred_at >= :since
+              {_EXCLUDE_OPS_EVENTS}
             GROUP BY 1
             ORDER BY 1 ASC
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [{"hour": r.bucket.isoformat(), "count": r.cnt} for r in rows]
 
 
-async def users_ranking(session: AsyncSession, rng: Range) -> list[dict]:
+async def users_ranking(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     """사용자별 활동량 Top — 익명 anon_user_links 도 묶어서 본다."""
     rows = await session.execute(
         sql_text(
@@ -443,11 +513,13 @@ async def users_ranking(session: AsyncSession, rng: Range) -> list[dict]:
               SELECT
                 COALESCE(e.user_id, l.user_id) AS uid,
                 e.occurred_at,
-                e.props->>'sessionId' AS session_id
+                e.props->>'sessionId' AS session_id,
+                e.props->>'path' AS path
               FROM events e
               LEFT JOIN anon_user_links l
                 ON l.anon_id = (e.props->>'anonId') AND e.user_id IS NULL
               WHERE e.occurred_at >= :since
+                AND (e.props->>'path' IS NULL OR e.props->>'path' NOT LIKE '/ops/%')
             )
             SELECT
               o.uid::text AS user_id,
@@ -458,12 +530,13 @@ async def users_ranking(session: AsyncSession, rng: Range) -> list[dict]:
             FROM owner o
             LEFT JOIN users u ON u.id = o.uid
             WHERE o.uid IS NOT NULL
+              AND o.uid::text <> ALL(CAST(:ops_ids AS text[]))
             GROUP BY o.uid, u.nickname
             ORDER BY event_count DESC
             LIMIT 50
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [
         {
@@ -477,10 +550,12 @@ async def users_ranking(session: AsyncSession, rng: Range) -> list[dict]:
     ]
 
 
-async def error_ranking(session: AsyncSession, rng: Range) -> list[dict]:
+async def error_ranking(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             SELECT
               event_type,
               COALESCE(props->>'message', props->>'code', '(unknown)') AS message,
@@ -489,12 +564,13 @@ async def error_ranking(session: AsyncSession, rng: Range) -> list[dict]:
             FROM events
             WHERE occurred_at >= :since
               AND event_type IN ('error.client', 'error.api')
+              {_EXCLUDE_OPS_EVENTS}
             GROUP BY 1, 2
             ORDER BY cnt DESC
             LIMIT 30
             """
         ),
-        {"since": _since(rng)},
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
     )
     return [
         {
@@ -737,19 +813,25 @@ async def chatbot_top_users(session: AsyncSession, rng: Range) -> list[dict]:
     ]
 
 
-async def recent_events(session: AsyncSession, rng: Range, limit: int = 200) -> list[dict]:
+async def recent_events(
+    session: AsyncSession,
+    rng: Range,
+    limit: int = 200,
+    ops_ids: Sequence[str] = (),
+) -> list[dict]:
     rows = await session.execute(
         sql_text(
-            """
+            f"""
             SELECT
               event_type, user_id::text AS user_id, props, occurred_at
             FROM events
             WHERE occurred_at >= :since
+              {_EXCLUDE_OPS_EVENTS}
             ORDER BY occurred_at DESC
             LIMIT :limit
             """
         ),
-        {"since": _since(rng), "limit": limit},
+        {"since": _since(rng), "limit": limit, "ops_ids": list(ops_ids)},
     )
     return [
         {
@@ -760,3 +842,139 @@ async def recent_events(session: AsyncSession, rng: Range, limit: int = 200) -> 
         }
         for r in rows
     ]
+
+
+# ─── 신규 4개 시각화 쿼리 ───
+
+
+async def device_distribution(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
+    """디바이스(mobile/tablet/desktop) 별 고유 사용자 수 + 점유율."""
+    rows = await session.execute(
+        sql_text(
+            f"""
+            SELECT
+              COALESCE(props->>'deviceType', '(unknown)') AS device,
+              COUNT(DISTINCT COALESCE(user_id::text, props->>'anonId'))::int AS uniq,
+              COUNT(*)::int AS views
+            FROM events
+            WHERE event_type = 'page.view' AND occurred_at >= :since
+              {_EXCLUDE_OPS_EVENTS}
+            GROUP BY 1
+            ORDER BY uniq DESC
+            """
+        ),
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
+    )
+    items = [
+        {"device": r.device, "uniq": r.uniq, "views": r.views}
+        for r in rows
+    ]
+    total_uniq = sum(it["uniq"] for it in items) or 1
+    for it in items:
+        it["pct"] = round(it["uniq"] / total_uniq * 100, 1)
+    return items
+
+
+async def new_vs_returning(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> dict:
+    """anonId 의 첫 등장 시점이 기간 내면 신규, 이전이면 재방문."""
+    row = await session.execute(
+        sql_text(
+            f"""
+            WITH active_anons AS (
+              SELECT DISTINCT props->>'anonId' AS anon
+              FROM events
+              WHERE event_type = 'page.view'
+                AND occurred_at >= :since
+                AND props->>'anonId' IS NOT NULL
+                {_EXCLUDE_OPS_EVENTS}
+            ),
+            first_seen AS (
+              SELECT
+                props->>'anonId' AS anon,
+                MIN(occurred_at) AS first_at
+              FROM events
+              WHERE event_type = 'page.view'
+                AND props->>'anonId' IS NOT NULL
+                {_EXCLUDE_OPS_EVENTS}
+              GROUP BY 1
+            )
+            SELECT
+              COUNT(*) FILTER (WHERE fs.first_at >= :since)::int AS new_users,
+              COUNT(*) FILTER (WHERE fs.first_at < :since)::int AS returning_users
+            FROM active_anons aa
+            JOIN first_seen fs ON fs.anon = aa.anon
+            """
+        ),
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
+    )
+    r = row.first()
+    new_u = int(r.new_users or 0) if r else 0
+    ret_u = int(r.returning_users or 0) if r else 0
+    total = new_u + ret_u or 1
+    return {
+        "new": new_u,
+        "returning": ret_u,
+        "newPct": round(new_u / total * 100, 1),
+        "returningPct": round(ret_u / total * 100, 1),
+    }
+
+
+# Core Web Vitals 임계값 (Google 표준). good <= good, needs <= needs, else poor.
+_WV_THRESHOLDS = {
+    "LCP": (2500, 4000),
+    "FCP": (1800, 3000),
+    "INP": (200, 500),
+    "TTFB": (800, 1800),
+    "CLS": (0.1, 0.25),
+}
+
+
+def _wv_rating(metric: str, p75: float) -> str:
+    th = _WV_THRESHOLDS.get(metric)
+    if not th:
+        return "unknown"
+    good, needs = th
+    if p75 <= good:
+        return "good"
+    if p75 <= needs:
+        return "needs"
+    return "poor"
+
+
+async def web_vitals_summary(
+    session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
+) -> list[dict]:
+    """Core Web Vitals — metric 별 p75 + good/needs/poor 분류."""
+    rows = await session.execute(
+        sql_text(
+            f"""
+            SELECT
+              props->>'name' AS metric,
+              percentile_cont(0.75) WITHIN GROUP (ORDER BY (props->>'value')::numeric) AS p75,
+              count(*)::int AS samples
+            FROM events
+            WHERE event_type = 'perf.web_vitals'
+              AND occurred_at >= :since
+              AND props->>'name' IS NOT NULL
+              AND props->>'value' IS NOT NULL
+              {_EXCLUDE_OPS_EVENTS}
+            GROUP BY 1
+            ORDER BY 1
+            """
+        ),
+        {"since": _since(rng), "ops_ids": list(ops_ids)},
+    )
+    out = []
+    for r in rows:
+        p75 = float(r.p75 or 0)
+        out.append({
+            "metric": r.metric,
+            "p75": round(p75, 3) if r.metric == "CLS" else round(p75),
+            "samples": r.samples,
+            "rating": _wv_rating(r.metric, p75),
+        })
+    return out
