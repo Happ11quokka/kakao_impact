@@ -151,6 +151,84 @@ async def get_chatbot_users(
     return {"range": rng, "users": await queries.chatbot_top_users(session, rng)}
 
 
+# ─── 사용자 플로우 (events page.view 시퀀스) ───
+
+
+@router.get("/flow/transitions")
+async def get_flow_transitions(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "transitions": await queries.page_transitions(session, rng)}
+
+
+@router.get("/flow/entry")
+async def get_flow_entry(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "pages": await queries.entry_pages(session, rng)}
+
+
+@router.get("/flow/exit")
+async def get_flow_exit(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "pages": await queries.exit_pages(session, rng)}
+
+
+@router.get("/flow/sequences")
+async def get_flow_sequences(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "sequences": await queries.session_paths_top(session, rng)}
+
+
+# ─── 감정 기록 분석 (gems × emotions) ───
+
+
+@router.get("/emotions/distribution")
+async def get_emotion_distribution(
+    rng: Range = Query(default="7d", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "items": await queries.emotion_distribution(session, rng)}
+
+
+@router.get("/emotions/by-hour")
+async def get_emotion_by_hour(
+    rng: Range = Query(default="7d", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "items": await queries.emotion_by_hour(session, rng)}
+
+
+@router.get("/emotions/by-dow")
+async def get_emotion_by_dow(
+    rng: Range = Query(default="30d", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "items": await queries.emotion_by_dow(session, rng)}
+
+
+@router.get("/emotions/by-user")
+async def get_emotion_by_user(
+    rng: Range = Query(default="30d", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "users": await queries.emotion_by_user(session, rng)}
+
+
 @router.get("/sse")
 async def analytics_sse(
     request: Request,

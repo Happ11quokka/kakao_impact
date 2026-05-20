@@ -78,29 +78,322 @@ async def page_breakdown(session: AsyncSession, rng: Range) -> list[dict]:
     ]
 
 
-async def chatbot_funnel(session: AsyncSession, rng: Range) -> dict[str, int]:
-    """챗봇 깔때기: 질문 → 분류확인."""
+async def chatbot_funnel(session: AsyncSession, rng: Range) -> dict[str, object]:
+    """챗봇 3단계 깔때기: 카카오 inbound → AI 분류 row → 사용자 web 확정.
+
+    events 테이블 X — 카카오 webhook 이 우리 backend 가 아닌 ai/chatbot/ 서비스로
+    직접 가서 chatbot_messages 에 쌓이고 있음. 그 데이터 소스로 교체.
+    """
+    row = await session.execute(
+        sql_text(
+            """
+            SELECT
+              (SELECT count(*) FROM chatbot_messages
+                 WHERE direction='inbound' AND created_at >= :since) AS inbound,
+              (SELECT count(*) FROM chatbot WHERE created_at >= :since) AS classified,
+              (SELECT count(*) FROM chatbot
+                 WHERE created_at >= :since AND confirmed_emotion_code IS NOT NULL) AS confirmed
+            """
+        ),
+        {"since": _since_aware(rng)},
+    )
+    r = row.first()
+    inbound = int(r.inbound or 0) if r else 0
+    classified = int(r.classified or 0) if r else 0
+    confirmed = int(r.confirmed or 0) if r else 0
+    classify_rate = round(classified / inbound, 3) if inbound else 0.0
+    confirm_rate = round(confirmed / classified, 3) if classified else 0.0
+    overall_rate = round(confirmed / inbound, 3) if inbound else 0.0
+    return {
+        "inbound": inbound,
+        "classified": classified,
+        "confirmed": confirmed,
+        "classifyRate": classify_rate,
+        "confirmRate": confirm_rate,
+        "overallRate": overall_rate,
+    }
+
+
+# ─── 사용자 플로우 — events 의 page.view 시퀀스 ───
+
+
+async def page_transitions(session: AsyncSession, rng: Range) -> list[dict]:
+    """from → to 페이지 이동 페어 빈도 (LAG window)."""
     rows = await session.execute(
         sql_text(
             """
-            SELECT event_type, COUNT(*)::int AS cnt
-            FROM events
-            WHERE occurred_at >= :since
-              AND event_type IN ('chatbot.question.sent', 'record_emotion_confirmed')
-            GROUP BY event_type
+            WITH pv AS (
+              SELECT
+                props->>'sessionId' AS sid,
+                props->>'path' AS path,
+                occurred_at,
+                LAG(props->>'path') OVER (
+                  PARTITION BY props->>'sessionId'
+                  ORDER BY occurred_at
+                ) AS prev_path
+              FROM events
+              WHERE event_type = 'page.view'
+                AND occurred_at >= :since
+                AND props->>'sessionId' IS NOT NULL
+            )
+            SELECT prev_path AS from_path, path AS to_path, count(*)::int AS cnt
+            FROM pv
+            WHERE prev_path IS NOT NULL AND prev_path <> path
+            GROUP BY 1, 2
+            ORDER BY cnt DESC
+            LIMIT 30
             """
         ),
         {"since": _since(rng)},
     )
-    counts = {r.event_type: r.cnt for r in rows}
-    questions = counts.get("chatbot.question.sent", 0)
-    confirmations = counts.get("record_emotion_confirmed", 0)
-    rate = (confirmations / questions) if questions else 0.0
-    return {
-        "questions": questions,
-        "confirmations": confirmations,
-        "confirmRate": round(rate, 3),
-    }
+    return [{"from": r.from_path, "to": r.to_path, "count": r.cnt} for r in rows]
+
+
+async def entry_pages(session: AsyncSession, rng: Range) -> list[dict]:
+    """각 세션의 첫 page.view = 진입 페이지."""
+    rows = await session.execute(
+        sql_text(
+            """
+            WITH ranked AS (
+              SELECT
+                props->>'sessionId' AS sid,
+                props->>'path' AS path,
+                ROW_NUMBER() OVER (
+                  PARTITION BY props->>'sessionId' ORDER BY occurred_at ASC
+                ) AS rn
+              FROM events
+              WHERE event_type = 'page.view'
+                AND occurred_at >= :since
+                AND props->>'sessionId' IS NOT NULL
+            )
+            SELECT path, count(*)::int AS sessions
+            FROM ranked WHERE rn = 1 AND path IS NOT NULL
+            GROUP BY path
+            ORDER BY sessions DESC
+            LIMIT 15
+            """
+        ),
+        {"since": _since(rng)},
+    )
+    return [{"path": r.path, "sessions": r.sessions} for r in rows]
+
+
+async def exit_pages(session: AsyncSession, rng: Range) -> list[dict]:
+    """각 세션의 마지막 page.view = 이탈 페이지."""
+    rows = await session.execute(
+        sql_text(
+            """
+            WITH ranked AS (
+              SELECT
+                props->>'sessionId' AS sid,
+                props->>'path' AS path,
+                ROW_NUMBER() OVER (
+                  PARTITION BY props->>'sessionId' ORDER BY occurred_at DESC
+                ) AS rn
+              FROM events
+              WHERE event_type = 'page.view'
+                AND occurred_at >= :since
+                AND props->>'sessionId' IS NOT NULL
+            )
+            SELECT path, count(*)::int AS sessions
+            FROM ranked WHERE rn = 1 AND path IS NOT NULL
+            GROUP BY path
+            ORDER BY sessions DESC
+            LIMIT 15
+            """
+        ),
+        {"since": _since(rng)},
+    )
+    return [{"path": r.path, "sessions": r.sessions} for r in rows]
+
+
+async def session_paths_top(session: AsyncSession, rng: Range) -> list[dict]:
+    """세션별 page.view 시퀀스를 화살표로 묶어 동일 시퀀스 빈도."""
+    rows = await session.execute(
+        sql_text(
+            """
+            WITH seq AS (
+              SELECT
+                props->>'sessionId' AS sid,
+                string_agg(props->>'path', ' → ' ORDER BY occurred_at) AS path_seq,
+                count(*) AS steps,
+                min(occurred_at) AS started_at
+              FROM events
+              WHERE event_type = 'page.view'
+                AND occurred_at >= :since
+                AND props->>'sessionId' IS NOT NULL
+              GROUP BY props->>'sessionId'
+              HAVING count(*) BETWEEN 2 AND 12
+            )
+            SELECT path_seq, steps::int AS steps, count(*)::int AS sessions
+            FROM seq
+            GROUP BY path_seq, steps
+            ORDER BY sessions DESC, steps DESC
+            LIMIT 20
+            """
+        ),
+        {"since": _since(rng)},
+    )
+    return [
+        {"sequence": r.path_seq, "steps": r.steps, "sessions": r.sessions}
+        for r in rows
+    ]
+
+
+# ─── 감정 기록 분석 — gems × emotions JOIN ───
+
+
+async def emotion_distribution(session: AsyncSession, rng: Range) -> list[dict]:
+    """전체 감정 분포 — emotion_code 별 카운트 + 한글명 + hex_color."""
+    rows = await session.execute(
+        sql_text(
+            """
+            SELECT
+              g.emotion_code AS code,
+              COALESCE(e.name_ko, g.emotion_code) AS name_ko,
+              COALESCE(e.hex_color, '#A0BCA8') AS hex_color,
+              count(*)::int AS cnt
+            FROM gems g
+            LEFT JOIN emotions e ON e.code = g.emotion_code
+            WHERE g.created_at >= :since
+            GROUP BY g.emotion_code, e.name_ko, e.hex_color
+            ORDER BY cnt DESC
+            LIMIT 30
+            """
+        ),
+        {"since": _since(rng)},
+    )
+    items = [
+        {
+            "code": r.code,
+            "nameKo": r.name_ko,
+            "hexColor": r.hex_color,
+            "count": r.cnt,
+        }
+        for r in rows
+    ]
+    total = sum(it["count"] for it in items) or 1
+    for it in items:
+        it["pct"] = round(it["count"] / total * 100, 1)
+    return items
+
+
+async def emotion_by_hour(session: AsyncSession, rng: Range) -> list[dict]:
+    """KST 시간대(0-23)별 감정 분포 — stacked bar 용."""
+    rows = await session.execute(
+        sql_text(
+            """
+            SELECT
+              date_part('hour', g.created_at AT TIME ZONE 'Asia/Seoul')::int AS hour,
+              g.emotion_code AS code,
+              COALESCE(e.name_ko, g.emotion_code) AS name_ko,
+              COALESCE(e.hex_color, '#A0BCA8') AS hex_color,
+              count(*)::int AS cnt
+            FROM gems g
+            LEFT JOIN emotions e ON e.code = g.emotion_code
+            WHERE g.created_at >= :since
+            GROUP BY 1, g.emotion_code, e.name_ko, e.hex_color
+            ORDER BY 1 ASC
+            """
+        ),
+        {"since": _since(rng)},
+    )
+    return [
+        {
+            "hour": r.hour,
+            "code": r.code,
+            "nameKo": r.name_ko,
+            "hexColor": r.hex_color,
+            "count": r.cnt,
+        }
+        for r in rows
+    ]
+
+
+async def emotion_by_dow(session: AsyncSession, rng: Range) -> list[dict]:
+    """요일(0=일~6=토)별 감정 분포."""
+    rows = await session.execute(
+        sql_text(
+            """
+            SELECT
+              EXTRACT(DOW FROM g.created_at AT TIME ZONE 'Asia/Seoul')::int AS dow,
+              g.emotion_code AS code,
+              COALESCE(e.name_ko, g.emotion_code) AS name_ko,
+              COALESCE(e.hex_color, '#A0BCA8') AS hex_color,
+              count(*)::int AS cnt
+            FROM gems g
+            LEFT JOIN emotions e ON e.code = g.emotion_code
+            WHERE g.created_at >= :since
+            GROUP BY 1, g.emotion_code, e.name_ko, e.hex_color
+            ORDER BY 1 ASC
+            """
+        ),
+        {"since": _since(rng)},
+    )
+    return [
+        {
+            "dow": r.dow,
+            "code": r.code,
+            "nameKo": r.name_ko,
+            "hexColor": r.hex_color,
+            "count": r.cnt,
+        }
+        for r in rows
+    ]
+
+
+async def emotion_by_user(session: AsyncSession, rng: Range) -> list[dict]:
+    """사용자별 Top 감정 (가장 많이 기록한 감정 1위)."""
+    rows = await session.execute(
+        sql_text(
+            """
+            WITH per_user_emo AS (
+              SELECT
+                g.user_id,
+                u.nickname,
+                g.emotion_code,
+                COALESCE(e.name_ko, g.emotion_code) AS name_ko,
+                COALESCE(e.hex_color, '#A0BCA8') AS hex_color,
+                count(*)::int AS gem_count,
+                ROW_NUMBER() OVER (
+                  PARTITION BY g.user_id
+                  ORDER BY count(*) DESC
+                ) AS rn,
+                SUM(count(*)) OVER (PARTITION BY g.user_id) AS total
+              FROM gems g
+              LEFT JOIN users u ON u.id = g.user_id
+              LEFT JOIN emotions e ON e.code = g.emotion_code
+              WHERE g.created_at >= :since
+              GROUP BY g.user_id, u.nickname, g.emotion_code, e.name_ko, e.hex_color
+            )
+            SELECT
+              user_id::text AS user_id,
+              nickname,
+              emotion_code AS top_code,
+              name_ko AS top_name,
+              hex_color AS top_color,
+              gem_count AS top_count,
+              total::int AS total
+            FROM per_user_emo
+            WHERE rn = 1
+            ORDER BY total DESC
+            LIMIT 30
+            """
+        ),
+        {"since": _since(rng)},
+    )
+    return [
+        {
+            "userId": r.user_id,
+            "nickname": r.nickname or "(unmapped)",
+            "topEmotionCode": r.top_code,
+            "topEmotionLabel": r.top_name,
+            "topEmotionColor": r.top_color,
+            "topEmotionCount": r.top_count,
+            "totalGems": r.total,
+        }
+        for r in rows
+    ]
 
 
 async def event_type_distribution(session: AsyncSession, rng: Range) -> list[dict]:

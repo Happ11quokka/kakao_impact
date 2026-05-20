@@ -215,6 +215,18 @@ body {
   /* Remove retro borders to match modern Figma */
 }
 
+/* === Ops Analytics — full viewport, allow scroll === */
+/* theme.css 가 전역으로 html/body/#root 에 overflow:hidden + height:100dvh 를
+   강제하고 있어 데스크탑 대시보드 가 viewport 안에 갇힘. 이 페이지만 풀어준다.
+   OpsAnalytics.tsx 가 mount 시 body 에 클래스 추가, unmount 시 제거. */
+body.ops-analytics-fullscreen,
+body.ops-analytics-fullscreen #root,
+html:has(body.ops-analytics-fullscreen) {
+  overflow: auto !important;
+  height: auto !important;
+  min-height: 100% !important;
+}
+
 .pixel-title {
   font-family: var(--font-pixel);
   letter-spacing: 0.4px;

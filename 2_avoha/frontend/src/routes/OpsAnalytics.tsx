@@ -15,6 +15,23 @@ import { clearOpsBasicAuth, getOpsBasicAuth } from '../components/RequireOpsUser
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000';
 
+// 페이지 경로 → 한글 라벨 매핑 (비전공자도 한 눈에). BottomNav 정의와 동기화.
+const PATH_LABELS: Record<string, string> = {
+  '/': '홈',
+  '/calendar': '캘린더',
+  '/analysis': '감정분석',
+  '/settings': '설정',
+  '/login': '로그인',
+  '/login/callback': '로그인 콜백',
+  '/ops/analytics': '운영자 대시보드',
+};
+function labelForPath(p: string | null | undefined): string {
+  if (!p) return '(unknown)';
+  const ko = PATH_LABELS[p];
+  return ko ? `${ko} (${p})` : p;
+}
+const DOW_KO = ['일', '월', '화', '수', '목', '금', '토'];
+
 type Range = '24h' | '7d' | '30d';
 
 type Summary = {
@@ -26,7 +43,41 @@ type Summary = {
   date?: string;
 };
 type Page = { path: string; views: number; uniq: number; avgDwellMs: number };
-type Funnel = { questions: number; confirmations: number; confirmRate: number };
+type Funnel = {
+  inbound: number;
+  classified: number;
+  confirmed: number;
+  classifyRate: number;
+  confirmRate: number;
+  overallRate: number;
+};
+type FlowEdge = { from: string; to: string; count: number };
+type FlowEndpoint = { path: string; sessions: number };
+type FlowSequence = { sequence: string; steps: number; sessions: number };
+type EmotionItem = {
+  code: string;
+  nameKo: string;
+  hexColor: string;
+  count: number;
+  pct: number;
+};
+type EmotionBucket = {
+  hour?: number;
+  dow?: number;
+  code: string;
+  nameKo: string;
+  hexColor: string;
+  count: number;
+};
+type EmotionByUser = {
+  userId: string;
+  nickname: string;
+  topEmotionCode: string;
+  topEmotionLabel: string;
+  topEmotionColor: string;
+  topEmotionCount: number;
+  totalGems: number;
+};
 type TypeRow = { type: string; count: number };
 type Bucket = { hour: string; count: number };
 type UserRow = {
@@ -116,6 +167,15 @@ export default function OpsAnalytics() {
   const [cbErrRecent, setCbErrRecent] = useState<ChatbotErrRow[]>([]);
   const [cbGems, setCbGems] = useState<ChatbotGem[]>([]);
   const [cbUsers, setCbUsers] = useState<ChatbotUser[]>([]);
+  // flow + emotions (Phase 2)
+  const [flowEntry, setFlowEntry] = useState<FlowEndpoint[]>([]);
+  const [flowExit, setFlowExit] = useState<FlowEndpoint[]>([]);
+  const [flowEdges, setFlowEdges] = useState<FlowEdge[]>([]);
+  const [flowSeq, setFlowSeq] = useState<FlowSequence[]>([]);
+  const [emoDist, setEmoDist] = useState<EmotionItem[]>([]);
+  const [emoByHour, setEmoByHour] = useState<EmotionBucket[]>([]);
+  const [emoByDow, setEmoByDow] = useState<EmotionBucket[]>([]);
+  const [emoByUser, setEmoByUser] = useState<EmotionByUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
@@ -124,7 +184,10 @@ export default function OpsAnalytics() {
   const reload = useCallback(async () => {
     setLoading(true);
     const [s, p, f, t, b, u, e, r,
-      cs, ch, cl, ce, cg, cu] = await Promise.all([
+      cs, ch, cl, ce, cg, cu,
+      fEntry, fExit, fEdges, fSeq,
+      emD, emH, emW, emU,
+    ] = await Promise.all([
       get<Summary>('/ops/analytics/summary'),
       get<{ pages: Page[] }>(`/ops/analytics/pages?range=${range}`),
       get<Funnel>(`/ops/analytics/funnels/chatbot?range=${range}`),
@@ -140,6 +203,16 @@ export default function OpsAnalytics() {
       get<{ bySource: ChatbotErrSrc[]; recent: ChatbotErrRow[] }>(`/ops/analytics/chatbot/errors?range=${range}`),
       get<{ gems: ChatbotGem[] }>(`/ops/analytics/chatbot/gems?range=${range}`),
       get<{ users: ChatbotUser[] }>(`/ops/analytics/chatbot/users?range=${range}`),
+      // flow
+      get<{ pages: FlowEndpoint[] }>(`/ops/analytics/flow/entry?range=${range}`),
+      get<{ pages: FlowEndpoint[] }>(`/ops/analytics/flow/exit?range=${range}`),
+      get<{ transitions: FlowEdge[] }>(`/ops/analytics/flow/transitions?range=${range}`),
+      get<{ sequences: FlowSequence[] }>(`/ops/analytics/flow/sequences?range=${range}`),
+      // emotions
+      get<{ items: EmotionItem[] }>(`/ops/analytics/emotions/distribution?range=${range}`),
+      get<{ items: EmotionBucket[] }>(`/ops/analytics/emotions/by-hour?range=${range}`),
+      get<{ items: EmotionBucket[] }>(`/ops/analytics/emotions/by-dow?range=${range}`),
+      get<{ users: EmotionByUser[] }>(`/ops/analytics/emotions/by-user?range=${range}`),
     ]);
     if (s) setSummary(s);
     setPages(p?.pages ?? []);
@@ -156,6 +229,14 @@ export default function OpsAnalytics() {
     setCbErrRecent(ce?.recent ?? []);
     setCbGems(cg?.gems ?? []);
     setCbUsers(cu?.users ?? []);
+    setFlowEntry(fEntry?.pages ?? []);
+    setFlowExit(fExit?.pages ?? []);
+    setFlowEdges(fEdges?.transitions ?? []);
+    setFlowSeq(fSeq?.sequences ?? []);
+    setEmoDist(emD?.items ?? []);
+    setEmoByHour(emH?.items ?? []);
+    setEmoByDow(emW?.items ?? []);
+    setEmoByUser(emU?.users ?? []);
     setLoading(false);
     setLastRefreshed(new Date());
   }, [range]);
@@ -165,38 +246,11 @@ export default function OpsAnalytics() {
     void reload();
   }, [reload]);
 
-  // theme.css 가 html/body/#root 에 overflow:hidden + height:100dvh 를 강제하고 있어
-  // OpsAnalytics 가 viewport 안에 갇혀 스크롤 불가. 이 페이지만 임시 unlock.
+  // theme.css 가 전역 overflow:hidden + height:100dvh 라 페이지 스크롤 불가.
+  // body 에 클래스 토글 → CSS 가 !important 로 풀어줌 (specificity 명확, StrictMode 무관).
   useEffect(() => {
-    const html = document.documentElement;
-    const body = document.body;
-    const root = document.getElementById('root');
-    const prev = {
-      htmlOverflow: html.style.overflow,
-      htmlHeight: html.style.height,
-      bodyOverflow: body.style.overflow,
-      bodyHeight: body.style.height,
-      rootOverflow: root?.style.overflow,
-      rootHeight: root?.style.height,
-    };
-    html.style.overflow = 'auto';
-    html.style.height = 'auto';
-    body.style.overflow = 'auto';
-    body.style.height = 'auto';
-    if (root) {
-      root.style.overflow = 'visible';
-      root.style.height = 'auto';
-    }
-    return () => {
-      html.style.overflow = prev.htmlOverflow;
-      html.style.height = prev.htmlHeight;
-      body.style.overflow = prev.bodyOverflow;
-      body.style.height = prev.bodyHeight;
-      if (root) {
-        root.style.overflow = prev.rootOverflow ?? '';
-        root.style.height = prev.rootHeight ?? '';
-      }
-    };
+    document.body.classList.add('ops-analytics-fullscreen');
+    return () => document.body.classList.remove('ops-analytics-fullscreen');
   }, []);
 
   useEffect(() => {
@@ -408,27 +462,42 @@ export default function OpsAnalytics() {
             )}
           </Panel>
 
-          {/* 챗봇 funnel */}
+          {/* 챗봇 funnel — 3단계: 카카오 inbound → AI 분류 → 사용자 web 확정 */}
           <Panel
             title="챗봇 funnel"
-            caption="질문 수신 → 감정 확정"
-            help={
-              funnel && funnel.questions === 0 && funnel.confirmations > 0
-                ? '⚠️ 질문 0인데 확정 있음 = 카카오 webhook 이 우리 백엔드로 안 들어오는 상태. webhook URL 확인 필요.'
-                : '카카오 챗봇에 들어온 질문 중 사용자가 감정으로 확정해 원석으로 만든 비율.'
-            }
+            caption="질문 → 분류 → 확정"
+            help="chatbot_messages(inbound) = 카카오에 들어온 질문. chatbot 테이블 row = AI 가 감정 분류 성공. confirmed_emotion_code = 사용자가 웹에서 확정. 각 단계 사이 conversion 비율."
             span={2}
           >
             {funnel ? (
               <div style={styles.funnelBlock}>
-                <FunnelRow label="질문 수신" value={funnel.questions} color="#A0BCA8" max={Math.max(funnel.questions, funnel.confirmations, 1)} />
-                <FunnelRow
-                  label="감정 확정"
-                  value={funnel.confirmations}
-                  color="#1E3328"
-                  max={Math.max(funnel.questions, funnel.confirmations, 1)}
-                  hint={funnel.questions > 0 ? `확정률 ${Math.round(funnel.confirmRate * 100)}%` : 'n/a'}
-                />
+                {(() => {
+                  const m = Math.max(funnel.inbound, funnel.classified, funnel.confirmed, 1);
+                  return (
+                    <>
+                      <FunnelRow
+                        label="질문 수신"
+                        value={funnel.inbound}
+                        color="#A0BCA8"
+                        max={m}
+                      />
+                      <FunnelRow
+                        label="AI 분류"
+                        value={funnel.classified}
+                        color="#7AA088"
+                        max={m}
+                        hint={funnel.inbound > 0 ? `분류율 ${Math.round(funnel.classifyRate * 100)}%` : '—'}
+                      />
+                      <FunnelRow
+                        label="사용자 확정"
+                        value={funnel.confirmed}
+                        color="#1E3328"
+                        max={m}
+                        hint={funnel.classified > 0 ? `확정률 ${Math.round(funnel.confirmRate * 100)}%` : '—'}
+                      />
+                    </>
+                  );
+                })()}
               </div>
             ) : (
               <p style={styles.empty}>데이터 없음</p>
@@ -457,7 +526,7 @@ export default function OpsAnalytics() {
                 <tbody>
                   {pages.slice(0, 25).map((p) => (
                     <tr key={p.path}>
-                      <Td><code>{p.path}</code></Td>
+                      <Td>{labelForPath(p.path)}</Td>
                       <Td align="right">{p.views.toLocaleString()}</Td>
                       <Td align="right">{p.uniq.toLocaleString()}</Td>
                       <Td align="right">{(p.avgDwellMs / 1000).toFixed(1)}초</Td>
@@ -559,6 +628,231 @@ export default function OpsAnalytics() {
                 ))
               )}
             </div>
+          </Panel>
+        </section>
+
+        {/* ─── 🔀 사용자 플로우 섹션 ─── */}
+        <section style={styles.sectionDivider}>
+          <h2 style={styles.sectionDividerTitle}>🔀 사용자 플로우</h2>
+          <p style={styles.sectionDividerCaption}>
+            세션 단위로 어디서 들어와 → 어디로 이동 → 어디서 떠나는지. events.page.view 시퀀스를 sessionId 별로 묶어 추출.
+          </p>
+        </section>
+
+        <section style={styles.grid}>
+          <Panel
+            title="진입 페이지 Top"
+            caption="세션의 첫 화면"
+            help="사용자가 처음 도착한 페이지. /login 이 많으면 로그인 직진, / 가 많으면 직접 홈 진입."
+            span={3}
+          >
+            {flowEntry.length === 0 ? (
+              <p style={styles.empty}>—</p>
+            ) : (
+              <ul style={styles.typeBarList}>
+                {flowEntry.map((p) => {
+                  const max = flowEntry[0]?.sessions || 1;
+                  const pct = Math.round((p.sessions / max) * 100);
+                  return (
+                    <li key={p.path} style={styles.typeBarRow}>
+                      <span style={styles.typeBarName} title={p.path}>{labelForPath(p.path)}</span>
+                      <span style={styles.typeBarTrack}>
+                        <span style={{ ...styles.typeBarFill, width: `${Math.max(pct, 3)}%`, background: '#A0BCA8' }} />
+                      </span>
+                      <span style={styles.typeBarValue}>{p.sessions.toLocaleString()}</span>
+                      <span style={styles.typeBarPct}>세션</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel
+            title="이탈 페이지 Top"
+            caption="세션의 마지막 화면"
+            help="사용자가 마지막으로 보고 떠난 페이지. 특정 페이지에서 이탈이 몰리면 → 그 페이지 UX 점검 필요."
+            span={3}
+          >
+            {flowExit.length === 0 ? (
+              <p style={styles.empty}>—</p>
+            ) : (
+              <ul style={styles.typeBarList}>
+                {flowExit.map((p) => {
+                  const max = flowExit[0]?.sessions || 1;
+                  const pct = Math.round((p.sessions / max) * 100);
+                  return (
+                    <li key={p.path} style={styles.typeBarRow}>
+                      <span style={styles.typeBarName} title={p.path}>{labelForPath(p.path)}</span>
+                      <span style={styles.typeBarTrack}>
+                        <span style={{ ...styles.typeBarFill, width: `${Math.max(pct, 3)}%`, background: '#B23A3A' }} />
+                      </span>
+                      <span style={styles.typeBarValue}>{p.sessions.toLocaleString()}</span>
+                      <span style={styles.typeBarPct}>세션</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel
+            title="페이지 이동 (from → to)"
+            caption={`Top ${flowEdges.length}`}
+            help="가장 빈번한 페이지 이동 페어. 예: 캘린더 → 감정분석 12회 = 사용자가 캘린더 보고 분석으로 자주 넘어간다."
+            span={3}
+          >
+            {flowEdges.length === 0 ? (
+              <p style={styles.empty}>—</p>
+            ) : (
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <Th>from</Th>
+                    <Th>→</Th>
+                    <Th>to</Th>
+                    <Th align="right">횟수</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {flowEdges.slice(0, 25).map((e, i) => (
+                    <tr key={`${e.from}-${e.to}-${i}`}>
+                      <Td>{labelForPath(e.from)}</Td>
+                      <Td><span style={{ color: '#8B7355' }}>→</span></Td>
+                      <Td>{labelForPath(e.to)}</Td>
+                      <Td align="right">{e.count.toLocaleString()}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Panel>
+
+          <Panel
+            title="세션 경로 패턴 Top"
+            caption="동일한 시퀀스를 묶어서"
+            help="한 세션 내 페이지 방문 순서가 같은 그룹. 가장 많은 패턴 = 대표 사용자 여정."
+            span={3}
+          >
+            {flowSeq.length === 0 ? (
+              <p style={styles.empty}>2-12 step 짜리 세션이 아직 부족합니다.</p>
+            ) : (
+              <div style={styles.streamList}>
+                {flowSeq.slice(0, 12).map((s, i) => (
+                  <div key={i} style={styles.seqRow}>
+                    <span style={styles.seqMeta}>
+                      <strong>{s.sessions}</strong> 세션 · {s.steps}단계
+                    </span>
+                    <span style={styles.seqPath}>
+                      {s.sequence
+                        .split(' → ')
+                        .map((p) => PATH_LABELS[p] ?? p)
+                        .join(' → ')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </section>
+
+        {/* ─── 🎭 감정 기록 분석 섹션 ─── */}
+        <section style={styles.sectionDivider}>
+          <h2 style={styles.sectionDividerTitle}>🎭 감정 기록 분석</h2>
+          <p style={styles.sectionDividerCaption}>
+            아보하 도메인 핵심 데이터 — gems 테이블에 쌓인 모든 감정 기록을 emotions 표준 한글명·색상으로 풀어 분포·시간·요일·개인별로 분석.
+          </p>
+        </section>
+
+        <section style={styles.grid}>
+          <Panel
+            title="전체 감정 분포"
+            caption={`${emoDist.length}종 · 총 ${emoDist.reduce((a, x) => a + x.count, 0).toLocaleString()} 개`}
+            help="기간 내 모든 사용자가 기록한 감정 원석(gems) 분포. emotions.hex_color 로 색칠."
+            span={3}
+          >
+            {emoDist.length === 0 ? (
+              <p style={styles.empty}>아직 감정 기록이 없어요.</p>
+            ) : (
+              <ul style={styles.typeBarList}>
+                {emoDist.map((e) => (
+                  <li key={e.code} style={styles.typeBarRow}>
+                    <span style={styles.typeBarName} title={e.code}>
+                      <span style={{
+                        display: 'inline-block',
+                        width: 10, height: 10, borderRadius: 999,
+                        background: e.hexColor, marginRight: 6,
+                        verticalAlign: 'middle',
+                      }} />
+                      {e.nameKo}
+                    </span>
+                    <span style={styles.typeBarTrack}>
+                      <span style={{ ...styles.typeBarFill, width: `${Math.max(e.pct, 3)}%`, background: e.hexColor }} />
+                    </span>
+                    <span style={styles.typeBarValue}>{e.count.toLocaleString()}</span>
+                    <span style={styles.typeBarPct}>{e.pct}%</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel
+            title="시간대(시)별 감정 분포"
+            caption="KST 0-23시"
+            help="언제 어떤 감정이 많이 기록되는지. 새벽=우울/불안 vs 저녁=기쁨/뿌듯 같은 패턴 추출."
+            span={3}
+          >
+            <HourEmotionChart items={emoByHour} />
+          </Panel>
+
+          <Panel
+            title="요일별 감정 분포"
+            caption="일~토"
+            help="주말 vs 평일 감정 분포 차이. 월요일 우울증 / 금요일 기쁨 같은 일주일 리듬."
+            span={3}
+          >
+            <DowEmotionChart items={emoByDow} />
+          </Panel>
+
+          <Panel
+            title="사용자별 Top 감정"
+            caption={`상위 ${emoByUser.length}명`}
+            help="각 사용자가 가장 많이 기록한 감정 1위 + 총 기록 수. 누가 어떤 감정 풍경을 가졌는지."
+            span={3}
+          >
+            {emoByUser.length === 0 ? (
+              <p style={styles.empty}>—</p>
+            ) : (
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <Th>닉네임</Th>
+                    <Th>Top 감정</Th>
+                    <Th align="right">해당</Th>
+                    <Th align="right">전체</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {emoByUser.slice(0, 20).map((u) => (
+                    <tr key={u.userId}>
+                      <Td>{u.nickname}</Td>
+                      <Td>
+                        <span style={{
+                          display: 'inline-block',
+                          width: 10, height: 10, borderRadius: 999,
+                          background: u.topEmotionColor, marginRight: 6,
+                          verticalAlign: 'middle',
+                        }} />
+                        {u.topEmotionLabel}
+                      </Td>
+                      <Td align="right">{u.topEmotionCount}</Td>
+                      <Td align="right">{u.totalGems}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </Panel>
         </section>
 
@@ -876,6 +1170,148 @@ function Td({ children, align }: { children: React.ReactNode; align?: 'right' })
   return <td style={{ ...styles.td, textAlign: align ?? 'left' }}>{children}</td>;
 }
 
+// === 감정 × 시간 / 요일 stacked bar (Recharts 대신 자체 SVG) ===
+function HourEmotionChart({ items }: { items: EmotionBucket[] }) {
+  // 24시간 × 감정 stacked bar
+  const codes = Array.from(new Set(items.map((it) => it.code)));
+  const colors: Record<string, string> = {};
+  codes.forEach((c) => {
+    const found = items.find((it) => it.code === c);
+    if (found) colors[c] = found.hexColor;
+  });
+  const labels: Record<string, string> = {};
+  codes.forEach((c) => {
+    const found = items.find((it) => it.code === c);
+    if (found) labels[c] = found.nameKo;
+  });
+
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const byHour = hours.map((h) => {
+    const row: Record<string, number> = {};
+    let total = 0;
+    for (const c of codes) {
+      const v = items.find((it) => it.hour === h && it.code === c)?.count ?? 0;
+      row[c] = v;
+      total += v;
+    }
+    return { hour: h, row, total };
+  });
+  const maxTotal = Math.max(...byHour.map((b) => b.total), 1);
+
+  if (items.length === 0) return <p style={styles.empty}>아직 시간대 데이터 부족</p>;
+
+  return (
+    <div>
+      <div style={styles.hourChart}>
+        {byHour.map((b) => (
+          <div key={b.hour} style={styles.hourCol}>
+            <div style={styles.hourStackTrack}>
+              <div style={styles.hourStackInner}>
+                {codes.map((c) => {
+                  const v = b.row[c];
+                  if (!v) return null;
+                  const h = (v / maxTotal) * 100;
+                  return (
+                    <div
+                      key={c}
+                      title={`${b.hour}시 · ${labels[c]} · ${v}`}
+                      style={{
+                        height: `${h}%`,
+                        background: colors[c],
+                        width: '100%',
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+            <span style={styles.hourLabel}>{b.hour}</span>
+          </div>
+        ))}
+      </div>
+      <div style={styles.legend}>
+        {codes.map((c) => (
+          <span key={c} style={styles.legendItem}>
+            <span style={{ ...styles.legendDot, background: colors[c] }} />
+            {labels[c]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DowEmotionChart({ items }: { items: EmotionBucket[] }) {
+  const codes = Array.from(new Set(items.map((it) => it.code)));
+  const colors: Record<string, string> = {};
+  codes.forEach((c) => {
+    const found = items.find((it) => it.code === c);
+    if (found) colors[c] = found.hexColor;
+  });
+  const labels: Record<string, string> = {};
+  codes.forEach((c) => {
+    const found = items.find((it) => it.code === c);
+    if (found) labels[c] = found.nameKo;
+  });
+
+  // 일=0~토=6
+  const dows = [0, 1, 2, 3, 4, 5, 6];
+  const byDow = dows.map((d) => {
+    const row: Record<string, number> = {};
+    let total = 0;
+    for (const c of codes) {
+      const v = items.find((it) => it.dow === d && it.code === c)?.count ?? 0;
+      row[c] = v;
+      total += v;
+    }
+    return { dow: d, row, total };
+  });
+  const maxTotal = Math.max(...byDow.map((b) => b.total), 1);
+
+  if (items.length === 0) return <p style={styles.empty}>아직 요일 데이터 부족</p>;
+
+  return (
+    <div>
+      <div style={styles.dowChart}>
+        {byDow.map((b) => (
+          <div key={b.dow} style={styles.dowCol}>
+            <div style={styles.dowTotal}>{b.total || ''}</div>
+            <div style={styles.dowStackTrack}>
+              <div style={styles.hourStackInner}>
+                {codes.map((c) => {
+                  const v = b.row[c];
+                  if (!v) return null;
+                  const h = (v / maxTotal) * 100;
+                  return (
+                    <div
+                      key={c}
+                      title={`${DOW_KO[b.dow]} · ${labels[c]} · ${v}`}
+                      style={{
+                        height: `${h}%`,
+                        background: colors[c],
+                        width: '100%',
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+            <span style={styles.dowLabel}>{DOW_KO[b.dow]}</span>
+          </div>
+        ))}
+      </div>
+      <div style={styles.legend}>
+        {codes.map((c) => (
+          <span key={c} style={styles.legendItem}>
+            <span style={{ ...styles.legendDot, background: colors[c] }} />
+            {labels[c]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const styles: Record<string, CSSProperties> = {
   viewport: {
     minHeight: '100vh',
@@ -1114,5 +1550,117 @@ const styles: Record<string, CSSProperties> = {
     color: '#5A4A32',
     fontWeight: 600,
     maxWidth: 820,
+  },
+  // 세션 경로 패턴
+  seqRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    padding: '6px 0',
+    borderBottom: '1px dashed #E8DFC9',
+  },
+  seqMeta: {
+    fontSize: 11,
+    color: '#8B7355',
+    fontWeight: 700,
+  },
+  seqPath: {
+    fontSize: 12,
+    color: '#1E3328',
+    fontWeight: 700,
+    lineHeight: 1.4,
+    wordBreak: 'keep-all',
+  },
+  // 시간대별 stacked bar
+  hourChart: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(24, 1fr)',
+    gap: 2,
+    height: 180,
+    alignItems: 'flex-end',
+  },
+  hourCol: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 4,
+    height: '100%',
+    justifyContent: 'flex-end',
+  },
+  hourStackTrack: {
+    width: '100%',
+    flex: 1,
+    background: '#F2EAD6',
+    borderRadius: 3,
+    display: 'flex',
+    alignItems: 'flex-end',
+    overflow: 'hidden',
+  },
+  hourStackInner: {
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column-reverse',
+  },
+  hourLabel: {
+    fontSize: 9,
+    color: '#8B7355',
+    fontWeight: 700,
+  },
+  // 요일별 stacked bar
+  dowChart: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: 8,
+    height: 180,
+    alignItems: 'flex-end',
+  },
+  dowCol: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 4,
+    height: '100%',
+    justifyContent: 'flex-end',
+  },
+  dowStackTrack: {
+    width: '100%',
+    flex: 1,
+    background: '#F2EAD6',
+    borderRadius: 6,
+    display: 'flex',
+    alignItems: 'flex-end',
+    overflow: 'hidden',
+  },
+  dowTotal: {
+    fontSize: 11,
+    fontWeight: 800,
+    color: '#5A4A32',
+    minHeight: 14,
+  },
+  dowLabel: {
+    fontSize: 11,
+    color: '#8B7355',
+    fontWeight: 800,
+  },
+  // 범례
+  legend: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+    fontSize: 10,
+    color: '#5A4A32',
+    fontWeight: 700,
+  },
+  legendItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+  },
+  legendDot: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: 999,
   },
 };
