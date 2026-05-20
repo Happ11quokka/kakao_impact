@@ -129,6 +129,8 @@ pending_emotion_selection: dict = {}
 user_last_active: dict = {}  # {user_id: date(KST)}
 pending_simple_record: dict = {}  # {user_id: True} 단순모드 여부
 pending_reflection: dict = {}  # {user_id: {question_id, question_text, stage, linked_date}}
+today_record_count_cache: dict[str, tuple[date, int]] = {}
+today_gem_count_cache: dict[str, tuple[date, int]] = {}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
 reflection_schema_ready = False
@@ -143,6 +145,24 @@ def _safe_count(value) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
+
+
+def _get_today_cache(cache: dict[str, tuple[date, int]], user_id: str) -> int:
+    item = cache.get(user_id)
+    if not isinstance(item, tuple) or len(item) != 2:
+        cache.pop(user_id, None)
+        return 0
+    cached_day, cached_count = item
+    if cached_day != _today_kst():
+        cache.pop(user_id, None)
+        return 0
+    return _safe_count(cached_count)
+
+
+def _set_today_cache(cache: dict[str, tuple[date, int]], user_id: str, count: int) -> int:
+    safe_count = _safe_count(count)
+    cache[user_id] = (_today_kst(), safe_count)
+    return safe_count
 
 
 def _josa_eul(word: str) -> str:
@@ -218,7 +238,7 @@ def is_audio_url(text: str) -> bool:
 
 
 def _db_get_today_count(user_id: str) -> int:
-    """오늘(KST) 채집한 원석 수 (일상기록 제외). 에러 시 0 반환."""
+    """오늘(KST) 채집한 원석 수 (일상/단순기록 제외). 에러 시 0 반환."""
     if not RAILWAY_DATABASE_URL:
         return 0
     today = _today_kst()
@@ -229,7 +249,7 @@ def _db_get_today_count(user_id: str) -> int:
             """
             SELECT COUNT(*) FROM chatbot
             WHERE user_id = %s
-              AND gem != '일상기록'
+              AND gem NOT IN ('일상기록', '단순기록')
               AND (created_at AT TIME ZONE 'Asia/Seoul')::date = %s
             """,
             (user_id, today),
@@ -241,6 +261,49 @@ def _db_get_today_count(user_id: str) -> int:
     except Exception as e:
         print(f"[_db_get_today_count error] {e}")
         return 0
+
+
+def _db_get_today_record_count(user_id: str) -> int:
+    """오늘(KST) 저장된 전체 기록 수. 에러 시 0 반환."""
+    if not RAILWAY_DATABASE_URL:
+        return 0
+    today = _today_kst()
+    try:
+        conn = psycopg2.connect(RAILWAY_DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM chatbot
+            WHERE user_id = %s
+              AND (created_at AT TIME ZONE 'Asia/Seoul')::date = %s
+            """,
+            (user_id, today),
+        )
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return int(count)
+    except Exception as e:
+        print(f"[_db_get_today_record_count error] {e}")
+        return 0
+
+
+def _reserve_today_record_count(user_id: str, increment: int = 1) -> int:
+    """응답 시점의 '오늘 n번째 기록' 번호를 예약한다."""
+    base_count = max(
+        _db_get_today_record_count(user_id),
+        _get_today_cache(today_record_count_cache, user_id),
+    )
+    return _set_today_cache(today_record_count_cache, user_id, base_count + _safe_count(increment))
+
+
+def _reserve_today_gem_count(user_id: str, increment: int = 1) -> int:
+    """백그라운드 저장 전에도 오늘 누적 원석 번호가 이어지도록 예약한다."""
+    base_count = max(
+        _db_get_today_count(user_id),
+        _get_today_cache(today_gem_count_cache, user_id),
+    )
+    return _set_today_cache(today_gem_count_cache, user_id, base_count + _safe_count(increment))
 
 
 EMOTION_TO_GEM = {
@@ -1266,14 +1329,14 @@ def _extract_payload_value(body, key: str) -> str:
 
 
 def get_gem_stats(user_id: str) -> tuple[int, int]:
-    """(오늘 채집 수, 전체 채집 수) — 일상기록 제외"""
+    """(오늘 채집 수, 전체 채집 수) — 일상/단순기록 제외"""
     today_count = _db_get_today_count(user_id)
     total_count = 0
     if RAILWAY_DATABASE_URL:
         try:
             conn = psycopg2.connect(RAILWAY_DATABASE_URL)
             cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM chatbot WHERE user_id = %s AND gem != '일상기록'", (user_id,))
+            cur.execute("SELECT COUNT(*) FROM chatbot WHERE user_id = %s AND gem NOT IN ('일상기록', '단순기록')", (user_id,))
             total_count = cur.fetchone()[0]
             cur.close()
             conn.close()
@@ -1551,7 +1614,7 @@ def _prepend_greeting(response: dict, greeting: str) -> dict:
 
 
 def _prepend_today_record_count(response: dict, user_id: str) -> dict:
-    today_count = _db_get_today_count(user_id) + 1
+    today_count = _reserve_today_record_count(user_id)
     outputs = response.get("template", {}).get("outputs", [])
     response.setdefault("template", {})["outputs"] = [
         {"simpleText": {"text": f"오늘 {today_count}번째 기록이에요!"}}
@@ -2210,7 +2273,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if not data.get("gem"):
             return JSONResponse(kakao_response("감정을 먼저 선택해주세요!", show_emotion_buttons=True))
         gem_to_save = data["gem"]
-        today_count = _db_get_today_count(user_id) + 1
+        today_count = _reserve_today_gem_count(user_id)
         background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"), trace_id=trace_id)
         pending_gem.pop(user_id, None)
         alert_msg = check_negative_accumulation(user_id)
@@ -2227,7 +2290,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
         pending_emotion_selection.pop(user_id, None)
-        today_count = _db_get_today_count(user_id) + len(gems_to_save)
+        today_count = _reserve_today_gem_count(user_id, len(gems_to_save))
         alert_msg = check_negative_accumulation(user_id)
         response = kakao_multi_save_complete(gems_to_save, today_count, user_id, alert_msg or "")
         for gem in gems_to_save:
@@ -2261,7 +2324,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
         pending_emotion_selection.pop(user_id, None)
-        today_count = _db_get_today_count(user_id) + len(gems_to_save)
+        today_count = _reserve_today_gem_count(user_id, len(gems_to_save))
         alert_msg = check_negative_accumulation(user_id)
         response = kakao_multi_save_complete(gems_to_save, today_count, user_id, alert_msg or "")
         for gem in gems_to_save:
@@ -2328,7 +2391,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         existing = _safe_pending_gem(user_id)
         if existing:
             if existing.get("daily") and existing.get("daily_emotion_select"):
-                today_count = _db_get_today_count(user_id) + 1
+                today_count = _reserve_today_gem_count(user_id)
                 background_tasks.add_task(
                     save_gem,
                     user_id,
