@@ -1410,13 +1410,11 @@ def _maybe_attach_reflection_invite(response: dict, user_id: str, gem: str, reco
     }
     response.setdefault("template", {}).setdefault("outputs", []).append(
         {"simpleText": {"text": (
-            "방금 느낀 감정을 조금만 더 자세히 알려주세요.\n"
+            "방금 느낀 감정을 조금만 더 자세히 알려주세요 💭\n"
             "언제 어떤 기분이 들었나요?\n\n"
             "당장 적어주지 않아도 돼요.\n"
-            "준비가 되었다면 편하게 지금 감정을 적어주세요.\n\n"
-            "“오늘은 기대했던 것들이 다 이뤄지지 않아서 속상했어.”와 같이 짧은 문장도,\n"
-            "“잊고 지냈는데 불어오는 바람에 그 사람이 문득 생각나더라. 그래서 그냥 조금 생각이 많아졌어. 함께했던 소중한 날들이 오늘따라 더 사무치게 다가오네.” 처럼 긴 글도 다 괜찮아요.\n\n"
-            "이 글은 아무도 보지 않으니, 그냥 툭 여기에 기록해보아요."
+            "준비가 되었다면 지금 감정을 편하게 한 문장 적어주세요.\n\n"
+            "이 글은 아무도 보지 않으니, 그냥 툭 여기에 기록해보아요 👻"
         )}}
     )
     response["template"]["quickReplies"] = REFLECTION_INVITE_QUICK_REPLIES
