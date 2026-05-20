@@ -1336,7 +1336,10 @@ def _safe_pending_photo(user_id: str) -> tuple[bool, list[str], datetime | None]
 def kakao_save_complete(gem: str, today_count: int, user_id: str = "", alert_msg: str = "") -> dict:
     display = gem
     link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
-    description = "아래 웹 사이트에서 수집한 조각 기록들을 더 자세히 살펴 볼 수 있어요."
+    description = (
+        f"오늘 {today_count}번째 원석이에요!\n"
+        "아래 웹 사이트에서 수집한 조각 기록들을 더 자세히 살펴 볼 수 있어요."
+    )
     if alert_msg:
         description += f"\n\n{alert_msg.lstrip()}"
     return {
@@ -1346,6 +1349,29 @@ def kakao_save_complete(gem: str, today_count: int, user_id: str = "", alert_msg
                 "title": f"{display}{_josa_eul(display)} 수집했어요!",
                 "description": description,
                 "thumbnail": {"imageUrl": _gem_image_url(gem)},
+                "buttons": [{"action": "webLink", "label": "조각 기록들 살펴보기", "webLinkUrl": link_url}],
+            }}],
+            "quickReplies": BASE_QUICK_REPLIES,
+        },
+    }
+
+
+def kakao_multi_save_complete(gems: list[str], today_count: int, user_id: str = "", alert_msg: str = "") -> dict:
+    saved_names = ", ".join(gems)
+    link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
+    description = (
+        f"오늘 {today_count}번째 원석이에요!\n"
+        "아래 웹 사이트에서 수집한 조각 기록들을 더 자세히 살펴 볼 수 있어요."
+    )
+    if alert_msg:
+        description += f"\n\n{alert_msg.lstrip()}"
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [{"basicCard": {
+                "title": f"{saved_names}{_josa_eul(saved_names)} 수집했어요!",
+                "description": description,
+                "thumbnail": {"imageUrl": ALL_GEMS_IMAGE},
                 "buttons": [{"action": "webLink", "label": "조각 기록들 살펴보기", "webLinkUrl": link_url}],
             }}],
             "quickReplies": BASE_QUICK_REPLIES,
@@ -2138,13 +2164,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
         pending_emotion_selection.pop(user_id, None)
-        saved_names = ", ".join(gems_to_save)
         today_count = _db_get_today_count(user_id) + len(gems_to_save)
-        msg = f"✨ {saved_names}{_josa_eul(saved_names)} 채집했어요!\n오늘 {today_count}번째 원석이에요! 🪨"
         alert_msg = check_negative_accumulation(user_id)
-        if alert_msg:
-            msg += alert_msg
-        response = kakao_response(msg)
+        response = kakao_multi_save_complete(gems_to_save, today_count, user_id, alert_msg or "")
         for gem in gems_to_save:
             response = _maybe_attach_reflection_invite(response, user_id, gem, sel["text"])
             if user_id in pending_reflection:
@@ -2176,12 +2198,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
         pending_emotion_selection.pop(user_id, None)
-        saved_names = ", ".join(gems_to_save)
-        msg = f"{saved_names}{_josa_eul(saved_names)} 수집했어요!\n아래 웹 사이트에서 수집한 조각 기록들을 더 자세히 살펴 볼 수 있어요."
+        today_count = _db_get_today_count(user_id) + len(gems_to_save)
         alert_msg = check_negative_accumulation(user_id)
-        if alert_msg:
-            msg += alert_msg
-        response = kakao_response(msg)
+        response = kakao_multi_save_complete(gems_to_save, today_count, user_id, alert_msg or "")
         for gem in gems_to_save:
             response = _maybe_attach_reflection_invite(response, user_id, gem, sel["text"])
             if user_id in pending_reflection:
