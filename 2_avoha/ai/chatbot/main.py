@@ -1759,8 +1759,6 @@ def _check_and_update_visit(user_id: str) -> str | None:
 
     if last is None:
         return "유로그에 처음 오셨군요! 반가워요 😊"
-    if last < today:
-        return "오늘도 돌아오셨군요! 🌟"
     return None
 
 
