@@ -22,7 +22,46 @@ export function clearOpsBasicAuth(): void {
   }
 }
 
+// /ops/analytics 진입 시점부터(로그인 폼 단계 포함) body 강제 overflow 풀기.
+// OpsAnalytics 가 mount 되기 전 단계에서도 페이지 스크롤 가능.
+function useOpsBodyUnlock(): void {
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const root = document.getElementById('root');
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      htmlHeight: html.style.height,
+      bodyOverflow: body.style.overflow,
+      bodyHeight: body.style.height,
+      rootOverflow: root?.style.overflow,
+      rootHeight: root?.style.height,
+    };
+    body.classList.add('ops-analytics-fullscreen');
+    html.style.setProperty('overflow', 'auto', 'important');
+    html.style.setProperty('height', 'auto', 'important');
+    body.style.setProperty('overflow', 'auto', 'important');
+    body.style.setProperty('height', 'auto', 'important');
+    if (root) {
+      root.style.setProperty('overflow', 'visible', 'important');
+      root.style.setProperty('height', 'auto', 'important');
+    }
+    return () => {
+      body.classList.remove('ops-analytics-fullscreen');
+      html.style.overflow = prev.htmlOverflow;
+      html.style.height = prev.htmlHeight;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.height = prev.bodyHeight;
+      if (root) {
+        root.style.overflow = prev.rootOverflow ?? '';
+        root.style.height = prev.rootHeight ?? '';
+      }
+    };
+  }, []);
+}
+
 export default function RequireOpsUser({ children }: { children: ReactNode }) {
+  useOpsBodyUnlock();
   const [state, setState] = useState<State>('checking');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -138,7 +177,8 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 13,
   },
   screen: {
-    flex: 1,
+    minHeight: '100dvh',
+    width: '100%',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
