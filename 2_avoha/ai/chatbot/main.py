@@ -344,6 +344,10 @@ GEM_IMAGE_URL = {
     "후회 조각":     _IMG_BASE + "regret.png",
 }
 
+
+def _gem_image_url(gem: str) -> str:
+    return GEM_IMAGE_URL.get(gem) or DEFAULT_CARD_IMAGE
+
 BASE_QUICK_REPLIES = [
     {"label": "단순 모드", "action": "message", "messageText": "단순모드"},
     {"label": "대화 모드", "action": "message", "messageText": "대화모드"},
@@ -1341,7 +1345,7 @@ def kakao_save_complete(gem: str, today_count: int, user_id: str = "", alert_msg
             "outputs": [{"basicCard": {
                 "title": f"{display}{_josa_eul(display)} 수집했어요!",
                 "description": description,
-                "thumbnail": {"imageUrl": GEM_IMAGE_URL.get(gem, DEFAULT_CARD_IMAGE)},
+                "thumbnail": {"imageUrl": _gem_image_url(gem)},
                 "buttons": [{"action": "webLink", "label": "조각 기록들 살펴보기", "webLinkUrl": link_url}],
             }}],
             "quickReplies": BASE_QUICK_REPLIES,
@@ -1760,7 +1764,7 @@ def kakao_today_records(user_id: str) -> dict:
             image_url = record["image_url"] or MASCOT_IMAGE
         else:
             title = f"{record['saved_time']} {gem}"
-            image_url = record["image_url"] or GEM_IMAGE_URL.get(gem, DEFAULT_CARD_IMAGE)
+            image_url = record["image_url"] or _gem_image_url(gem)
         description = _truncate_text(record["record_text"], 160)
         if not description:
             description = "사진으로 저장한 기록이에요." if record["has_photo"] else "내용 없이 저장된 기록이에요."
