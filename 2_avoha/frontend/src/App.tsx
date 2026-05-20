@@ -69,11 +69,9 @@ export default function App() {
               <Route
                 path="/ops/analytics"
                 element={
-                  <AuthGate>
-                    <RequireOpsUser>
-                      <OpsAnalytics />
-                    </RequireOpsUser>
-                  </AuthGate>
+                  <RequireOpsUser>
+                    <OpsAnalytics />
+                  </RequireOpsUser>
                 }
               />
             </Routes>

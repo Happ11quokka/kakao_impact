@@ -8,17 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-import uuid
 from typing import AsyncIterator, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.analytics import counters, pubsub as analytics_pubsub, queries
-from app.config import settings
-from app.deps import get_db, require_ops
-from app.services.tokens import decode_token
+from app.deps import get_db, require_admin_basic
 
 router = APIRouter(prefix="/ops/analytics")
 
@@ -27,7 +24,7 @@ Range = Literal["24h", "7d", "30d"]
 
 @router.get("/summary")
 async def get_summary(
-    _ops: dict = Depends(require_ops),
+    _admin: dict = Depends(require_admin_basic),
 ) -> dict[str, object]:
     return await counters.read_kpi_summary()
 
@@ -35,7 +32,7 @@ async def get_summary(
 @router.get("/pages")
 async def get_pages(
     rng: Range = Query(default="24h", alias="range"),
-    _ops: dict = Depends(require_ops),
+    _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     rows = await queries.page_breakdown(session, rng)
@@ -45,7 +42,7 @@ async def get_pages(
 @router.get("/funnels/chatbot")
 async def get_chatbot_funnel(
     rng: Range = Query(default="7d", alias="range"),
-    _ops: dict = Depends(require_ops),
+    _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     return {"range": rng, **(await queries.chatbot_funnel(session, rng))}
@@ -55,7 +52,7 @@ async def get_chatbot_funnel(
 async def get_recent_events(
     rng: Range = Query(default="24h", alias="range"),
     limit: int = Query(default=200, ge=1, le=500),
-    _ops: dict = Depends(require_ops),
+    _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     return {"range": rng, "events": await queries.recent_events(session, rng, limit)}
@@ -64,7 +61,7 @@ async def get_recent_events(
 @router.get("/event-types")
 async def get_event_type_distribution(
     rng: Range = Query(default="24h", alias="range"),
-    _ops: dict = Depends(require_ops),
+    _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     return {"range": rng, "types": await queries.event_type_distribution(session, rng)}
@@ -73,7 +70,7 @@ async def get_event_type_distribution(
 @router.get("/timeseries")
 async def get_timeseries(
     rng: Range = Query(default="24h", alias="range"),
-    _ops: dict = Depends(require_ops),
+    _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     return {"range": rng, "buckets": await queries.hourly_timeseries(session, rng)}
@@ -82,7 +79,7 @@ async def get_timeseries(
 @router.get("/users")
 async def get_users(
     rng: Range = Query(default="7d", alias="range"),
-    _ops: dict = Depends(require_ops),
+    _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     return {"range": rng, "users": await queries.users_ranking(session, rng)}
@@ -91,38 +88,19 @@ async def get_users(
 @router.get("/errors")
 async def get_errors(
     rng: Range = Query(default="24h", alias="range"),
-    _ops: dict = Depends(require_ops),
+    _admin: dict = Depends(require_admin_basic),
     session: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
     return {"range": rng, "errors": await queries.error_ranking(session, rng)}
 
 
-def _check_ops_token(token: str | None) -> bool:
-    # SSE 는 EventSource 가 커스텀 헤더를 못 보내서 ?token=... 으로 인증.
-    if not token:
-        return False
-    payload = decode_token(token)
-    if not payload:
-        return False
-    try:
-        kakao_id = int(payload.get("kakaoId") or 0)
-        uuid.UUID(str(payload.get("userId")))
-    except (TypeError, ValueError):
-        return False
-    return kakao_id in settings.ops_allowed_kakao_ids
-
-
 @router.get("/sse")
 async def analytics_sse(
     request: Request,
-    token: str | None = Query(default=None),
+    _admin: dict = Depends(require_admin_basic),
 ) -> EventSourceResponse:
-    if not _check_ops_token(token):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": {"message": "FORBIDDEN", "code": "NOT_OPS"}},
-        )
-
+    # require_admin_basic 가 Authorization 헤더와 ?u=&p= 쿼리 둘 다 허용.
+    # EventSource 는 헤더 못 보내므로 프론트가 쿼리로 전달.
     async def event_gen() -> AsyncIterator[dict[str, str]]:
         yield {"data": json.dumps({"type": "hello"})}
         agen = analytics_pubsub.subscribe()

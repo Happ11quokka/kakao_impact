@@ -29,6 +29,10 @@ class Settings(BaseSettings):
 
     KAKAO_WEBHOOK_SECRET: str | None = None
     OPS_ALLOWED_KAKAO_IDS: str = ""
+    # 분석 대시보드(/ops/analytics, /ops/check) 전용 Basic Auth 자격증명.
+    # production 에서는 반드시 Railway env 로 덮어쓸 것. default admin/admin 은 데모용.
+    OPS_BASIC_USERNAME: str = "admin"
+    OPS_BASIC_PASSWORD: str = "admin"
     DISCORD_OPS_WEBHOOK: str | None = None
     SENTRY_DSN: str | None = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1

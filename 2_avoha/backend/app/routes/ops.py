@@ -10,7 +10,7 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Event, Gem, KakaoMessage, User
-from app.deps import get_db, require_ops
+from app.deps import get_db, require_admin_basic, require_ops
 from app.services import sse_bus
 from app.services.tickets import today_kst
 
@@ -29,9 +29,9 @@ class RejectBody(BaseModel):
 
 
 @router.get("/ops/check")
-async def ops_check(ops: dict[str, Any] = Depends(require_ops)) -> dict[str, object]:
-    # 프론트 RequireOpsUser 가드용 — 권한이 없으면 require_ops 가 403 던짐.
-    return {"ok": True, "kakaoId": ops["kakaoId"]}
+async def ops_check(admin: dict[str, Any] = Depends(require_admin_basic)) -> dict[str, object]:
+    # 프론트 RequireOpsUser 가드용 — Basic Auth 통과 시 OK.
+    return {"ok": True, "username": admin["username"]}
 
 
 @router.get("/ops/queue")

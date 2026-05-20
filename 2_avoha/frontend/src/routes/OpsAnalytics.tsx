@@ -12,6 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import { openAnalyticsStream, type StreamEvent } from '../lib/analytics-stream';
+import { clearOpsBasicAuth, getOpsBasicAuth } from '../components/RequireOpsUser';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000';
 
@@ -47,11 +48,16 @@ type EventRow = {
 
 async function get<T>(path: string): Promise<T | null> {
   try {
-    const token = localStorage.getItem('avoha_token');
+    const basic = getOpsBasicAuth();
     const res = await fetch(`${API_URL}${path}`, {
-      credentials: 'include',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: basic ? { Authorization: `Basic ${basic}` } : {},
     });
+    if (res.status === 401) {
+      // 비밀번호가 만료/변경된 상태 → 입력 화면으로 돌려보내기.
+      clearOpsBasicAuth();
+      window.location.reload();
+      return null;
+    }
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hmac
 import uuid
 from typing import AsyncIterator
 
@@ -91,6 +93,49 @@ async def require_ops(request: Request) -> dict[str, object]:
     return {"userId": user_id, "kakaoId": kakao_id}
 
 
+def _check_basic_credentials(username: str, password: str) -> bool:
+    """timing-safe 비교 — 사용자명/비밀번호 둘 다."""
+    u_ok = hmac.compare_digest(username.encode("utf-8"), settings.OPS_BASIC_USERNAME.encode("utf-8"))
+    p_ok = hmac.compare_digest(password.encode("utf-8"), settings.OPS_BASIC_PASSWORD.encode("utf-8"))
+    return u_ok and p_ok
+
+
+def _extract_basic_from_header(request: Request) -> tuple[str, str] | None:
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not auth or not auth.lower().startswith("basic "):
+        return None
+    try:
+        raw = base64.b64decode(auth.split(" ", 1)[1].strip()).decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return None
+    if ":" not in raw:
+        return None
+    username, password = raw.split(":", 1)
+    return username, password
+
+
+async def require_admin_basic(request: Request) -> dict[str, str]:
+    """분석 대시보드 전용 Basic Auth 게이트 — 카카오 로그인 우회.
+
+    Authorization: Basic <base64(user:pass)> 또는 ?u=&p= query 둘 다 허용.
+    EventSource 가 헤더를 못 보내므로 SSE 용 query 폴백 제공.
+    """
+    creds = _extract_basic_from_header(request)
+    if creds is None:
+        q_user = request.query_params.get("u")
+        q_pass = request.query_params.get("p")
+        if q_user and q_pass:
+            creds = (q_user, q_pass)
+    if creds is None or not _check_basic_credentials(*creds):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": {"message": "FORBIDDEN", "code": "BASIC_AUTH_REQUIRED"}},
+            headers={"WWW-Authenticate": 'Basic realm="ops-analytics"'},
+        )
+    return {"username": creds[0]}
+
+
 DbSession = Depends(get_db)
 CurrentUserId = Depends(require_user)
 CurrentOps = Depends(require_ops)
+CurrentAdminBasic = Depends(require_admin_basic)
