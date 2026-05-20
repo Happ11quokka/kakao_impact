@@ -211,10 +211,11 @@ def _merge_today_analysis_records(user_id: str, rows: list[tuple[str, str | None
         gem = str(item.get("gem") or "")
         record_text = str(item.get("record_text") or "")
         record = (str(gem or ""), str(record_text or ""))
-        fresh_cache.append(item)
         cache_counts[record] += 1
-        if cache_counts[record] > db_counts[record]:
-            merged.append(record)
+        if cache_counts[record] <= db_counts[record]:
+            continue
+        fresh_cache.append(item)
+        merged.append(record)
     if fresh_cache:
         today_pending_record_cache[user_id] = fresh_cache
     else:
@@ -245,11 +246,11 @@ def _merge_today_display_records(user_id: str, records: list[dict]) -> list[dict
             continue
         if saved_at < cutoff or saved_at.date() != now.date():
             continue
-        fresh_cache.append(item)
         key = (str(item.get("gem") or ""), str(item.get("record_text") or ""))
         cache_counts[key] += 1
         if cache_counts[key] <= db_counts[key]:
             continue
+        fresh_cache.append(item)
         pending_records.append({
             "gem": key[0],
             "record_text": key[1],
