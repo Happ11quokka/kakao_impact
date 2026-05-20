@@ -154,8 +154,24 @@ async function reportWebVitals(): Promise<void> {
   }
 }
 
+// 운영자 전용 경로 — 자기 자신의 사용을 통계에 넣으면 데이터 오염. 트래킹 제외.
+const TRACKING_EXCLUDE_PATH_PREFIXES = ['/ops/'];
+function isExcludedPath(): boolean {
+  if (typeof window === 'undefined') return false;
+  const p = window.location.pathname;
+  return TRACKING_EXCLUDE_PATH_PREFIXES.some((prefix) => p.startsWith(prefix));
+}
+
 export function track(eventType: string, props?: Record<string, unknown>): void {
   if (!initialized) return;
+  // /ops/* 페이지에서의 자동 트래킹 (page.view, click, perf.web_vitals 등) 제외.
+  // 운영자가 대시보드 자체를 사용한 행동이 KPI/플로우/감정 분석을 오염시킴.
+  if (isExcludedPath()) return;
+  // props.path 가 /ops/ 면 dwell 같이 이동 직후 발사 케이스도 차단.
+  const pp = props?.path;
+  if (typeof pp === 'string' && TRACKING_EXCLUDE_PATH_PREFIXES.some((px) => pp.startsWith(px))) {
+    return;
+  }
   if (queue.length >= MAX_QUEUE) queue.shift(); // 오래된 거 버림
   queue.push({
     eventType,
