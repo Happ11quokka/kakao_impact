@@ -39,8 +39,8 @@ describe('reclassify flow helpers', () => {
       interaction: 'confirm',
     });
     expect(buildRecordReclassifyAction(confirmed)).toEqual({
-      label: '감정 재분류하기',
-      ariaLabel: '감정 재분류 아코디언 열기',
+      label: '감정 자세히보기',
+      ariaLabel: '감정 자세히보기 아코디언 열기',
       interaction: 'reclassify',
     });
   });

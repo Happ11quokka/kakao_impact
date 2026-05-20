@@ -1,0 +1,29 @@
+{
+  "id": "20260521-004414-notion-qa-feedback",
+  "epic": "Notion QA feedback 반영: Avoha Calendar/Home/Analysis/Chatbot UX fixes",
+  "status": "done",
+  "phases": {
+    "P": "completed",
+    "A": "completed",
+    "B": "completed",
+    "C": "completed",
+    "D": "completed"
+  },
+  "source": {
+    "notion_page_id": "366e315d-c81c-8081-93a9-d67daeb1d119",
+    "notion_image_blocks_found": 17,
+    "notion_image_pixels_accessible": false,
+    "image_access_note": "API markdown returned file:// attachment placeholders; browser page required Notion login. Local UI was visually checked instead."
+  },
+  "scope": [
+    "frontend UI/data fixes",
+    "chatbot quick-reply/backend fixes"
+  ],
+  "checks": {
+    "home_targeted_tests": "pass: 7/7",
+    "frontend_tests": "pass: 35/35",
+    "frontend_build": "pass",
+    "chatbot_py_compile": "pass",
+    "browser_smoke": "pass with minor spacing note"
+  }
+}

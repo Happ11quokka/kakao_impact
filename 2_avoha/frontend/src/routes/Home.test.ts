@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildActiveRecordGemBadges,
+  buildHomeLakeCircleStyle,
+  buildHomeJoystickStyle,
   buildHomeStoneGemLayout,
   buildTodayCategoryGemSlots,
   needsLakeReview,
@@ -161,6 +163,12 @@ describe('Home stone + active record helpers', () => {
         expect(centerDistance).toBeGreaterThanOrEqual(Math.max(item.size, next.size));
       });
     });
+  });
+
+  it('clips the home lake circle and keeps the joystick fully inside it', () => {
+    expect(buildHomeLakeCircleStyle().overflow).toBe('hidden');
+    expect(buildHomeJoystickStyle().right).toBe(40);
+    expect(buildHomeJoystickStyle().bottom).toBe(40);
   });
 
   it('builds all confirmed emotion badges for the active recap sheet', () => {

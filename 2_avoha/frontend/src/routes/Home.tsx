@@ -1,5 +1,5 @@
 // === Home 화면 — 오늘의 감정 호수 ===
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useInventoryStore } from '../stores/inventory-store';
 import { useRecordsStore } from '../stores/records-store';
@@ -51,6 +51,42 @@ const CATEGORY_ACCENT: Record<CategoryCode, string> = {
   anxiety: '#B8C7D8',
   complex: '#3D3A34',
 };
+
+export function buildHomeLakeCircleStyle(): CSSProperties {
+  return {
+    position: 'relative',
+    width: 316,
+    height: 316,
+    borderRadius: '50%',
+    background:
+      'radial-gradient(circle at 48% 42%, rgba(255,255,255,0.66) 0%, rgba(239,236,218,0.94) 49%, rgba(220,230,215,0.76) 78%, rgba(205,222,211,0.52) 100%)',
+    boxShadow:
+      'inset 0 0 0 1px rgba(61, 107, 80, 0.06), inset 0 -22px 60px rgba(126, 104, 66, 0.08)',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
+}
+
+export function buildHomeJoystickStyle(active = false): CSSProperties {
+  return {
+    position: 'absolute',
+    right: 40,
+    bottom: 40,
+    width: 64,
+    height: 64,
+    borderRadius: '50%',
+    background:
+      'radial-gradient(circle at 50% 28%, #F7EFDA 0%, #DCC9A0 58%, #B89A6A 100%)',
+    border: '1px solid rgba(86, 71, 48, 0.22)',
+    boxShadow:
+      'inset 0 -3px 6px rgba(86,71,48,0.28), inset 0 2px 4px rgba(255,255,255,0.62), 0 10px 22px rgba(86,71,48,0.22)',
+    zIndex: 8,
+    touchAction: 'none',
+    cursor: active ? 'grabbing' : 'grab',
+  };
+}
 
 type FieldPosition = { x: number; y: number };
 type ReflectionType = 'meditation' | 'none';
@@ -657,20 +693,7 @@ export default function Home() {
           </div>
 
           <div
-            style={{
-              position: 'relative',
-              width: 316,
-              height: 316,
-              borderRadius: '50%',
-              background:
-                'radial-gradient(circle at 48% 42%, rgba(255,255,255,0.66) 0%, rgba(239,236,218,0.94) 49%, rgba(220,230,215,0.76) 78%, rgba(205,222,211,0.52) 100%)',
-              boxShadow:
-                'inset 0 0 0 1px rgba(61, 107, 80, 0.06), inset 0 -22px 60px rgba(126, 104, 66, 0.08)',
-              overflow: 'visible',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
+            style={buildHomeLakeCircleStyle()}
           >
             {lakeStones.map((stone) => {
               const primaryCode = stone.emotionCodes[0];
@@ -851,22 +874,7 @@ export default function Home() {
               }}
               onPointerUp={stopJoystick}
               onPointerCancel={stopJoystick}
-              style={{
-                position: 'absolute',
-                right: 12,
-                bottom: -34,
-                width: 64,
-                height: 64,
-                borderRadius: '50%',
-                background:
-                  'radial-gradient(circle at 50% 28%, #F7EFDA 0%, #DCC9A0 58%, #B89A6A 100%)',
-                border: '1px solid rgba(86, 71, 48, 0.22)',
-                boxShadow:
-                  'inset 0 -3px 6px rgba(86,71,48,0.28), inset 0 2px 4px rgba(255,255,255,0.62), 0 10px 22px rgba(86,71,48,0.22)',
-                zIndex: 8,
-                touchAction: 'none',
-                cursor: joystick.active ? 'grabbing' : 'grab',
-              }}
+              style={buildHomeJoystickStyle(joystick.active)}
             >
               <div
                 aria-hidden="true"
