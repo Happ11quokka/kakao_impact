@@ -201,6 +201,22 @@ def is_video_url(text: str) -> bool:
     return False
 
 
+def is_audio_url(text: str) -> bool:
+    if not text or " " in text or "\n" in text:
+        return False
+    if not text.startswith("http"):
+        return False
+    lowered = text.lower()
+    audio_exts = (".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".opus", ".amr", ".flac")
+    if any(ext in lowered for ext in audio_exts):
+        return True
+    if "talk.kakaocdn.net" in lowered and "/audio" in lowered:
+        return True
+    if "kakaocdn.net" in lowered and "audioplay" in lowered:
+        return True
+    return False
+
+
 def _db_get_today_count(user_id: str) -> int:
     """오늘(KST) 채집한 원석 수 (일상기록 제외). 에러 시 0 반환."""
     if not RAILWAY_DATABASE_URL:
@@ -231,10 +247,13 @@ EMOTION_TO_GEM = {
     "우울함": "우울함 조각", "외로움": "외로움 조각", "상실감": "상실감 조각",
     "서러움": "서러움 조각", "실망감": "실망감 조각",
     "걱정": "걱정 조각", "긴장감": "긴장감 조각", "위축감": "위축감 조각",
+    "초조": "초조 조각", "공포": "공포 조각",
     "짜증": "짜증 조각", "억울함": "억울함 조각", "화남": "화남 조각", "적대감": "적대감 조각",
+    "경멸": "경멸 조각",
     "즐거움": "즐거움 조각", "감사함": "감사함 조각", "설렘": "설렘 조각",
     "뿌듯함": "뿌듯함 조각", "편안함": "편안함 조각",
     "무기력함": "무기력함 조각", "공허함": "공허함 조각", "후회": "후회 조각",
+    "부끄러움": "부끄러움 조각", "혼란스러움": "혼란스러움 조각",
 }
 GEM_TO_EMOTION = {v: k for k, v in EMOTION_TO_GEM.items()}
 
@@ -269,10 +288,10 @@ CHATBOT_GEM_TO_EMOTION_CODE: dict[str, str] = {
 
 EMOTION_CATEGORIES = {
     "슬픔 계열": ["우울함", "외로움", "상실감", "서러움", "실망감"],
-    "불안/두려움 계열": ["걱정", "긴장감", "위축감"],
-    "분노 계열": ["짜증", "억울함", "화남", "적대감"],
+    "불안/두려움 계열": ["걱정", "긴장감", "위축감", "초조", "공포"],
+    "분노 계열": ["짜증", "억울함", "화남", "적대감", "경멸"],
     "기쁨/긍정 계열": ["즐거움", "감사함", "설렘", "뿌듯함", "편안함"],
-    "복잡/모호 계열": ["무기력함", "공허함", "후회"],
+    "복잡/모호 계열": ["무기력함", "공허함", "후회", "부끄러움", "혼란스러움"],
 }
 
 EMOTION_TO_REFLECTION_CATEGORY = {
@@ -315,6 +334,12 @@ VIDEO_NOT_SUPPORTED_MESSAGE = (
     "대신 한 줄 글이나 사진으로 적어주시면\n"
     "오늘의 감정 원석을 같이 찾아드릴게요. ✨"
 )
+AUDIO_NOT_SUPPORTED_MESSAGE = (
+    "음성으로 마음을 담아주셨네요. \n\n"
+    "아직은 음성을 함께 들여다보지는 못해요. \n"
+    "대신 한 줄 글이나 사진으로 적어주시면\n"
+    "오늘의 감정 원석을 같이 찾아드릴게요. ✨"
+)
 
 WEB_URL = "https://frontend-production-09f81.up.railway.app/login"
 _IMG_BASE = f"{ASSET_BASE_URL}/gems/"
@@ -330,10 +355,13 @@ GEM_IMAGE_URL = {
     "걱정 조각":     _IMG_BASE + "worry.png",
     "긴장감 조각":   _IMG_BASE + "tension.png",
     "위축감 조각":   _IMG_BASE + "timidity.png",
+    "초조 조각":     _IMG_BASE + "nervousness.png",
+    "공포 조각":     _IMG_BASE + "fear.png",
     "짜증 조각":     _IMG_BASE + "irritation.png",
     "억울함 조각":   _IMG_BASE + "resentment.png",
     "화남 조각":     _IMG_BASE + "anger.png",
     "적대감 조각":   _IMG_BASE + "hostility.png",
+    "경멸 조각":     _IMG_BASE + "contempt.png",
     "즐거움 조각":   _IMG_BASE + "joy.png",
     "감사함 조각":   _IMG_BASE + "gratitude.png",
     "설렘 조각":     _IMG_BASE + "flutter.png",
@@ -342,11 +370,13 @@ GEM_IMAGE_URL = {
     "무기력함 조각": _IMG_BASE + "lethargy.png",
     "공허함 조각":   _IMG_BASE + "emptiness.png",
     "후회 조각":     _IMG_BASE + "regret.png",
+    "부끄러움 조각": _IMG_BASE + "shame.png",
+    "혼란스러움 조각": _IMG_BASE + "confusion.png",
 }
 
 
-def _gem_image_url(gem: str) -> str:
-    return GEM_IMAGE_URL.get(gem) or DEFAULT_CARD_IMAGE
+def _thumbnail(url: str | None) -> dict:
+    return {"thumbnail": {"imageUrl": url}} if url else {}
 
 BASE_QUICK_REPLIES = [
     {"label": "단순 모드", "action": "message", "messageText": "단순모드"},
@@ -556,6 +586,16 @@ def classify_emotion(
         "   '행복하다', '좋다', '기분 좋다', '신난다'는 즐거움으로 분류해.\n"
         "   '힘들다', '힘들어'는 단순 사실이 아니라 감정/상태 표현으로 보고 문맥에 따라 무기력함, 걱정, 후회 등으로 분류해.\n"
         "   예: '지금 너무 많이 먹어서 행복하고 힘들어' → 즐거움, 무기력함\n"
+        "   '눈물이 날 것 같다', '울컥하다'는 우울함보다 서러움 후보로 우선 검토해.\n"
+        "   '뒤처진 것 같다', '나만 못한 것 같다', '내가 작아진다'는 위축감 후보로 우선 검토해.\n"
+        "   '마음이 무겁다', '가라앉는다'는 걱정보다 우울함/공허함 후보로 우선 검토해.\n"
+        "   '안 괜찮다', '괜찮다고 했지만 사실 아니다'는 서러움/우울함 후보로 검토해.\n"
+        "   '억울함'은 부당함, 왜 나만, 내 잘못이 아닌데 같은 단서가 있을 때만 선택해.\n"
+        "   '하찮게 느껴진다', '깔보게 된다', '정떨어진다', '한심하다'는 경멸 후보로 검토해.\n"
+        "   '조마조마하다', '안절부절못하다', '가만히 못 있겠다'는 초조 후보로 검토해.\n"
+        "   '무섭다', '두렵다', '공포스럽다', '겁난다'는 공포 후보로 검토해.\n"
+        "   '창피하다', '민망하다', '쪽팔리다'는 부끄러움 후보로 검토해.\n"
+        "   '뭐가 뭔지 모르겠다', '머리가 복잡하다', '갈피를 못 잡겠다'는 혼란스러움 후보로 검토해.\n"
         "4. 사용자 문장에는 오타, 받침 실수, 음절 치환이 있을 수 있어. 명백한 오타는 문맥상 자연스러운 한국어로 보정해서 해석해.\n"
         "   예: '힘덜어'는 '힘들어'로 해석해.\n"
         f"감정 목록: {emotion_list}\n"
@@ -659,6 +699,15 @@ def supervisor_check_classification(
         "- '행복하다', '좋다', '기분 좋다', '신난다'는 즐거움 감정 단서로 본다.\n"
         "- '힘들다', '힘들어'는 단순 사실이 아니라 감정/상태 표현으로 보고 문맥에 따라 무기력함, 걱정, 후회 등으로 검토한다.\n"
         "- 예: '지금 너무 많이 먹어서 행복하고 힘들어'는 감정 맥락이 있으므로 즐거움과 무기력함 후보를 검토한다.\n"
+        "- '눈물이 날 것 같다', '울컥하다'는 우울함보다 서러움 후보로 우선 검토한다.\n"
+        "- '뒤처진 것 같다', '나만 못한 것 같다', '내가 작아진다'는 위축감 후보로 우선 검토한다.\n"
+        "- '마음이 무겁다', '가라앉는다'는 걱정보다 우울함/공허함 후보로 우선 검토한다.\n"
+        "- '억울함'은 부당함, 왜 나만, 내 잘못이 아닌데 같은 단서가 있을 때만 선택한다.\n"
+        "- 경멸은 하찮게 느낌, 깔봄, 정떨어짐, 한심함 단서가 있을 때 검토한다.\n"
+        "- 초조는 조마조마함, 안절부절못함, 가만히 못 있겠음 단서가 있을 때 검토한다.\n"
+        "- 공포는 무서움, 두려움, 공포스러움, 겁남 단서가 있을 때 검토한다.\n"
+        "- 부끄러움은 창피함, 민망함, 쪽팔림 단서가 있을 때 검토한다.\n"
+        "- 혼란스러움은 뭐가 뭔지 모름, 머리가 복잡함, 갈피를 못 잡음 단서가 있을 때 검토한다.\n"
         "- 발화에 감정 맥락이 있는데 '일상기록' 또는 '기록아님'으로 빠졌는지 확인한다.\n"
         "- 단순 사실 나열인데 감정 원석으로 과잉 분류했는지 확인한다.\n"
         "- 허용 목록 밖의 값은 실패로 본다.\n"
@@ -1342,15 +1391,16 @@ def kakao_save_complete(gem: str, today_count: int, user_id: str = "", alert_msg
     )
     if alert_msg:
         description += f"\n\n{alert_msg.lstrip()}"
+    card = {
+        "title": f"{display}{_josa_eul(display)} 수집했어요!",
+        "description": description,
+        "buttons": [{"action": "webLink", "label": "조각 기록들 살펴보기", "webLinkUrl": link_url}],
+    }
+    card.update(_thumbnail(GEM_IMAGE_URL.get(gem)))
     return {
         "version": "2.0",
         "template": {
-            "outputs": [{"basicCard": {
-                "title": f"{display}{_josa_eul(display)} 수집했어요!",
-                "description": description,
-                "thumbnail": {"imageUrl": _gem_image_url(gem)},
-                "buttons": [{"action": "webLink", "label": "조각 기록들 살펴보기", "webLinkUrl": link_url}],
-            }}],
+            "outputs": [{"basicCard": card}],
             "quickReplies": BASE_QUICK_REPLIES,
         },
     }
@@ -1768,7 +1818,7 @@ def kakao_today_records(user_id: str) -> dict:
             f"지금까지 총 {emotion_count}개의 감정원석과 {daily_count}개의 일상을 저장했어요.\n\n"
             "웹에서 오늘까지 쌓아온 모든 기록과 분석을 만나보세요!"
         ),
-        "thumbnail": {"imageUrl": ALL_GEMS_IMAGE},
+        "thumbnail": {"imageUrl": MASCOT_IMAGE},
         "buttons": [{"action": "webLink", "label": "웹 방문하기", "webLinkUrl": link_url}],
     }]
 
@@ -1790,16 +1840,17 @@ def kakao_today_records(user_id: str) -> dict:
             image_url = record["image_url"] or MASCOT_IMAGE
         else:
             title = f"{record['saved_time']} {gem}"
-            image_url = record["image_url"] or _gem_image_url(gem)
+            image_url = record["image_url"] or GEM_IMAGE_URL.get(gem)
         description = _truncate_text(record["record_text"], 160)
         if not description:
             description = "사진으로 저장한 기록이에요." if record["has_photo"] else "내용 없이 저장된 기록이에요."
-        items.append({
+        item = {
             "title": title.strip(),
             "description": description,
-            "thumbnail": {"imageUrl": image_url},
             "buttons": [{"action": "webLink", "label": "웹 방문하기", "webLinkUrl": link_url}],
-        })
+        }
+        item.update(_thumbnail(image_url))
+        items.append(item)
 
     return {
         "version": "2.0",
@@ -2349,12 +2400,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                 "outputs": [
                     {"simpleText": {"text": (
                         "기록을 통해 채집할 수 있는 감정 원석들이에요.\n\n"
-                        "감정 원석은 총 20종,\n크게 다섯 가지 결을 가지고 있어요.\n\n"
+                        "감정 원석은 총 25종,\n크게 다섯 가지 결을 가지고 있어요.\n\n"
                         "💙 슬픔의 결\n우울함 조각 · 외로움 조각 · 상실감 조각 · 서러움 조각 · 실망감 조각\n위로받고 싶은 일상의 순간들이 담겨요.\n\n"
-                        "🤍 불안/두려움의 결\n걱정 조각 · 긴장감 조각 · 위축감 조각\n마음이 팽팽해지는 순간들이 담겨요.\n\n"
-                        "🧡 분노의 결\n짜증 조각 · 억울함 조각 · 화남 조각 · 적대감 조각\n뜨겁고 단단한 감정들이 담겨요.\n\n"
+                        "🤍 불안/두려움의 결\n걱정 조각 · 긴장감 조각 · 위축감 조각 · 초조 조각 · 공포 조각\n마음이 팽팽해지는 순간들이 담겨요.\n\n"
+                        "🧡 분노의 결\n짜증 조각 · 억울함 조각 · 화남 조각 · 적대감 조각 · 경멸 조각\n뜨겁고 단단한 감정들이 담겨요.\n\n"
                         "💛 기쁨/긍정의 결\n즐거움 조각 · 감사함 조각 · 설렘 조각 · 뿌듯함 조각 · 편안함 조각\n따뜻하고 빛나는 순간들이 담겨요.\n\n"
-                        "🩶 복잡/모호의 결\n무기력함 조각 · 공허함 조각 · 후회 조각\n잘 정의되지 않는 감정들이 담겨요.\n\n"
+                        "🩶 복잡/모호의 결\n무기력함 조각 · 공허함 조각 · 후회 조각 · 부끄러움 조각 · 혼란스러움 조각\n잘 정의되지 않는 감정들이 담겨요.\n\n"
                         "각 원석은 강화를 통해 보석으로 세공할 수 있어요."
                     )}},
                     {"basicCard": {
@@ -2437,6 +2488,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             )
         pending_reflection.pop(user_id, None)
         return JSONResponse(kakao_response("잘 담아뒀어요 ✎", custom_replies=BASE_QUICK_REPLIES))
+
+    # 음성 전송 (현재는 분석 미지원 → 안내만 응답)
+    if is_audio_url(utterance):
+        print(f"[audio detected] user={user_id}, utterance={utterance}")
+        return JSONResponse(kakao_response(
+            AUDIO_NOT_SUPPORTED_MESSAGE,
+            custom_replies=BASE_QUICK_REPLIES,
+        ))
 
     # 영상 전송 (현재는 분석 미지원 → 안내만 응답)
     if is_video_url(utterance):

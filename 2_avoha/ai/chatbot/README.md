@@ -101,10 +101,13 @@ SUPERVISOR_ENABLED=false
 | 불안/두려움 계열 | 걱정 | 걱정 조각 | worry.png |
 | 불안/두려움 계열 | 긴장감 | 긴장감 조각 | tension.png |
 | 불안/두려움 계열 | 위축감 | 위축감 조각 | timidity.png |
+| 불안/두려움 계열 | 초조 | 초조 조각 | nervousness.png |
+| 불안/두려움 계열 | 공포 | 공포 조각 | fear.png |
 | 분노 계열 | 짜증 | 짜증 조각 | irritation.png |
 | 분노 계열 | 억울함 | 억울함 조각 | resentment.png |
 | 분노 계열 | 화남 | 화남 조각 | anger.png |
 | 분노 계열 | 적대감 | 적대감 조각 | hostility.png |
+| 분노 계열 | 경멸 | 경멸 조각 | contempt.png |
 | 기쁨/긍정 계열 | 즐거움 | 즐거움 조각 | joy.png |
 | 기쁨/긍정 계열 | 감사함 | 감사함 조각 | gratitude.png |
 | 기쁨/긍정 계열 | 설렘 | 설렘 조각 | flutter.png |
@@ -113,8 +116,10 @@ SUPERVISOR_ENABLED=false
 | 복잡/모호 계열 | 무기력함 | 무기력함 조각 | lethargy.png |
 | 복잡/모호 계열 | 공허함 | 공허함 조각 | emptiness.png |
 | 복잡/모호 계열 | 후회 | 후회 조각 | regret.png |
+| 복잡/모호 계열 | 부끄러움 | 부끄러움 조각 | shame.png |
+| 복잡/모호 계열 | 혼란스러움 | 혼란스러움 조각 | confusion.png |
 
-`CHATBOT_GEM_TO_EMOTION_CODE`는 챗봇의 20개 원석을 웹 인벤토리의 emotion code로 매핑합니다.
+`CHATBOT_GEM_TO_EMOTION_CODE`는 챗봇의 원석을 웹 인벤토리의 emotion code로 매핑합니다.
 
 ## 환경 변수
 
