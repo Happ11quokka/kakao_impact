@@ -43,6 +43,42 @@ type EventRow = {
   props: Record<string, unknown> | null;
   occurredAt: string | null;
 };
+// ── Chatbot 상세 통계 (ai/chatbot/ 서비스 직접 연동) ──
+type ChatbotSummary = {
+  inbound: number;
+  outbound: number;
+  pairedTraces: number;
+  avgResponseMs: number;
+  p95ResponseMs: number;
+};
+type ChatbotHourly = { hour: string; inbound: number; outbound: number };
+type ChatbotLlmStat = {
+  callType: string;
+  model: string;
+  calls: number;
+  ok: number;
+  failed: number;
+  successRate: number;
+  avgMs: number;
+  p95Ms: number;
+};
+type ChatbotErrSrc = { source: string; count: number; lastSeen: string | null };
+type ChatbotErrRow = {
+  id: number;
+  source: string;
+  message: string | null;
+  userId: string | null;
+  traceId: string | null;
+  occurredAt: string | null;
+};
+type ChatbotGem = { gem: string; count: number };
+type ChatbotUser = {
+  providerUserKey: string;
+  nickname: string;
+  records: number;
+  withPhoto: number;
+  lastAt: string | null;
+};
 
 async function get<T>(path: string): Promise<T | null> {
   try {
@@ -72,6 +108,14 @@ export default function OpsAnalytics() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [errors, setErrors] = useState<ErrorRow[]>([]);
   const [recent, setRecent] = useState<EventRow[]>([]);
+  // chatbot
+  const [cbSummary, setCbSummary] = useState<ChatbotSummary | null>(null);
+  const [cbHourly, setCbHourly] = useState<ChatbotHourly[]>([]);
+  const [cbLlm, setCbLlm] = useState<ChatbotLlmStat[]>([]);
+  const [cbErrSrc, setCbErrSrc] = useState<ChatbotErrSrc[]>([]);
+  const [cbErrRecent, setCbErrRecent] = useState<ChatbotErrRow[]>([]);
+  const [cbGems, setCbGems] = useState<ChatbotGem[]>([]);
+  const [cbUsers, setCbUsers] = useState<ChatbotUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
@@ -79,7 +123,8 @@ export default function OpsAnalytics() {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const [s, p, f, t, b, u, e, r] = await Promise.all([
+    const [s, p, f, t, b, u, e, r,
+      cs, ch, cl, ce, cg, cu] = await Promise.all([
       get<Summary>('/ops/analytics/summary'),
       get<{ pages: Page[] }>(`/ops/analytics/pages?range=${range}`),
       get<Funnel>(`/ops/analytics/funnels/chatbot?range=${range}`),
@@ -88,6 +133,13 @@ export default function OpsAnalytics() {
       get<{ users: UserRow[] }>(`/ops/analytics/users?range=${range}`),
       get<{ errors: ErrorRow[] }>(`/ops/analytics/errors?range=${range}`),
       get<{ events: EventRow[] }>(`/ops/analytics/events?range=${range}&limit=80`),
+      // chatbot endpoints
+      get<ChatbotSummary>(`/ops/analytics/chatbot/summary?range=${range}`),
+      get<{ buckets: ChatbotHourly[] }>(`/ops/analytics/chatbot/hourly?range=${range}`),
+      get<{ stats: ChatbotLlmStat[] }>(`/ops/analytics/chatbot/llm?range=${range}`),
+      get<{ bySource: ChatbotErrSrc[]; recent: ChatbotErrRow[] }>(`/ops/analytics/chatbot/errors?range=${range}`),
+      get<{ gems: ChatbotGem[] }>(`/ops/analytics/chatbot/gems?range=${range}`),
+      get<{ users: ChatbotUser[] }>(`/ops/analytics/chatbot/users?range=${range}`),
     ]);
     if (s) setSummary(s);
     setPages(p?.pages ?? []);
@@ -97,6 +149,13 @@ export default function OpsAnalytics() {
     setUsers(u?.users ?? []);
     setErrors(e?.errors ?? []);
     setRecent(r?.events ?? []);
+    if (cs) setCbSummary(cs);
+    setCbHourly(ch?.buckets ?? []);
+    setCbLlm(cl?.stats ?? []);
+    setCbErrSrc(ce?.bySource ?? []);
+    setCbErrRecent(ce?.recent ?? []);
+    setCbGems(cg?.gems ?? []);
+    setCbUsers(cu?.users ?? []);
     setLoading(false);
     setLastRefreshed(new Date());
   }, [range]);
@@ -105,6 +164,40 @@ export default function OpsAnalytics() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // theme.css 가 html/body/#root 에 overflow:hidden + height:100dvh 를 강제하고 있어
+  // OpsAnalytics 가 viewport 안에 갇혀 스크롤 불가. 이 페이지만 임시 unlock.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const root = document.getElementById('root');
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      htmlHeight: html.style.height,
+      bodyOverflow: body.style.overflow,
+      bodyHeight: body.style.height,
+      rootOverflow: root?.style.overflow,
+      rootHeight: root?.style.height,
+    };
+    html.style.overflow = 'auto';
+    html.style.height = 'auto';
+    body.style.overflow = 'auto';
+    body.style.height = 'auto';
+    if (root) {
+      root.style.overflow = 'visible';
+      root.style.height = 'auto';
+    }
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      html.style.height = prev.htmlHeight;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.height = prev.bodyHeight;
+      if (root) {
+        root.style.overflow = prev.rootOverflow ?? '';
+        root.style.height = prev.rootHeight ?? '';
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -155,6 +248,21 @@ export default function OpsAnalytics() {
     () => buckets.map((b) => ({ x: formatBucketLabel(b.hour), count: b.count })),
     [buckets, formatBucketLabel],
   );
+
+  const cbBucketChartData = useMemo(
+    () => cbHourly.map((b) => ({
+      x: formatBucketLabel(b.hour),
+      inbound: b.inbound,
+      outbound: b.outbound,
+    })),
+    [cbHourly, formatBucketLabel],
+  );
+
+  const cbTotalLlmCalls = cbLlm.reduce((acc, s) => acc + s.calls, 0);
+  const cbAvgSuccessRate = cbTotalLlmCalls > 0
+    ? cbLlm.reduce((acc, s) => acc + s.ok, 0) / cbTotalLlmCalls
+    : 0;
+  const cbTotalGems = cbGems.reduce((acc, g) => acc + g.count, 0) || 1;
 
   const rangeLabel = range === '24h' ? '지난 24시간' : range === '7d' ? '지난 7일' : '지난 30일';
   const lastRefreshedLabel = lastRefreshed
@@ -451,6 +559,229 @@ export default function OpsAnalytics() {
                 ))
               )}
             </div>
+          </Panel>
+        </section>
+
+        {/* ─── 챗봇 상세 섹션 (ai/chatbot/ 서비스 직접 연동) ─── */}
+        <section style={styles.sectionDivider}>
+          <h2 style={styles.sectionDividerTitle}>💬 챗봇 상세 (Yulog)</h2>
+          <p style={styles.sectionDividerCaption}>
+            카카오 webhook → chatbot 서비스 → LLM 호출 → 카카오 응답 흐름. backend 와 같은 Postgres 의 chatbot_* 테이블 직접 SELECT.
+          </p>
+        </section>
+
+        <section style={styles.kpiRow}>
+          <KpiCard
+            label="질문 수신 (inbound)"
+            value={cbSummary?.inbound ?? 0}
+            hint="chatbot_messages WHERE direction='inbound' — 카카오에서 들어온 사용자 발화"
+          />
+          <KpiCard
+            label="응답 송신 (outbound)"
+            value={cbSummary?.outbound ?? 0}
+            hint="chatbot_messages WHERE direction='outbound' — 사용자에게 보낸 봇 응답"
+          />
+          <KpiCard
+            label="평균 응답시간"
+            value={cbSummary ? Math.round(cbSummary.avgResponseMs) : 0}
+            hint={`같은 trace 의 inbound→outbound 시차 ms. p95: ${cbSummary?.p95ResponseMs ?? 0}ms`}
+          />
+          <KpiCard
+            label="LLM 호출 (total)"
+            value={cbTotalLlmCalls}
+            hint={`성공률 ${Math.round(cbAvgSuccessRate * 100)}% — chatbot_llm_calls`}
+            accent={cbAvgSuccessRate < 0.9 ? '#B23A3A' : undefined}
+          />
+          <KpiCard
+            label="에러 (chatbot_errors)"
+            value={cbErrSrc.reduce((a, e) => a + e.count, 0)}
+            hint="source 별 잡힌 예외 합계. 0 이면 좋음"
+            accent={cbErrSrc.length > 0 ? '#B23A3A' : undefined}
+          />
+        </section>
+
+        <section style={styles.grid}>
+          {/* 챗봇 트래픽 추이 */}
+          <Panel
+            title="챗봇 트래픽 추이"
+            caption={range === '24h' ? '시간대별' : '일자별'}
+            help="inbound(질문) / outbound(응답) 시간대별. 두 라인이 비슷하게 따라가면 정상."
+            span={3}
+          >
+            <div style={{ height: 220 }}>
+              <ResponsiveContainer>
+                <LineChart data={cbBucketChartData} margin={{ top: 8, right: 12, bottom: 0, left: -10 }}>
+                  <CartesianGrid stroke="#E0D3BA" strokeDasharray="3 3" />
+                  <XAxis dataKey="x" stroke="#8B7355" fontSize={11} />
+                  <YAxis stroke="#8B7355" fontSize={11} allowDecimals={false} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="inbound" stroke="#A0BCA8" strokeWidth={2.5} dot={false} name="질문" />
+                  <Line type="monotone" dataKey="outbound" stroke="#1E3328" strokeWidth={2.5} dot={false} name="응답" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Panel>
+
+          {/* LLM 호출 통계 */}
+          <Panel
+            title="LLM 호출 통계"
+            caption={`${cbLlm.length}종 call_type`}
+            help="call_type 별 호출 수·성공률·평균/p95 latency. 응답이 느리면 prompt 길이/모델 변경 검토."
+            span={3}
+          >
+            {cbLlm.length === 0 ? (
+              <p style={styles.empty}>아직 LLM 호출 없음</p>
+            ) : (
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <Th>type</Th>
+                    <Th>model</Th>
+                    <Th align="right">호출</Th>
+                    <Th align="right">성공률</Th>
+                    <Th align="right">avg</Th>
+                    <Th align="right">p95</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cbLlm.map((s, i) => (
+                    <tr key={`${s.callType}-${s.model}-${i}`}>
+                      <Td>{s.callType}</Td>
+                      <Td><code style={{ fontSize: 10 }}>{s.model}</code></Td>
+                      <Td align="right">{s.calls.toLocaleString()}</Td>
+                      <Td align="right">
+                        <span style={{ color: s.successRate < 0.9 ? '#B23A3A' : '#3D6050', fontWeight: 800 }}>
+                          {Math.round(s.successRate * 100)}%
+                        </span>
+                      </Td>
+                      <Td align="right">{s.avgMs}ms</Td>
+                      <Td align="right">{s.p95Ms}ms</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Panel>
+
+          {/* 감정 원석 분포 */}
+          <Panel
+            title="감정 원석 분포"
+            caption={`${cbGems.length}종 · 총 ${(cbTotalGems - 1).toLocaleString()}건`}
+            help="chatbot 이 분류한 gem 컬럼 분포. 어떤 감정이 가장 많이 분류되는지 = 사용자 감정 풍경."
+            span={3}
+          >
+            {cbGems.length === 0 ? (
+              <p style={styles.empty}>아직 분류된 감정 없음</p>
+            ) : (
+              <ul style={styles.typeBarList}>
+                {cbGems.slice(0, 12).map((g) => {
+                  const pct = Math.round((g.count / cbTotalGems) * 100);
+                  return (
+                    <li key={g.gem} style={styles.typeBarRow}>
+                      <span style={styles.typeBarName} title={g.gem}>{g.gem}</span>
+                      <span style={styles.typeBarTrack}>
+                        <span
+                          style={{
+                            ...styles.typeBarFill,
+                            width: `${Math.max(pct, g.count ? 3 : 0)}%`,
+                            background: '#D4A574',
+                          }}
+                        />
+                      </span>
+                      <span style={styles.typeBarValue}>{g.count.toLocaleString()}</span>
+                      <span style={styles.typeBarPct}>{pct}%</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Panel>
+
+          {/* 챗봇 Top 사용자 */}
+          <Panel
+            title="챗봇 사용 Top"
+            caption="기록 수 기준"
+            help="가장 많이 챗봇에 기록한 사용자. (unmapped) 는 users 테이블에 provider_user_key 매핑 안 된 카카오 ID."
+            span={3}
+          >
+            {cbUsers.length === 0 ? (
+              <p style={styles.empty}>—</p>
+            ) : (
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <Th>닉네임</Th>
+                    <Th align="right">기록</Th>
+                    <Th align="right">사진</Th>
+                    <Th>마지막</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cbUsers.slice(0, 20).map((u) => (
+                    <tr key={u.providerUserKey}>
+                      <Td>{u.nickname}</Td>
+                      <Td align="right">{u.records.toLocaleString()}</Td>
+                      <Td align="right">{u.withPhoto.toLocaleString()}</Td>
+                      <Td>{formatTime(u.lastAt)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Panel>
+
+          {/* 챗봇 에러 source 별 */}
+          <Panel
+            title="챗봇 에러 source 별"
+            caption={`${cbErrSrc.length}종`}
+            help="chatbot_errors 테이블의 source 컬럼 (webhook.json / save_gem / classify_emotion 등). 1건이라도 있으면 봐야 함."
+            span={3}
+          >
+            {cbErrSrc.length === 0 ? (
+              <p style={{ ...styles.empty, color: '#3D6050' }}>✓ 에러 없음</p>
+            ) : (
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <Th>source</Th>
+                    <Th align="right">횟수</Th>
+                    <Th>마지막</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cbErrSrc.map((e) => (
+                    <tr key={e.source}>
+                      <Td>{e.source}</Td>
+                      <Td align="right">{e.count}</Td>
+                      <Td>{formatTime(e.lastSeen)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Panel>
+
+          {/* 최근 챗봇 에러 raw */}
+          <Panel
+            title="최근 챗봇 에러"
+            caption="최신 raw"
+            help="실제 message + trace_id. 디버깅용. trace_id 로 chatbot_messages 와 join 가능."
+            span={3}
+          >
+            {cbErrRecent.length === 0 ? (
+              <p style={{ ...styles.empty, color: '#3D6050' }}>✓ 깨끗</p>
+            ) : (
+              <div style={styles.streamList}>
+                {cbErrRecent.slice(0, 20).map((e) => (
+                  <div key={e.id} style={styles.streamRow}>
+                    <span style={styles.streamTime}>{formatTime(e.occurredAt)}</span>
+                    <span style={{ ...styles.streamType, color: '#B23A3A' }}>{e.source}</span>
+                    <span style={styles.streamUser}>{e.userId ? e.userId.slice(0, 10) : '—'}</span>
+                    <span style={styles.streamProps}>{e.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </Panel>
         </section>
 
@@ -765,5 +1096,23 @@ const styles: Record<string, CSSProperties> = {
     color: '#8B7355',
     fontWeight: 600,
     lineHeight: 1.5,
+  },
+  sectionDivider: {
+    marginTop: 18,
+    paddingTop: 18,
+    borderTop: '2px solid #E0D3BA',
+  },
+  sectionDividerTitle: {
+    margin: 0,
+    fontSize: 20,
+    fontWeight: 900,
+    color: '#1E3328',
+  },
+  sectionDividerCaption: {
+    margin: '4px 0 0',
+    fontSize: 12,
+    color: '#5A4A32',
+    fontWeight: 600,
+    maxWidth: 820,
   },
 };

@@ -94,6 +94,63 @@ async def get_errors(
     return {"range": rng, "errors": await queries.error_ranking(session, rng)}
 
 
+# ─── 챗봇 (ai/chatbot/) 전용 통계 — 같은 Postgres 의 chatbot_* 테이블 직접 SELECT ───
+
+
+@router.get("/chatbot/summary")
+async def get_chatbot_summary(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, **(await queries.chatbot_traffic_summary(session, rng))}
+
+
+@router.get("/chatbot/hourly")
+async def get_chatbot_hourly(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "buckets": await queries.chatbot_hourly(session, rng)}
+
+
+@router.get("/chatbot/llm")
+async def get_chatbot_llm(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "stats": await queries.chatbot_llm_stats(session, rng)}
+
+
+@router.get("/chatbot/errors")
+async def get_chatbot_errors(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, **(await queries.chatbot_errors(session, rng))}
+
+
+@router.get("/chatbot/gems")
+async def get_chatbot_gems(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "gems": await queries.chatbot_gem_distribution(session, rng)}
+
+
+@router.get("/chatbot/users")
+async def get_chatbot_users(
+    rng: Range = Query(default="24h", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    return {"range": rng, "users": await queries.chatbot_top_users(session, rng)}
+
+
 @router.get("/sse")
 async def analytics_sse(
     request: Request,
