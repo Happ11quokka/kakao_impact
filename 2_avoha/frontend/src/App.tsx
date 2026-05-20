@@ -20,65 +20,75 @@ export default function App() {
   return (
     <BrowserRouter>
       <PageTracker />
-      <div className="phone-frame-wrapper">
-        <div className="phone-frame-bezel">
-          <div className="phone-frame">
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/login/callback" element={<LoginCallback />} />
-              <Route
-                path="/"
-                element={
-                  <AuthGate>
-                    <PageLayout>
-                      <Home />
-                    </PageLayout>
-                  </AuthGate>
-                }
-              />
-              <Route
-                path="/calendar"
-                element={
-                  <AuthGate>
-                    <PageLayout>
-                      <Calendar />
-                    </PageLayout>
-                  </AuthGate>
-                }
-              />
-              <Route
-                path="/analysis"
-                element={
-                  <AuthGate>
-                    <PageLayout>
-                      <Analysis />
-                    </PageLayout>
-                  </AuthGate>
-                }
-              />
-              <Route
-                path="/settings"
-                element={
-                  <AuthGate>
-                    <PageLayout>
-                      <Settings />
-                    </PageLayout>
-                  </AuthGate>
-                }
-              />
-              <Route
-                path="/ops/analytics"
-                element={
-                  <RequireOpsUser>
-                    <OpsAnalytics />
-                  </RequireOpsUser>
-                }
-              />
-            </Routes>
-          </div>
+      <Routes>
+        {/* 운영자 대시보드는 phone-frame 밖, full viewport 데스크탑 레이아웃 */}
+        <Route
+          path="/ops/analytics"
+          element={
+            <RequireOpsUser>
+              <OpsAnalytics />
+            </RequireOpsUser>
+          }
+        />
+        {/* 그 외 모든 라우트는 모바일 phone-frame 안에 */}
+        <Route path="/*" element={<PhoneFrame />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+function PhoneFrame() {
+  return (
+    <div className="phone-frame-wrapper">
+      <div className="phone-frame-bezel">
+        <div className="phone-frame">
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/login/callback" element={<LoginCallback />} />
+            <Route
+              path="/"
+              element={
+                <AuthGate>
+                  <PageLayout>
+                    <Home />
+                  </PageLayout>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/calendar"
+              element={
+                <AuthGate>
+                  <PageLayout>
+                    <Calendar />
+                  </PageLayout>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/analysis"
+              element={
+                <AuthGate>
+                  <PageLayout>
+                    <Analysis />
+                  </PageLayout>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <AuthGate>
+                  <PageLayout>
+                    <Settings />
+                  </PageLayout>
+                </AuthGate>
+              }
+            />
+          </Routes>
         </div>
       </div>
-    </BrowserRouter>
+    </div>
   );
 }
 
