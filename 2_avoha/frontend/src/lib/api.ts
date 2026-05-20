@@ -74,6 +74,15 @@ async function request<T>(path: string, init: JsonInit = {}): Promise<T> {
     : undefined;
   if (!res.ok) {
     const code = (payload as { error?: { code?: string } } | undefined)?.error?.code ?? 'HTTP_ERROR';
+    // /events 자체 실패는 트래킹하지 말 것 (재귀 폭주 방지).
+    if (path !== '/events') {
+      try {
+        const { track } = await import('./analytics');
+        track('error.api', { path, status: res.status, code });
+      } catch {
+        /* silent */
+      }
+    }
     throw new ApiError(res.status, code, payload);
   }
   return payload as T;

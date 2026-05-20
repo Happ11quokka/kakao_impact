@@ -326,6 +326,7 @@ class Event(Base):
     __table_args__ = (
         Index("events_event_type_occurred_at_idx", "event_type", "occurred_at"),
         Index("events_props_gin_idx", "props", postgresql_using="gin"),
+        Index("events_user_id_occurred_at_idx", "user_id", "occurred_at"),
     )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
@@ -333,6 +334,22 @@ class Event(Base):
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     props: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     occurred_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class AnonUserLink(Base):
+    __tablename__ = "anon_user_links"
+
+    anon_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    linked_at: Mapped[datetime] = mapped_column(
         server_default=func.now(),
         nullable=False,
     )

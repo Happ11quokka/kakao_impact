@@ -2,6 +2,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { analytics } from '../lib/analytics';
 import { useAuthStore } from '../stores/auth-store';
 import ChibiAvatar from '../components/field/ChibiAvatar';
 
@@ -27,6 +28,8 @@ export default function LoginCallback() {
       const user = await fetchMe();
       if (cancelled) return;
       if (user) {
+        // 익명 시절 이벤트를 이 user 에 stitching.
+        void analytics.linkUser();
         navigate('/', { replace: true });
       } else {
         navigate('/login?error=failed', { replace: true });

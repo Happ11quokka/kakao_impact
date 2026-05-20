@@ -152,6 +152,7 @@ export default function Login() {
 
       <a
         href={api.loginUrl(capturedHash)}
+        data-track="auth.kakao_login"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -176,6 +177,7 @@ export default function Login() {
         <button
           type="button"
           onClick={handleDevEnter}
+          data-track="auth.dev_enter"
           style={{
             border: '1px solid rgba(90, 75, 60, 0.18)',
             background: 'rgba(255, 255, 255, 0.72)',

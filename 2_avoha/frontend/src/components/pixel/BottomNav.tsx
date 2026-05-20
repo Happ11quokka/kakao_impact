@@ -2,10 +2,10 @@
 import { NavLink } from 'react-router-dom';
 
 const tabs = [
-  { to: '/',         label: '홈' },
-  { to: '/analysis', label: '감정분석' },
-  { to: '/calendar', label: '캘린더' },
-  { to: '/settings', label: '설정' },
+  { to: '/',         label: '홈',        track: 'nav.home' },
+  { to: '/analysis', label: '감정분석',  track: 'nav.analysis' },
+  { to: '/calendar', label: '캘린더',    track: 'nav.calendar' },
+  { to: '/settings', label: '설정',      track: 'nav.settings' },
 ];
 
 export default function BottomNav() {
@@ -31,6 +31,7 @@ export default function BottomNav() {
           key={tab.to}
           to={tab.to}
           end={tab.to === '/'}
+          data-track={tab.track}
           style={{
             display: 'flex',
             flexDirection: 'column',

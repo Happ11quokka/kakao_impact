@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import secrets
+import uuid
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, URLSafeSerializer
+from pydantic import BaseModel, Field
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.deps import get_db
+from app.deps import get_db, require_user
 from app.logging import logger
 from app.services.kakao import (
     KakaoOAuthError,
@@ -128,4 +131,31 @@ async def kakao_callback(
 @router.post("/auth/logout")
 async def logout(request: Request) -> dict[str, bool]:
     request.session.clear()
+    return {"ok": True}
+
+
+class LinkAnonBody(BaseModel):
+    anonId: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/auth/link-anon")
+async def link_anon(
+    body: LinkAnonBody,
+    user_id: uuid.UUID = Depends(require_user),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    # 로그인 콜백 직후 프론트가 호출. 같은 anon_id 가 다른 user 에 묶여 있어도
+    # 마지막 로그인을 진실로 본다 (ON CONFLICT DO UPDATE).
+    await session.execute(
+        sql_text(
+            """
+            INSERT INTO anon_user_links (anon_id, user_id, linked_at)
+            VALUES (:anon_id, :user_id, now())
+            ON CONFLICT (anon_id) DO UPDATE
+              SET user_id = EXCLUDED.user_id, linked_at = EXCLUDED.linked_at
+            """
+        ),
+        {"anon_id": body.anonId.strip(), "user_id": str(user_id)},
+    )
+    await session.commit()
     return {"ok": True}

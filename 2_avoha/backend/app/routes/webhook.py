@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db.models import KakaoMessage
+from app.db.models import Event, KakaoMessage, User
 from app.deps import get_db
 from app.logging import logger
 
@@ -116,6 +116,31 @@ async def webhook_kakao(
         raw=raw,
     )
     session.add(row)
+    await session.flush()
+
+    # 분석용 이벤트: 챗봇 inbound 1건. utterance 원문은 chatbot_messages 에
+    # 이미 있으므로 props 에는 길이/타입만 기록 (프라이버시).
+    provider_key = normalized["providerUserKey"]
+    matched_user_id = None
+    if provider_key:
+        matched_user_id = (
+            await session.execute(
+                select(User.id).where(User.provider_user_key == provider_key).limit(1)
+            )
+        ).scalar_one_or_none()
+    session.add(
+        Event(
+            user_id=matched_user_id,
+            event_type="chatbot.question.sent",
+            props={
+                "contentType": normalized["contentType"],
+                "bodyLength": len(normalized["body"] or ""),
+                "hasMedia": bool(normalized["mediaUrl"]),
+                "providerUserKey": provider_key,
+                "messageId": str(row.id),
+            },
+        )
+    )
     await session.commit()
     await session.refresh(row)
 

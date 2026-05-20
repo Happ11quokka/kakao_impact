@@ -28,6 +28,12 @@ class RejectBody(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
+@router.get("/ops/check")
+async def ops_check(ops: dict[str, Any] = Depends(require_ops)) -> dict[str, object]:
+    # 프론트 RequireOpsUser 가드용 — 권한이 없으면 require_ops 가 403 던짐.
+    return {"ok": True, "kakaoId": ops["kakaoId"]}
+
+
 @router.get("/ops/queue")
 async def ops_queue(
     _: dict[str, Any] = Depends(require_ops),

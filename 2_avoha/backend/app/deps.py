@@ -56,6 +56,18 @@ async def require_user(request: Request) -> uuid.UUID:
         )
 
 
+async def optional_user(request: Request) -> uuid.UUID | None:
+    # 익명 이벤트(로그인 전 page.view 등)를 받기 위한 soft auth.
+    ident = _identity(request)
+    raw = ident.get("userId") if ident else None
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(str(raw))
+    except ValueError:
+        return None
+
+
 async def require_ops(request: Request) -> dict[str, object]:
     ident = _identity(request)
     if not ident or not ident.get("userId") or not ident.get("kakaoId"):
