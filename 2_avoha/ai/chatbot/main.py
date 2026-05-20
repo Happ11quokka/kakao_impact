@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
-from collections import defaultdict
+from collections import Counter, defaultdict
 import requests
 import os
 import json
@@ -131,8 +131,10 @@ pending_simple_record: dict = {}  # {user_id: True} 단순모드 여부
 pending_reflection: dict = {}  # {user_id: {question_id, question_text, stage, linked_date}}
 today_record_count_cache: dict[str, tuple[date, int]] = {}
 today_gem_count_cache: dict[str, tuple[date, int]] = {}
+today_analysis_record_cache: dict[str, list[tuple[datetime, str, str]]] = {}
 
 PHOTO_TIMEOUT = timedelta(minutes=10)
+ANALYSIS_RECORD_CACHE_TTL = timedelta(minutes=10)
 reflection_schema_ready = False
 
 
@@ -163,6 +165,42 @@ def _set_today_cache(cache: dict[str, tuple[date, int]], user_id: str, count: in
     safe_count = _safe_count(count)
     cache[user_id] = (_today_kst(), safe_count)
     return safe_count
+
+
+def _remember_today_analysis_record(user_id: str, gem: str, record_text: str | None) -> None:
+    """DB background save가 끝나기 전 '오늘 분석'이 바로 눌려도 방금 기록을 포함한다."""
+    if not user_id:
+        return
+    now = datetime.now(tz=ZoneInfo("Asia/Seoul"))
+    cutoff = now - ANALYSIS_RECORD_CACHE_TTL
+    records = [
+        item for item in today_analysis_record_cache.get(user_id, [])
+        if item[0] >= cutoff and item[0].date() == now.date()
+    ]
+    records.append((now, str(gem or ""), str(record_text or "")))
+    today_analysis_record_cache[user_id] = records[-30:]
+
+
+def _merge_today_analysis_records(user_id: str, rows: list[tuple[str, str | None]]) -> list[tuple[str, str]]:
+    merged = [(str(gem or ""), str(record_text or "")) for gem, record_text in rows]
+    db_counts = Counter(merged)
+    cache_counts: Counter[tuple[str, str]] = Counter()
+    now = datetime.now(tz=ZoneInfo("Asia/Seoul"))
+    cutoff = now - ANALYSIS_RECORD_CACHE_TTL
+    fresh_cache = []
+    for saved_at, gem, record_text in today_analysis_record_cache.get(user_id, []):
+        if saved_at < cutoff or saved_at.date() != now.date():
+            continue
+        record = (str(gem or ""), str(record_text or ""))
+        fresh_cache.append((saved_at, *record))
+        cache_counts[record] += 1
+        if cache_counts[record] > db_counts[record]:
+            merged.append(record)
+    if fresh_cache:
+        today_analysis_record_cache[user_id] = fresh_cache
+    else:
+        today_analysis_record_cache.pop(user_id, None)
+    return merged
 
 
 def _josa_eul(word: str) -> str:
@@ -1954,6 +1992,7 @@ def _run_today_emotion_analysis(
                   trace_id=trace_id, user_id=user_id)
         return "오늘 분석 중 오류가 발생했어요. 잠시 후 다시 시도해주세요."
 
+    rows = _merge_today_analysis_records(user_id, rows)
     if len(rows) < 1:
         return "오늘 분석할 기록이 아직 없어요.\n오늘의 일상을 남기면 분석할 수 있어요."
 
@@ -2275,6 +2314,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         gem_to_save = data["gem"]
         today_count = _reserve_today_gem_count(user_id)
         background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"), trace_id=trace_id)
+        _remember_today_analysis_record(user_id, gem_to_save, data["text"])
         pending_gem.pop(user_id, None)
         alert_msg = check_negative_accumulation(user_id)
         response = kakao_save_complete(gem_to_save, today_count, user_id, alert_msg or "")
@@ -2289,6 +2329,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         gems_to_save = [EMOTION_TO_GEM[e] for e in sel["emotions"] if e in EMOTION_TO_GEM]
         for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
+            _remember_today_analysis_record(user_id, gem, sel["text"])
         pending_emotion_selection.pop(user_id, None)
         today_count = _reserve_today_gem_count(user_id, len(gems_to_save))
         alert_msg = check_negative_accumulation(user_id)
@@ -2323,6 +2364,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         gems_to_save = [EMOTION_TO_GEM[e] for e in selected if e in EMOTION_TO_GEM]
         for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
+            _remember_today_analysis_record(user_id, gem, sel["text"])
         pending_emotion_selection.pop(user_id, None)
         today_count = _reserve_today_gem_count(user_id, len(gems_to_save))
         alert_msg = check_negative_accumulation(user_id)
@@ -2348,6 +2390,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if not data:
             return JSONResponse(kakao_response("저장할 기록이 없어요. 일상을 먼저 보내주세요!"))
         background_tasks.add_task(save_gem, user_id, "일상기록", data["text"], bool(data.get("has_photo", False)), data.get("image_url"), None, trace_id=trace_id)
+        _remember_today_analysis_record(user_id, "일상기록", data["text"])
         pending_gem.pop(user_id, None)
         return JSONResponse(kakao_daily_save_complete(user_id))
 
@@ -2356,8 +2399,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         has_photo, photo_urls, _ = _safe_pending_photo(user_id)
         if has_photo and photo_urls:
             background_tasks.add_task(save_gem, user_id, "일상기록", "", True, photo_urls[0], None, trace_id=trace_id)
+            _remember_today_analysis_record(user_id, "일상기록", "")
             for _extra_url in photo_urls[1:]:
                 background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None, trace_id=trace_id)
+                _remember_today_analysis_record(user_id, "단순기록", "")
             pending_photo.pop(user_id, None)
             return JSONResponse(kakao_response("사진이 일상 기록으로 저장됐어요! 📝"))
         return JSONResponse(kakao_response("저장할 사진이 없어요. 사진을 먼저 보내주세요!"))
@@ -2402,6 +2447,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     gem,
                     trace_id=trace_id,
                 )
+                _remember_today_analysis_record(user_id, gem, existing["text"])
                 pending_gem.pop(user_id, None)
                 alert_msg = check_negative_accumulation(user_id)
                 response = kakao_save_complete(gem, today_count, user_id, alert_msg or "")
@@ -2668,6 +2714,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     image_url = image_urls[0] if image_urls else None
     for _extra_url in image_urls[1:]:
         background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None, trace_id=trace_id)
+        _remember_today_analysis_record(user_id, "단순기록", "")
 
     if callback_url:
         background_tasks.add_task(
