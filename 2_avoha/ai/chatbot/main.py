@@ -522,6 +522,7 @@ SIMPLE_MODE_IMAGE = _IMG_BASE + "simple_mode.png"
 CONVERSATION_MODE_IMAGE = _IMG_BASE + "conversation_mode.png"
 TODAY_RECORDS_IMAGE = _IMG_BASE + "today_records.png"
 TODAY_ANALYSIS_IMAGE = _IMG_BASE + "today_analysis.png"
+FIND_EMOTION_IMAGE = _IMG_BASE + "find_emotion.png"
 MULTI_EMOTION_IMAGE = _IMG_BASE + "multi_emotion.png"
 CATEGORY_IMAGE_URL = {
     "슬픔 계열": _IMG_BASE + "category_sadness.png",
@@ -2442,7 +2443,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                         {"basicCard": {
                             "title": "원하는 감정이 없다면",
                             "description": "일상 기록으로도 저장할 수 있어요.",
-                            "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                            "thumbnail": {"imageUrl": FIND_EMOTION_IMAGE},
                             "buttons": [{"action": "message", "label": "그대로 저장하기", "messageText": "그대로 저장하기"}],
                         }},
                     ],
@@ -2623,7 +2624,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     {"basicCard": {
                         "title": "원하는 감정이 없다면",
                         "description": "일상 기록으로도 저장할 수 있어요.",
-                        "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                        "thumbnail": {"imageUrl": FIND_EMOTION_IMAGE},
                         "buttons": [{"action": "message", "label": "그대로 저장하기", "messageText": "그대로 저장하기"}],
                     }},
                 ],
@@ -2649,7 +2650,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     {"basicCard": {
                         "title": "원하는 감정이 없다면",
                         "description": "일상 기록으로도 저장할 수 있어요.",
-                        "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                        "thumbnail": {"imageUrl": FIND_EMOTION_IMAGE},
                         "buttons": [{"action": "message", "label": "그대로 저장하기", "messageText": "그대로 저장하기"}],
                     }},
                 ],
