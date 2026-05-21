@@ -2146,9 +2146,9 @@ def _run_today_emotion_analysis(
     records_text = "\n".join([f"- {gem}: {record_text}" for gem, record_text in rows])
     prompt = (
         "다음은 사용자의 오늘 감정원석 기록과 일상 기록들이야. 오늘 하루에 한정해서 짧고 다정하게 분석해줘.\n\n"
-        "형식은 반드시 아래 3줄로 맞춰줘.\n"
-        "오늘의 감정 흐름: ...\n"
-        "가장 눈에 띄는 조각: ...\n"
+        "형식은 반드시 아래 3줄로 맞추고, 각 줄 사이에는 빈 줄을 하나씩 넣어줘.\n"
+        "오늘의 감정 흐름: ...\n\n"
+        "가장 눈에 띄는 조각: ...\n\n"
         "오늘의 한 줄 정리: ...\n\n"
         "총 220자 이내로, 과장하거나 진단하지 말고 기록에 근거해서 말해.\n"
         "다른 말 없이 분석 내용만 답해.\n\n"
@@ -2162,15 +2162,21 @@ def _run_today_emotion_analysis(
     return data["choices"][0]["message"]["content"].strip()
 
 
+def _format_today_analysis_text(text: str) -> str:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    return "\n\n".join(lines)
+
+
 def kakao_today_analysis_response(analysis_text: str, user_id: str) -> dict:
     link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
+    formatted_analysis = _format_today_analysis_text(analysis_text)
     return {
         "version": "2.0",
         "template": {
             "outputs": [{"basicCard": {
                 "title": "오늘 분석",
                 "description": (
-                    f"{analysis_text}\n\n"
+                    f"{formatted_analysis}\n\n"
                     "아래 버튼을 눌러 더 자세한 분석과 내 기록물을 만나보세요."
                 ),
                 "thumbnail": {"imageUrl": TODAY_ANALYSIS_IMAGE},
