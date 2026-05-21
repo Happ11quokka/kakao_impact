@@ -1553,6 +1553,15 @@ def _extract_kakao_request(body) -> tuple[str, str, str | None]:
     return user_id, utterance, callback_url
 
 
+def _compact_command_text(value: str | None) -> str:
+    return "".join(str(value or "").split())
+
+
+def _matches_command(value: str | None, *commands: str) -> bool:
+    compact_value = _compact_command_text(value)
+    return compact_value in {_compact_command_text(command) for command in commands}
+
+
 def _safe_pending_gem(user_id: str, require_text: bool = False) -> dict | None:
     data = pending_gem.get(user_id)
     if not isinstance(data, dict):
@@ -2262,6 +2271,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(kakao_response("요청을 읽지 못했어요. 메시지를 다시 보내주세요."))
 
     user_id, utterance, callback_url = _extract_kakao_request(body)
+    command_text = _compact_command_text(utterance)
+    emotion_by_command = {_compact_command_text(emotion): emotion for emotion in EMOTION_TO_GEM}
+    category_by_command = {_compact_command_text(category): category for category in EMOTION_CATEGORIES}
     _current_user_id.set(user_id or "unknown")
     log_message(
         trace_id=trace_id, user_id=user_id or "unknown", direction="inbound",
@@ -2282,7 +2294,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(kakao_response(HARMFUL_MESSAGE))
 
     reflection = _safe_pending_reflection(user_id)
-    if reflection and utterance in ("건너뛰기", "건너뛸게요"):
+    if reflection and _matches_command(utterance, "건너뛰기", "건너뛸게요"):
         pending_reflection.pop(user_id, None)
         link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
         return JSONResponse({
@@ -2298,14 +2310,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             },
         })
 
-    if reflection and utterance == "질문 받을게요":
+    if reflection and _matches_command(utterance, "질문 받을게요"):
         reflection["stage"] = "question_shown"
         return JSONResponse(kakao_response(
             reflection["question_text"],
             custom_replies=REFLECTION_QUESTION_QUICK_REPLIES
         ))
 
-    if reflection and utterance == "답할게요":
+    if reflection and _matches_command(utterance, "답할게요"):
         reflection["stage"] = "awaiting_answer"
         return JSONResponse(kakao_response(
             "편하게 적어주세요 :)",
@@ -2313,7 +2325,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         ))
 
     # 모드 선택 메뉴
-    if utterance == "모드":
+    if _matches_command(utterance, "모드"):
         pending_simple_record.pop(user_id, None)
         return JSONResponse({
             "version": "2.0",
@@ -2327,7 +2339,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         })
 
     # 대화모드 선택
-    if utterance in ("대화모드", "대화 모드"):
+    if _matches_command(utterance, "대화모드"):
         pending_simple_record.pop(user_id, None)
         link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
         return JSONResponse({
@@ -2350,7 +2362,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         })
 
     # 단순모드 선택
-    if utterance in ("단순모드", "단순 모드"):
+    if _matches_command(utterance, "단순모드"):
         pending_simple_record[user_id] = True
         link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
         return JSONResponse({
@@ -2372,7 +2384,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             },
         })
 
-    if utterance == "저장된 일상 기록 보기":
+    if _matches_command(utterance, "저장된 일상 기록 보기"):
         link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
         return JSONResponse({
             "version": "2.0",
@@ -2387,11 +2399,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             },
         })
 
-    if utterance == "오늘 기록":
+    if _matches_command(utterance, "오늘 기록"):
         return JSONResponse(kakao_today_records(user_id))
 
     # 오늘 분석
-    if utterance in ("오늘 분석", "감정분석"):
+    if _matches_command(utterance, "오늘 분석", "감정분석"):
         if callback_url:
             background_tasks.add_task(_callback_task_today_analysis, user_id, callback_url, trace_id=trace_id)
             return JSONResponse({"version": "2.0", "useCallback": True})
@@ -2399,7 +2411,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(kakao_today_analysis_response(result, user_id))
 
     # 다시 시도 (타임아웃 후 재분류)
-    if utterance == "다시 시도":
+    if _matches_command(utterance, "다시 시도"):
         data = _safe_pending_gem(user_id, require_text=True)
         if not data:
             return JSONResponse(kakao_response("다시 시도할 기록이 없어요. 일상을 다시 보내주세요!"))
@@ -2414,7 +2426,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(_build_ai_response(user_id, saved_utterance, saved_has_photo, saved_image_url, result))
 
     # 다시 찾을게요 — 1회차: 카테고리, 2회차: 전체 20개
-    if utterance == "다시 찾을게요":
+    if _matches_command(utterance, "다시 찾을게요"):
         data = _safe_pending_gem(user_id)
         if not data:
             return JSONResponse(kakao_response("저장 대기 중인 원석이 없어요. 일상을 먼저 보내주세요!"))
@@ -2441,7 +2453,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return JSONResponse(kakao_response("어떤 감정이 가장 가까운가요?", show_emotion_buttons=True))
 
     # 맞아요 (저장)
-    if utterance == "맞아요":
+    if _matches_command(utterance, "맞아요"):
         data = _safe_pending_gem(user_id, require_text=True)
         if not data:
             return JSONResponse(kakao_response("저장할 원석이 없어요. 일상을 먼저 보내주세요!"))
@@ -2458,7 +2470,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(response)
 
     # 모두 채집 (복수 감정 전체 저장)
-    if utterance == "모두 채집":
+    if _matches_command(utterance, "모두 채집"):
         sel = _safe_pending_emotion_selection(user_id)
         if not sel:
             return JSONResponse(kakao_response("저장할 원석이 없어요."))
@@ -2477,7 +2489,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(response)
 
     # 골라서 채집 (복수 감정 중 선택)
-    if utterance == "골라서 채집":
+    if _matches_command(utterance, "골라서 채집"):
         sel = _safe_pending_emotion_selection(user_id)
         if not sel:
             return JSONResponse(kakao_response("저장할 원석이 없어요."))
@@ -2487,7 +2499,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             custom_replies=_multi_emotion_selection_replies(sel),
         ))
 
-    if utterance == "완료하기":
+    if _matches_command(utterance, "완료하기"):
         sel = _safe_pending_emotion_selection(user_id)
         if not sel:
             return JSONResponse(kakao_response("저장할 원석이 없어요."))
@@ -2512,7 +2524,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(response)
 
     # 감정 선택하기 (일상 기록 후 감정 카테고리 선택)
-    if utterance in ("감정 선택하기", "감정 추가하기"):
+    if _matches_command(utterance, "감정 선택하기", "감정 추가하기"):
         data = _safe_pending_gem(user_id, require_text=True)
         if not data or not data.get("daily"):
             return JSONResponse(kakao_response("먼저 일상을 기록해주세요!"))
@@ -2521,7 +2533,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(kakao_response("어떤 감정 결에 더 가까운가요?", custom_replies=CATEGORY_QUICK_REPLIES))
 
     # 그대로 저장하기 (일상 기록으로 저장)
-    if utterance in ("그대로 저장하기", "이대로 저장"):
+    if _matches_command(utterance, "그대로 저장하기", "이대로 저장"):
         data = _safe_pending_gem(user_id, require_text=True)
         if not data:
             return JSONResponse(kakao_response("저장할 기록이 없어요. 일상을 먼저 보내주세요!"))
@@ -2531,7 +2543,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(kakao_daily_save_complete(user_id))
 
     # 일상으로 저장 (사진 → 일상 기록, 채집권 미사용)
-    if utterance == "일상으로 저장":
+    if _matches_command(utterance, "일상으로 저장"):
         has_photo, photo_urls, _ = _safe_pending_photo(user_id)
         if has_photo and photo_urls:
             background_tasks.add_task(save_gem, user_id, "일상기록", "", True, photo_urls[0], None, trace_id=trace_id)
@@ -2544,24 +2556,25 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(kakao_response("저장할 사진이 없어요. 사진을 먼저 보내주세요!"))
 
     # 감정 적기 (사진 후 텍스트 유도)
-    if utterance == "감정 적기":
+    if _matches_command(utterance, "감정 적기"):
         return JSONResponse(kakao_response(
             "오늘 있었던 일이나 지금 느끼는 마음을 적어봐요.\n짧게 적어도 괜찮아요!",
             hide_buttons=True
         ))
 
     # 감정 퀵버튼 선택
-    if utterance in EMOTION_TO_GEM:
-        gem = EMOTION_TO_GEM[utterance]
+    selected_emotion = emotion_by_command.get(command_text)
+    if selected_emotion:
+        gem = EMOTION_TO_GEM[selected_emotion]
         sel = _safe_pending_emotion_selection(user_id)
-        print(f"[emotion click] utterance={utterance}, sel={sel}, pending_gem={pending_gem.get(user_id)}")
-        if sel and utterance in sel["emotions"]:
+        print(f"[emotion click] utterance={utterance}, emotion={selected_emotion}, sel={sel}, pending_gem={pending_gem.get(user_id)}")
+        if sel and selected_emotion in sel["emotions"]:
             selected = sel.get("selected_emotions")
             if not isinstance(selected, list):
                 selected = []
                 sel["selected_emotions"] = selected
-            if utterance not in selected:
-                selected.append(utterance)
+            if selected_emotion not in selected:
+                selected.append(selected_emotion)
             replies = _multi_emotion_selection_replies(sel)
             if len(selected) >= len(sel["emotions"]):
                 replies = [{"label": "완료하기", "action": "message", "messageText": "완료하기"}]
@@ -2596,7 +2609,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(kakao_response("먼저 오늘의 일상을 적어주세요 🪨\n어떤 일이 있었는지 보내주시면 원석으로 저장해드릴게요!"))
 
     # 이전 단계로 (감정 선택 → 카테고리 선택)
-    if utterance == "이전 단계로":
+    if _matches_command(utterance, "이전 단계로"):
         data = _safe_pending_gem(user_id)
         if not data:
             return JSONResponse(kakao_response("저장 대기 중인 원석이 없어요. 일상을 먼저 보내주세요!"))
@@ -2618,11 +2631,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         })
 
     # 카테고리 선택 (재분류 1회차 → 2회차)
-    if utterance in EMOTION_CATEGORIES:
+    selected_category = category_by_command.get(command_text)
+    if selected_category:
         data = _safe_pending_gem(user_id)
         if not data:
             return JSONResponse(kakao_response("저장 대기 중인 원석이 없어요. 일상을 먼저 보내주세요!"))
-        emotions_in_cat = EMOTION_CATEGORIES[utterance]
+        emotions_in_cat = EMOTION_CATEGORIES[selected_category]
         emotion_buttons = [{"label": e, "action": "message", "messageText": e} for e in emotions_in_cat]
         emotion_buttons.append({"label": "이전 단계로", "action": "message", "messageText": "이전 단계로"})
         data["reclassify_step"] = 2
@@ -2643,7 +2657,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         })
 
     # 도감 조회
-    if utterance == "도감":
+    if _matches_command(utterance, "도감"):
         pdata = _safe_pending_gem(user_id)
         if pdata and pdata.get("gem"):
             pending_replies = _gem_save_quick_replies(pdata["gem"], include_nav=True)
@@ -2675,7 +2689,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         })
 
     # 원석 가방 조회
-    if utterance in ("내 원석", "원석 보기", "가방", "인벤토리"):
+    if _matches_command(utterance, "내 원석", "원석 보기", "가방", "인벤토리"):
         pdata = _safe_pending_gem(user_id)
         if pdata and pdata.get("gem"):
             inv_replies = _gem_save_quick_replies(pdata["gem"], include_nav=True)
@@ -2706,7 +2720,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         })
 
     # 채집 안내
-    if utterance == "채집 안내":
+    if _matches_command(utterance, "채집 안내"):
         return JSONResponse({
             "version": "2.0",
             "template": {
