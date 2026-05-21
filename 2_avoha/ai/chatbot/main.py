@@ -177,6 +177,7 @@ def _remember_today_pending_record(
     record_text: str | None,
     has_photo: bool = False,
     image_url: str | None = None,
+    trace_id: _uuid.UUID | None = None,
 ) -> None:
     """DB background save가 끝나기 전 '오늘 기록/분석'이 바로 눌려도 방금 기록을 포함한다."""
     if not user_id:
@@ -195,6 +196,7 @@ def _remember_today_pending_record(
         "record_text": str(record_text or ""),
         "has_photo": bool(has_photo),
         "image_url": str(image_url or ""),
+        "trace_id": str(trace_id or ""),
     })
     today_pending_record_cache[user_id] = records[-30:]
 
@@ -235,11 +237,21 @@ def _merge_today_display_records(user_id: str, records: list[dict]) -> list[dict
             "has_photo": bool(record.get("has_photo")),
             "image_url": str(record.get("image_url") or ""),
             "saved_time": str(record.get("saved_time") or ""),
+            "trace_id": str(record.get("trace_id") or ""),
         }
         for record in records
     ]
-    db_counts = Counter((record["gem"], record["record_text"]) for record in db_records)
-    cache_counts: Counter[tuple[str, str]] = Counter()
+    db_counts = Counter(
+        (
+            record["trace_id"],
+            record["gem"],
+            record["record_text"],
+            record["has_photo"],
+            record["image_url"],
+        )
+        for record in db_records
+    )
+    cache_counts: Counter[tuple[str, str, str, bool, str]] = Counter()
     pending_records = []
     now = datetime.now(tz=ZoneInfo("Asia/Seoul"))
     cutoff = now - ANALYSIS_RECORD_CACHE_TTL
@@ -250,23 +262,70 @@ def _merge_today_display_records(user_id: str, records: list[dict]) -> list[dict
             continue
         if saved_at < cutoff or saved_at.date() != now.date():
             continue
-        key = (str(item.get("gem") or ""), str(item.get("record_text") or ""))
+        key = (
+            str(item.get("trace_id") or ""),
+            str(item.get("gem") or ""),
+            str(item.get("record_text") or ""),
+            bool(item.get("has_photo")),
+            str(item.get("image_url") or ""),
+        )
         cache_counts[key] += 1
         if cache_counts[key] <= db_counts[key]:
             continue
         fresh_cache.append(item)
         pending_records.append({
-            "gem": key[0],
-            "record_text": key[1],
-            "has_photo": bool(item.get("has_photo")),
-            "image_url": str(item.get("image_url") or ""),
+            "gem": key[1],
+            "record_text": key[2],
+            "has_photo": key[3],
+            "image_url": key[4],
             "saved_time": saved_at.strftime("%H:%M"),
+            "trace_id": key[0],
         })
     if fresh_cache:
         today_pending_record_cache[user_id] = fresh_cache
     else:
         today_pending_record_cache.pop(user_id, None)
-    return (pending_records + db_records)[:9]
+    return _group_today_display_records(pending_records + db_records)[:9]
+
+
+def _today_display_group_key(record: dict) -> tuple:
+    trace_id = str(record.get("trace_id") or "")
+    if trace_id:
+        return (
+            "trace",
+            trace_id,
+            str(record.get("record_text") or ""),
+            bool(record.get("has_photo")),
+            str(record.get("image_url") or ""),
+        )
+    return (
+        "content",
+        str(record.get("saved_time") or ""),
+        str(record.get("record_text") or ""),
+        bool(record.get("has_photo")),
+        str(record.get("image_url") or ""),
+    )
+
+
+def _group_today_display_records(records: list[dict]) -> list[dict]:
+    grouped_records: list[dict] = []
+    group_index: dict[tuple, dict] = {}
+    for record in records:
+        key = _today_display_group_key(record)
+        existing = group_index.get(key)
+        if not existing:
+            merged = dict(record)
+            merged["gems"] = [str(record.get("gem") or "")]
+            group_index[key] = merged
+            grouped_records.append(merged)
+            continue
+        gem = str(record.get("gem") or "")
+        if gem and gem not in existing["gems"]:
+            existing["gems"].append(gem)
+        if not existing.get("image_url") and record.get("image_url"):
+            existing["image_url"] = str(record.get("image_url") or "")
+        existing["has_photo"] = bool(existing.get("has_photo")) or bool(record.get("has_photo"))
+    return grouped_records
 
 
 def _josa_eul(word: str) -> str:
@@ -1999,13 +2058,13 @@ def _fetch_today_records(user_id: str) -> list[dict]:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT gem, record_text, has_photo, image_url,
+            SELECT gem, record_text, has_photo, image_url, trace_id,
                    to_char(created_at AT TIME ZONE 'Asia/Seoul', 'HH24:MI') AS saved_time
             FROM chatbot
             WHERE user_id = %s
               AND (created_at AT TIME ZONE 'Asia/Seoul')::date = %s
             ORDER BY created_at DESC
-            LIMIT 9
+            LIMIT 30
             """,
             (user_id, _today_kst()),
         )
@@ -2019,8 +2078,9 @@ def _fetch_today_records(user_id: str) -> list[dict]:
                 "has_photo": bool(has_photo),
                 "image_url": str(image_url or ""),
                 "saved_time": str(saved_time or ""),
+                "trace_id": str(trace_id or ""),
             }
-            for gem, record_text, has_photo, image_url, saved_time in rows
+            for gem, record_text, has_photo, image_url, trace_id, saved_time in rows
         ]
         return _merge_today_display_records(user_id, records)
     except Exception as e:
@@ -2080,6 +2140,7 @@ def kakao_today_records(user_id: str) -> dict:
 
     for record in records:
         gem = record["gem"]
+        gems = [str(item) for item in record.get("gems", [gem]) if str(item)]
         if gem == "일상기록":
             title = f"{record['saved_time']} 소중한 일상"
             image_url = record["image_url"] or MASCOT_IMAGE
@@ -2087,7 +2148,7 @@ def kakao_today_records(user_id: str) -> dict:
             title = f"{record['saved_time']} 단순 기록"
             image_url = record["image_url"] or MASCOT_IMAGE
         else:
-            title = f"{record['saved_time']} {gem}"
+            title = f"{record['saved_time']} {', '.join(gems)}"
             image_url = record["image_url"] or GEM_IMAGE_URL.get(gem)
         description = _truncate_text(record["record_text"], 160)
         if not description:
@@ -2470,7 +2531,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         gem_to_save = data["gem"]
         today_count = _reserve_today_gem_count(user_id)
         background_tasks.add_task(save_gem, user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), data.get("ai_gems"), trace_id=trace_id)
-        _remember_today_pending_record(user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"))
+        _remember_today_pending_record(user_id, gem_to_save, data["text"], bool(data.get("has_photo", False)), data.get("image_url"), trace_id=trace_id)
         pending_gem.pop(user_id, None)
         alert_msg = check_negative_accumulation(user_id)
         response = kakao_save_complete(gem_to_save, today_count, user_id, alert_msg or "")
@@ -2485,7 +2546,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         gems_to_save = [EMOTION_TO_GEM[e] for e in sel["emotions"] if e in EMOTION_TO_GEM]
         for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
-            _remember_today_pending_record(user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"))
+            _remember_today_pending_record(user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), trace_id=trace_id)
         pending_emotion_selection.pop(user_id, None)
         today_count = _reserve_today_gem_count(user_id, len(gems_to_save))
         alert_msg = check_negative_accumulation(user_id)
@@ -2520,7 +2581,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         gems_to_save = [EMOTION_TO_GEM[e] for e in selected if e in EMOTION_TO_GEM]
         for gem in gems_to_save:
             background_tasks.add_task(save_gem, user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), sel.get("ai_gems"), trace_id=trace_id)
-            _remember_today_pending_record(user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"))
+            _remember_today_pending_record(user_id, gem, sel["text"], bool(sel.get("has_photo", False)), sel.get("image_url"), trace_id=trace_id)
         pending_emotion_selection.pop(user_id, None)
         today_count = _reserve_today_gem_count(user_id, len(gems_to_save))
         alert_msg = check_negative_accumulation(user_id)
@@ -2546,7 +2607,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if not data:
             return JSONResponse(kakao_response("저장할 기록이 없어요. 일상을 먼저 보내주세요!"))
         background_tasks.add_task(save_gem, user_id, "일상기록", data["text"], bool(data.get("has_photo", False)), data.get("image_url"), None, trace_id=trace_id)
-        _remember_today_pending_record(user_id, "일상기록", data["text"], bool(data.get("has_photo", False)), data.get("image_url"))
+        _remember_today_pending_record(user_id, "일상기록", data["text"], bool(data.get("has_photo", False)), data.get("image_url"), trace_id=trace_id)
         pending_gem.pop(user_id, None)
         return JSONResponse(kakao_daily_save_complete(user_id))
 
@@ -2555,10 +2616,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         has_photo, photo_urls, _ = _safe_pending_photo(user_id)
         if has_photo and photo_urls:
             background_tasks.add_task(save_gem, user_id, "일상기록", "", True, photo_urls[0], None, trace_id=trace_id)
-            _remember_today_pending_record(user_id, "일상기록", "", True, photo_urls[0])
+            _remember_today_pending_record(user_id, "일상기록", "", True, photo_urls[0], trace_id=trace_id)
             for _extra_url in photo_urls[1:]:
                 background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None, trace_id=trace_id)
-                _remember_today_pending_record(user_id, "단순기록", "", True, _extra_url)
+                _remember_today_pending_record(user_id, "단순기록", "", True, _extra_url, trace_id=trace_id)
             pending_photo.pop(user_id, None)
             return JSONResponse(kakao_response("사진이 일상 기록으로 저장됐어요! 📝"))
         return JSONResponse(kakao_response("저장할 사진이 없어요. 사진을 먼저 보내주세요!"))
@@ -2604,7 +2665,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     gem,
                     trace_id=trace_id,
                 )
-                _remember_today_pending_record(user_id, gem, existing["text"], bool(existing.get("has_photo", False)), existing.get("image_url"))
+                _remember_today_pending_record(user_id, gem, existing["text"], bool(existing.get("has_photo", False)), existing.get("image_url"), trace_id=trace_id)
                 pending_gem.pop(user_id, None)
                 alert_msg = check_negative_accumulation(user_id)
                 response = kakao_save_complete(gem, today_count, user_id, alert_msg or "")
@@ -2872,7 +2933,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     image_url = image_urls[0] if image_urls else None
     for _extra_url in image_urls[1:]:
         background_tasks.add_task(save_gem, user_id, "단순기록", "", True, _extra_url, None, trace_id=trace_id)
-        _remember_today_pending_record(user_id, "단순기록", "", True, _extra_url)
+        _remember_today_pending_record(user_id, "단순기록", "", True, _extra_url, trace_id=trace_id)
 
     if callback_url:
         background_tasks.add_task(
