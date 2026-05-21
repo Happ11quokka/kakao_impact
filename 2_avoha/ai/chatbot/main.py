@@ -2327,7 +2327,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         })
 
     # 대화모드 선택
-    if utterance == "대화모드":
+    if utterance in ("대화모드", "대화 모드"):
         pending_simple_record.pop(user_id, None)
         link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
         return JSONResponse({
@@ -2350,7 +2350,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         })
 
     # 단순모드 선택
-    if utterance == "단순모드":
+    if utterance in ("단순모드", "단순 모드"):
         pending_simple_record[user_id] = True
         link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
         return JSONResponse({
