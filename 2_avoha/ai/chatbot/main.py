@@ -2149,7 +2149,8 @@ def kakao_today_records(user_id: str) -> dict:
             image_url = record["image_url"] or MASCOT_IMAGE
         else:
             title = f"{record['saved_time']} {', '.join(gems)}"
-            image_url = record["image_url"] or GEM_IMAGE_URL.get(gem)
+            default_image_url = MULTI_EMOTION_IMAGE if len(gems) > 1 else GEM_IMAGE_URL.get(gem)
+            image_url = record["image_url"] or default_image_url
         description = _truncate_text(record["record_text"], 160)
         if not description:
             description = "사진으로 저장한 기록이에요." if record["has_photo"] else "내용 없이 저장된 기록이에요."
