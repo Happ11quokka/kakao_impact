@@ -521,6 +521,7 @@ MASCOT_IMAGE = DEFAULT_CARD_IMAGE
 SIMPLE_MODE_IMAGE = _IMG_BASE + "simple_mode.png"
 CONVERSATION_MODE_IMAGE = _IMG_BASE + "conversation_mode.png"
 TODAY_RECORDS_IMAGE = _IMG_BASE + "today_records.png"
+TODAY_ANALYSIS_IMAGE = _IMG_BASE + "today_analysis.png"
 MULTI_EMOTION_IMAGE = _IMG_BASE + "multi_emotion.png"
 CATEGORY_IMAGE_URL = {
     "슬픔 계열": _IMG_BASE + "category_sadness.png",
@@ -2072,7 +2073,7 @@ def kakao_today_records(user_id: str) -> dict:
         items.append({
             "title": "오늘 저장한 기록이 아직 없어요.",
             "description": "일상을 보내주시면 오늘 기록에 담아둘게요.",
-            "thumbnail": {"imageUrl": TODAY_RECORDS_IMAGE},
+            "thumbnail": {"imageUrl": MASCOT_IMAGE},
             "buttons": [{"action": "webLink", "label": "웹 방문하기", "webLinkUrl": link_url}],
         })
 
@@ -2171,7 +2172,7 @@ def kakao_today_analysis_response(analysis_text: str, user_id: str) -> dict:
                     f"{analysis_text}\n\n"
                     "아래 버튼을 눌러 더 자세한 분석과 내 기록물을 만나보세요."
                 ),
-                "thumbnail": {"imageUrl": ALL_GEMS_IMAGE},
+                "thumbnail": {"imageUrl": TODAY_ANALYSIS_IMAGE},
                 "buttons": [{"action": "webLink", "label": "웹 방문하기", "webLinkUrl": link_url}],
             }}],
             "quickReplies": BASE_QUICK_REPLIES,
