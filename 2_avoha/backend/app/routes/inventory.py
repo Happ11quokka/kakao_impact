@@ -40,6 +40,7 @@ async def list_gems(
             Gem.tier,
             Gem.source,
             Gem.source_message_id,
+            Gem.source_chatbot_id,
             Gem.crafted_from,
             Gem.created_at,
         )
@@ -61,6 +62,7 @@ async def list_gems(
                 "tier": r.tier,
                 "source": r.source,
                 "sourceMessageId": str(r.source_message_id) if r.source_message_id else None,
+                "sourceChatbotId": r.source_chatbot_id,
                 "craftedFrom": [str(x) for x in (r.crafted_from or [])],
                 "createdAt": r.created_at.isoformat() if r.created_at else None,
             }

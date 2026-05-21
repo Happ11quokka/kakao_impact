@@ -101,7 +101,19 @@ export type CalendarReclassifyAccordionState = {
 
 export function buildRecordTextSectionStyle(hasReflection: boolean): CSSProperties {
   return {
-    marginTop: hasReflection ? 18 : 0,
+    marginTop: 0,
+    marginBottom: hasReflection ? 10 : 0,
+  };
+}
+
+export function buildRecordReflectionSectionStyle(): CSSProperties {
+  return {
+    marginTop: 8,
+    padding: '10px 11px',
+    border: '1px solid rgba(61, 96, 80, 0.14)',
+    borderRadius: 12,
+    background: 'rgba(255, 255, 255, 0.62)',
+    boxShadow: '0 8px 18px rgba(86, 71, 48, 0.05)',
   };
 }
 
@@ -142,6 +154,54 @@ export function buildReclassifyBottomTabStyle(): CSSProperties {
     cursor: 'pointer',
     textAlign: 'center',
     boxShadow: '0 8px 18px rgba(30, 51, 40, 0.18)',
+  };
+}
+
+export function buildReclassifyReflectionSubmitStyle(reflection: string, completed: boolean): CSSProperties {
+  const hasText = reflection.trim().length > 0;
+  if (completed) {
+    return { display: 'none' };
+  }
+  return {
+    marginTop: 2,
+    width: '100%',
+    border: '1px solid rgba(255, 255, 255, 0.24)',
+    borderRadius: 10,
+    background: completed
+      ? 'rgba(61, 96, 80, 0.62)'
+      : hasText
+        ? 'rgba(61, 96, 80, 0.96)'
+        : 'rgba(225, 237, 226, 0.74)',
+    color: hasText || completed ? '#FFFFFF' : 'rgba(61, 96, 80, 0.72)',
+    fontSize: 11,
+    fontWeight: 900,
+    padding: '10px 12px',
+    cursor: hasText && !completed ? 'pointer' : 'default',
+    textAlign: 'center',
+    boxShadow: hasText && !completed ? '0 8px 18px rgba(30, 51, 40, 0.16)' : 'none',
+    transition: 'background 160ms ease, color 160ms ease, box-shadow 160ms ease',
+  };
+}
+
+export function buildReclassifySecondaryActionStyle(): CSSProperties {
+  return {
+    marginTop: 8,
+    width: '100%',
+    border: 0,
+    borderRadius: 99,
+    background: '#F4E8CD',
+    color: TEXT_MAIN,
+    fontSize: 11,
+    fontWeight: 900,
+    padding: '10px 12px',
+    cursor: 'pointer',
+    textAlign: 'center',
+  };
+}
+
+export function buildReclassifyEmotionPickerStyle(hasReflectionControls: boolean): CSSProperties {
+  return {
+    marginTop: hasReflectionControls ? 14 : 0,
   };
 }
 
@@ -501,6 +561,7 @@ function DatePanel({
   const [pickerRecordId, setPickerRecordId] = useState<number | null>(null);
   const [pickerSelection, setPickerSelection] = useState<string[]>([]);
   const [pickerReflection, setPickerReflection] = useState<string>('');
+  const [pickerReflectionCompleted, setPickerReflectionCompleted] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const pickerRecord = records.find((record) => record.id === pickerRecordId) ?? null;
   const hasContent = gems.length > 0 || records.length > 0;
@@ -522,10 +583,12 @@ function DatePanel({
     setPickerRecordId(null);
     setPickerSelection([]);
     setPickerReflection('');
+    setPickerReflectionCompleted(false);
   }, [dateKey, records]);
 
   useEffect(() => {
     setPickerReflection('');
+    setPickerReflectionCompleted(false);
   }, [detailRecordId]);
 
   useEffect(() => {
@@ -594,6 +657,7 @@ function DatePanel({
                       selection={pickerSelection}
                       saving={savingId === record.id}
                       reflection={pickerReflection}
+                      reflectionCompleted={pickerReflectionCompleted}
                       pickerOpen={pickerRecordId === record.id}
                       onToggleEmotion={(emotionCode) => {
                         setPickerSelection((prev) =>
@@ -602,7 +666,11 @@ function DatePanel({
                             : [...prev, emotionCode],
                         );
                       }}
-                      onReflectionChange={setPickerReflection}
+                      onReflectionChange={(value) => {
+                        setPickerReflection(value);
+                        setPickerReflectionCompleted(false);
+                      }}
+                      onCompleteReflection={() => setPickerReflectionCompleted(true)}
                       onOpenPicker={() => setPickerRecordId(record.id)}
                       onSave={() =>
                         void onConfirmEmotion(record, pickerSelection, pickerReflection).then(
@@ -611,6 +679,7 @@ function DatePanel({
                             setPickerRecordId(null);
                             setPickerSelection([]);
                             setPickerReflection('');
+                            setPickerReflectionCompleted(false);
                           },
                         )
                       }
@@ -727,6 +796,13 @@ function RecordDetail({
         </button>
       </div>
 
+      {record.recordText && (
+        <div style={buildRecordTextSectionStyle(Boolean(reflection))}>
+          <div style={styles.recordLabel}>기록 내용</div>
+          <p style={styles.recordText}>{record.recordText}</p>
+        </div>
+      )}
+
       {reflection && (
         <div style={styles.reflectionBox}>
           <div style={styles.recordLabel}>자기인지 질문</div>
@@ -739,13 +815,6 @@ function RecordDetail({
           )}
         </div>
       )}
-
-      {record.recordText && (
-        <div style={buildRecordTextSectionStyle(Boolean(reflection))}>
-          <div style={styles.recordLabel}>기록 내용</div>
-          <p style={styles.recordText}>{record.recordText}</p>
-        </div>
-      )}
     </div>
   );
 }
@@ -755,9 +824,11 @@ function ReclassifyAccordion({
   selection,
   saving,
   reflection,
+  reflectionCompleted,
   pickerOpen,
   onToggleEmotion,
   onReflectionChange,
+  onCompleteReflection,
   onOpenPicker,
   onSave,
 }: {
@@ -765,9 +836,11 @@ function ReclassifyAccordion({
   selection: string[];
   saving: boolean;
   reflection: string;
+  reflectionCompleted: boolean;
   pickerOpen: boolean;
   onToggleEmotion: (emotionCode: string) => void;
   onReflectionChange: (value: string) => void;
+  onCompleteReflection: () => void;
   onOpenPicker: () => void;
   onSave: () => void;
 }) {
@@ -778,39 +851,52 @@ function ReclassifyAccordion({
   return (
     <div style={styles.reclassifyBox} aria-label={`${action.label} 아코디언`}>
       {state.needsReflection && (
-        <div style={buildReclassifyReflectionBlockStyle(state.pickerOpen)}>
+        <div style={buildReclassifyReflectionBlockStyle(reflectionCompleted)}>
           <div style={styles.recordLabel}>이 한 줄 회고</div>
           <p style={styles.reclassifyReflectionQuestion}>
             Q. 이 기록에 대해서 한줄로 표현한다면 어떤 문장일까요?
           </p>
-          {!state.pickerOpen ? (
+          {reflectionCompleted ? (
+            <p style={styles.reclassifyReflectionSummary}>
+              {reflection.trim() || '한 줄 회고 없이 감정을 다시 골라볼게요.'}
+            </p>
+          ) : (
             <textarea
               value={reflection}
               maxLength={200}
-              placeholder="짧게 한 문장으로 적어도 괜찮아요. (선택)"
+              placeholder="짧게 한 문장으로 적어도 괜찮아요."
               disabled={saving}
               onChange={(event) => onReflectionChange(event.target.value)}
               style={styles.reclassifyReflectionTextarea}
             />
-          ) : (
-            <p style={styles.reclassifyReflectionSummary}>
-              {reflection.trim() || '한 줄 회고 없이 감정을 다시 골라볼게요.'}
-            </p>
+          )}
+          {!reflectionCompleted && (
+            <button
+              type="button"
+              disabled={!reflection.trim() || saving}
+              onClick={onCompleteReflection}
+              aria-label="한 줄 회고 작성완료"
+              style={buildReclassifyReflectionSubmitStyle(reflection, reflectionCompleted)}
+            >
+              작성완료
+            </button>
           )}
         </div>
       )}
 
-      {!state.pickerOpen ? (
+      {state.needsReflection && !state.pickerOpen && (
         <button
           type="button"
           onClick={onOpenPicker}
-          aria-label="감정 재분류 펼치기"
-          style={styles.reclassifyBottomTab}
+          aria-label="감정 재분류하기"
+          style={styles.reclassifySecondaryAction}
         >
-          {state.pickerToggleLabel}
+          감정 재분류하기
         </button>
-      ) : (
-        <>
+      )}
+
+      {state.pickerOpen && (
+        <div style={buildReclassifyEmotionPickerStyle(state.needsReflection)}>
           <div style={styles.recordLabel}>{state.emotionLabel}</div>
           <p style={styles.reclassifyHint}>여러 감정이 함께 떠오르면 모두 골라주세요.</p>
           <div style={styles.emotionGrid}>
@@ -853,7 +939,7 @@ function ReclassifyAccordion({
           >
             {selection.length === 0 ? '감정을 골라주세요' : `감정 ${selection.length}개 저장`}
           </button>
-        </>
+        </div>
       )}
     </div>
   );
@@ -1262,11 +1348,7 @@ const styles: Record<string, CSSProperties> = {
     overflowWrap: 'anywhere',
   },
   reflectionBox: {
-    marginTop: 10,
-    padding: 10,
-    borderRadius: 10,
-    background: 'rgba(255, 255, 255, 0.2)',
-    border: '1px solid rgba(255, 255, 255, 0.22)',
+    ...buildRecordReflectionSectionStyle(),
   },
   reflectionQuestion: {
     margin: '0 0 8px',
@@ -1342,6 +1424,9 @@ const styles: Record<string, CSSProperties> = {
   },
   reclassifyBottomTab: {
     ...buildReclassifyBottomTabStyle(),
+  },
+  reclassifySecondaryAction: {
+    ...buildReclassifySecondaryActionStyle(),
   },
   reclassifyBox: {
     marginTop: 12,

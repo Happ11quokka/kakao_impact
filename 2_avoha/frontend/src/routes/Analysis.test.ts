@@ -62,6 +62,21 @@ describe('Analysis record enrichment', () => {
       { code: 'flutter', label: '설렘' },
     ]);
   });
+
+  it('uses sourceChatbotId to attach the exact chatbot record instead of falling back to a same-date record', () => {
+    const gems: Gem[] = [
+      { ...baseGem, id: 'gem-exact', emotionCode: 'pride', sourceChatbotId: 202 },
+    ];
+    const records: ChatbotRecordDto[] = [
+      { ...baseRecord, id: 201, recordText: '같은 날의 다른 기록', imageUrl: null },
+      { ...baseRecord, id: 202, recordText: '챗봇에서 실제로 채집한 뿌듯함 기록', imageUrl: 'https://example.com/exact.jpg' },
+    ];
+
+    const [item] = buildAnalysisItems(gems, records, 'weekly', today);
+
+    expect(item.recordText).toBe('챗봇에서 실제로 채집한 뿌듯함 기록');
+    expect(item.imageUrl).toBe('https://example.com/exact.jpg');
+  });
 });
 
 describe('Analysis recap themes', () => {

@@ -21,6 +21,7 @@ export interface Gem {
   emotionCode: string;
   tier: GemTier;
   sourceMessageId?: string;
+  sourceChatbotId?: number;
   sourceText?: string;          // mock용: 원본 메시지 텍스트
   craftedFrom?: string[];
   createdAt: string;

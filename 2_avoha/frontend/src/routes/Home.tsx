@@ -53,6 +53,16 @@ const CATEGORY_ACCENT: Record<CategoryCode, string> = {
   complex: '#3D3A34',
 };
 
+export function buildHomeLakeStageStyle(): CSSProperties {
+  return {
+    position: 'relative',
+    width: LAKE_CIRCLE_SIZE,
+    height: LAKE_CIRCLE_SIZE,
+    overflow: 'visible',
+    flexShrink: 0,
+  };
+}
+
 export function buildHomeLakeCircleStyle(): CSSProperties {
   return {
     position: 'relative',
@@ -73,8 +83,8 @@ export function buildHomeLakeCircleStyle(): CSSProperties {
 export function buildHomeJoystickStyle(active = false): CSSProperties {
   return {
     position: 'absolute',
-    right: 40,
-    bottom: 40,
+    right: -18,
+    bottom: -18,
     width: 64,
     height: 64,
     borderRadius: '50%',
@@ -694,9 +704,10 @@ export default function Home() {
             </p>
           </div>
 
-          <div
-            style={buildHomeLakeCircleStyle()}
-          >
+          <div style={buildHomeLakeStageStyle()}>
+            <div
+              style={buildHomeLakeCircleStyle()}
+            >
             {lakeStones.map((stone) => {
               const primaryCode = stone.emotionCodes[0];
               const emotion = getEmotion(primaryCode);
@@ -862,6 +873,7 @@ export default function Home() {
               <div style={{ filter: 'saturate(0.9) contrast(0.96)' }}>
                 <ChibiAvatar size={MASCOT_SIZE} mood="idle" />
               </div>
+            </div>
             </div>
 
             <div

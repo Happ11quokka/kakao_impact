@@ -44,6 +44,7 @@ export type AnalysisItem = {
   imageUrl?: string | null;
   hasPhoto?: boolean;
   sourceMessageId?: string;
+  sourceChatbotId?: number;
   logicalKey?: string;
   emotionBadges?: Array<{ code: string; label: string }>;
 };
@@ -159,6 +160,7 @@ function gemToItem(gem: Gem, index: number): AnalysisItem {
     createdAt: gem.createdAt,
     recordText: gem.sourceText,
     sourceMessageId: gem.sourceMessageId,
+    sourceChatbotId: gem.sourceChatbotId,
   };
 }
 
@@ -195,17 +197,21 @@ export function buildAnalysisItems(
     .filter((item) => dateInAnalysisPeriod(new Date(item.createdAt), period, today, customRange));
 
   const itemsWithRecord = filteredItems.map((item) => {
-    const sourceRecord = item.sourceMessageId
-      ? recordsBySourceMessageId.get(item.sourceMessageId)
-      : undefined;
+    const sourceRecord = item.sourceChatbotId !== undefined
+      ? recordsBySourceMessageId.get(String(item.sourceChatbotId))
+      : item.sourceMessageId
+        ? recordsBySourceMessageId.get(item.sourceMessageId)
+        : undefined;
     const dateRecord = recordDataByDate[toDateKey(new Date(item.createdAt))];
     const recordText = item.recordText ?? sourceRecord?.recordText ?? dateRecord?.recordText ?? null;
     const imageUrl = sourceRecord?.imageUrl ?? dateRecord?.imageUrl ?? null;
     const hasPhoto = sourceRecord?.hasPhoto ?? dateRecord?.hasPhoto ?? false;
     const logicalKey = sourceRecord
       ? logicalKeyForChatbotRecord(sourceRecord)
-      : item.sourceMessageId
-        ? `msg|${item.sourceMessageId}`
+      : item.sourceChatbotId !== undefined
+        ? `chatbot|${item.sourceChatbotId}`
+        : item.sourceMessageId
+          ? `msg|${item.sourceMessageId}`
         : `solo|${item.id}`;
     return {
       ...item,

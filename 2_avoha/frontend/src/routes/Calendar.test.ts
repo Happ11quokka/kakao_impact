@@ -6,9 +6,13 @@ import {
   buildCalendarSheetHeaderStyle,
   buildCalendarTimelineStyle,
   buildReclassifyBottomTabStyle,
+  buildReclassifyEmotionPickerStyle,
   buildReclassifyReflectionBlockStyle,
+  buildReclassifyReflectionSubmitStyle,
   buildReclassifyReflectionSummaryStyle,
+  buildReclassifySecondaryActionStyle,
   buildRecordGemBadges,
+  buildRecordReflectionSectionStyle,
   buildRecordTextSectionStyle,
   buildRecordReflection,
   calendarRecordEmotionCode,
@@ -97,12 +101,21 @@ describe('Calendar record reclassification helpers', () => {
     });
   });
 
-  it('keeps comfortable vertical space between the self-awareness answer and record content', () => {
+  it('keeps record content first and places the self-awareness question in a clear box below it', () => {
     expect(buildRecordTextSectionStyle(true)).toMatchObject({
-      marginTop: 18,
+      marginTop: 0,
+      marginBottom: 10,
     });
     expect(buildRecordTextSectionStyle(false)).toMatchObject({
       marginTop: 0,
+      marginBottom: 0,
+    });
+    expect(buildRecordReflectionSectionStyle()).toMatchObject({
+      marginTop: 8,
+      padding: '10px 11px',
+      border: '1px solid rgba(61, 96, 80, 0.14)',
+      borderRadius: 12,
+      background: 'rgba(255, 255, 255, 0.62)',
     });
   });
 
@@ -134,6 +147,54 @@ describe('Calendar record reclassification helpers', () => {
       pickerOpen: false,
       pickerToggleLabel: '작성완료',
       emotionLabel: '이 원석의 감정을 다시 골라주세요',
+    });
+  });
+
+  it('uses split actions for reflection completion and emotion reclassification', () => {
+    const confirmedRecord: RecordDto = {
+      ...baseRecord,
+      classificationStatus: 'user_confirmed',
+      confirmedEmotionCode: 'joy',
+      confirmedEmotionCodes: ['joy'],
+      gemEmotionCode: 'joy',
+      gemId: 'gem-joy',
+    };
+
+    expect(buildCalendarReclassifyAccordionState(confirmedRecord, false)).toEqual({
+      needsReflection: true,
+      pickerOpen: false,
+      pickerToggleLabel: '작성완료',
+      emotionLabel: '이 원석의 감정을 다시 골라주세요',
+    });
+    expect(buildReclassifySecondaryActionStyle()).toMatchObject({
+      background: '#F4E8CD',
+      color: '#1E3328',
+      borderRadius: 99,
+    });
+  });
+
+  it('makes 작성완료 light green before typing and dark green after typing', () => {
+    expect(buildReclassifyReflectionSubmitStyle('', false)).toMatchObject({
+      background: 'rgba(225, 237, 226, 0.74)',
+      color: 'rgba(61, 96, 80, 0.72)',
+      cursor: 'default',
+    });
+    expect(buildReclassifyReflectionSubmitStyle('오늘은 꽤 단단했다', false)).toMatchObject({
+      background: 'rgba(61, 96, 80, 0.96)',
+      color: '#FFFFFF',
+      cursor: 'pointer',
+    });
+    expect(buildReclassifyReflectionSubmitStyle('오늘은 꽤 단단했다', true)).toMatchObject({
+      display: 'none',
+    });
+  });
+
+  it('adds breathing room before the emotion picker after the reflection controls', () => {
+    expect(buildReclassifyEmotionPickerStyle(true)).toMatchObject({
+      marginTop: 14,
+    });
+    expect(buildReclassifyEmotionPickerStyle(false)).toMatchObject({
+      marginTop: 0,
     });
   });
 

@@ -447,10 +447,15 @@ CHATBOT_GEM_TO_EMOTION_CODE: dict[str, str] = {
     "걱정 조각": "solace",        # 오팔
     "긴장감 조각": "solace",
     "위축감 조각": "solace",
+    "초조 조각": "solace",
+    "공포 조각": "solace",
+    "경멸 조각": "annoyance",
     # 복잡/모호 계열
     "무기력함 조각": "untroubled", # 월장석
     "공허함 조각": "solace",      # 오팔
     "후회 조각": "regret",        # 연수정
+    "부끄러움 조각": "regret",
+    "혼란스러움 조각": "regret",
 }
 
 EMOTION_CATEGORIES = {
@@ -976,16 +981,29 @@ def save_gem(
     try:
         conn = psycopg2.connect(RAILWAY_DATABASE_URL)
         cur = conn.cursor()
+        emotion_code = CHATBOT_GEM_TO_EMOTION_CODE.get(gem)
         cur.execute(
-            "INSERT INTO chatbot (user_id, gem, record_text, has_photo, image_url, ai_gems, kakao_image_url, trace_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (user_id, gem, record_text, has_photo, persisted_image_url, ai_gems,
-             kakao_image_url, str(trace_id) if trace_id else None),
+            "INSERT INTO chatbot "
+            "(user_id, gem, record_text, has_photo, image_url, ai_gems, kakao_image_url, trace_id, "
+            "ai_emotion_code, confirmed_emotion_code, confirmed_emotion_codes) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) RETURNING id",
+            (
+                user_id,
+                gem,
+                record_text,
+                has_photo,
+                persisted_image_url,
+                ai_gems,
+                kakao_image_url,
+                str(trace_id) if trace_id else None,
+                emotion_code,
+                emotion_code,
+                json.dumps([emotion_code]) if emotion_code else None,
+            ),
         )
         inserted_id = cur.fetchone()[0]
 
         # gems 테이블에도 INSERT → 인벤토리 "광물" 탭에 표시
-        emotion_code = CHATBOT_GEM_TO_EMOTION_CODE.get(gem)
         if emotion_code:
             cur.execute(
                 "SELECT id FROM users WHERE provider_user_key = %s LIMIT 1",
@@ -995,9 +1013,9 @@ def save_gem(
             if user_row:
                 user_uuid = user_row[0]
                 cur.execute(
-                    "INSERT INTO gems (user_id, emotion_code, tier, source) "
-                    "VALUES (%s, %s, 1, %s)",
-                    (user_uuid, emotion_code, "chatbot"),
+                    "INSERT INTO gems (user_id, emotion_code, tier, source, source_chatbot_id) "
+                    "VALUES (%s, %s, 1, %s, %s)",
+                    (user_uuid, emotion_code, "chatbot", inserted_id),
                 )
                 print(f"[save_gem] synced to gems table: user={user_uuid}, emotion={emotion_code}")
             else:

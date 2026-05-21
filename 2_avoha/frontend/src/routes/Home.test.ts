@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildActiveRecordGemBadges,
   buildHomeLakeCircleStyle,
+  buildHomeLakeStageStyle,
   buildHomeJoystickStyle,
   buildHomeStoneGemLayout,
   buildTodayCategoryGemSlots,
@@ -166,10 +167,18 @@ describe('Home stone + active record helpers', () => {
     });
   });
 
-  it('clips the home lake circle and keeps the joystick fully inside it', () => {
+  it('keeps the lake clipped but places the joystick outside the circle on a visible stage', () => {
     expect(buildHomeLakeCircleStyle().overflow).toBe('hidden');
-    expect(buildHomeJoystickStyle().right).toBe(40);
-    expect(buildHomeJoystickStyle().bottom).toBe(40);
+    expect(buildHomeLakeStageStyle()).toMatchObject({
+      position: 'relative',
+      width: 316,
+      height: 316,
+      overflow: 'visible',
+    });
+    expect(buildHomeJoystickStyle()).toMatchObject({
+      right: -18,
+      bottom: -18,
+    });
   });
 
   it('clamps the mascot center far enough inside the circular lake to keep the full avatar visible', () => {

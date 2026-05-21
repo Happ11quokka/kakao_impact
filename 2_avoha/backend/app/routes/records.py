@@ -31,12 +31,17 @@ CHATBOT_GEM_TO_EMOTION_CODE: dict[str, str] = {
     "억울함 조각": "annoyance",
     "화남 조각": "annoyance",
     "적대감 조각": "annoyance",
+    "경멸 조각": "annoyance",
     "걱정 조각": "solace",
     "긴장감 조각": "solace",
     "위축감 조각": "solace",
+    "초조 조각": "solace",
+    "공포 조각": "solace",
     "무기력함 조각": "untroubled",
     "공허함 조각": "solace",
     "후회 조각": "regret",
+    "부끄러움 조각": "regret",
+    "혼란스러움 조각": "regret",
 }
 
 

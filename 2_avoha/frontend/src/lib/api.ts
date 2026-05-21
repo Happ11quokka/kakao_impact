@@ -106,6 +106,7 @@ export interface GemDto {
   tier: 1 | 2 | 3 | 4;
   source: string | null;
   sourceMessageId: string | null;
+  sourceChatbotId?: number | null;
   craftedFrom: string[];
   createdAt: string;
 }
