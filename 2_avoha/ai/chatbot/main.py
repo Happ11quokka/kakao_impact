@@ -443,13 +443,13 @@ CHATBOT_GEM_TO_EMOTION_CODE: dict[str, str] = {
     "억울함 조각": "annoyance",
     "화남 조각": "annoyance",
     "적대감 조각": "annoyance",
+    "경멸 조각": "annoyance",
     # 불안/두려움 계열
     "걱정 조각": "solace",        # 오팔
     "긴장감 조각": "solace",
     "위축감 조각": "solace",
     "초조 조각": "solace",
     "공포 조각": "solace",
-    "경멸 조각": "annoyance",
     # 복잡/모호 계열
     "무기력함 조각": "untroubled", # 월장석
     "공허함 조각": "solace",      # 오팔
@@ -515,9 +515,25 @@ AUDIO_NOT_SUPPORTED_MESSAGE = (
 
 WEB_URL = "https://frontend-production-09f81.up.railway.app/login"
 _IMG_BASE = f"{ASSET_BASE_URL}/gems/"
-DEFAULT_CARD_IMAGE = _IMG_BASE + "depression.png"
+DEFAULT_CARD_IMAGE = _IMG_BASE + "default.png"
 ALL_GEMS_IMAGE = _IMG_BASE + "all_gems.png"
-MASCOT_IMAGE = _IMG_BASE + "character_2x1.png"
+MASCOT_IMAGE = DEFAULT_CARD_IMAGE
+SIMPLE_MODE_IMAGE = _IMG_BASE + "simple_mode.png"
+CONVERSATION_MODE_IMAGE = _IMG_BASE + "conversation_mode.png"
+TODAY_RECORDS_IMAGE = _IMG_BASE + "today_records.png"
+MULTI_EMOTION_IMAGE = _IMG_BASE + "multi_emotion.png"
+CATEGORY_IMAGE_URL = {
+    "슬픔 계열": _IMG_BASE + "category_sadness.png",
+    "불안/두려움 계열": _IMG_BASE + "category_anxiety.png",
+    "분노 계열": _IMG_BASE + "category_anger.png",
+    "기쁨/긍정 계열": _IMG_BASE + "category_positive.png",
+    "복잡/모호 계열": _IMG_BASE + "category_complex.png",
+}
+GEM_CATEGORY_IMAGE_URL = {
+    EMOTION_TO_GEM[emotion]: CATEGORY_IMAGE_URL[category]
+    for category, emotions in EMOTION_CATEGORIES.items()
+    for emotion in emotions
+}
 GEM_IMAGE_URL = {
     "우울함 조각":   _IMG_BASE + "depression.png",
     "외로움 조각":   _IMG_BASE + "loneliness.png",
@@ -545,6 +561,10 @@ GEM_IMAGE_URL = {
     "부끄러움 조각": _IMG_BASE + "shame.png",
     "혼란스러움 조각": _IMG_BASE + "confusion.png",
 }
+
+
+def _gem_save_image_url(gem: str) -> str:
+    return GEM_CATEGORY_IMAGE_URL.get(gem, DEFAULT_CARD_IMAGE)
 
 
 def _thumbnail(url: str | None) -> dict:
@@ -1610,7 +1630,7 @@ def kakao_save_complete(gem: str, today_count: int, user_id: str = "", alert_msg
         "description": description,
         "buttons": [{"action": "webLink", "label": "조각 기록들 살펴보기", "webLinkUrl": link_url}],
     }
-    card.update(_thumbnail(GEM_IMAGE_URL.get(gem)))
+    card.update(_thumbnail(_gem_save_image_url(gem)))
     return {
         "version": "2.0",
         "template": {
@@ -1635,7 +1655,7 @@ def kakao_multi_save_complete(gems: list[str], today_count: int, user_id: str = 
             "outputs": [{"basicCard": {
                 "title": f"{saved_names}{_josa_eul(saved_names)} 수집했어요!",
                 "description": description,
-                "thumbnail": {"imageUrl": ALL_GEMS_IMAGE},
+                "thumbnail": {"imageUrl": MULTI_EMOTION_IMAGE},
                 "buttons": [{"action": "webLink", "label": "조각 기록들 살펴보기", "webLinkUrl": link_url}],
             }}],
             "quickReplies": BASE_QUICK_REPLIES,
@@ -2029,7 +2049,7 @@ def kakao_today_records(user_id: str) -> dict:
             f"지금까지 총 {emotion_count}개의 감정원석과 {daily_count}개의 일상을 저장했어요.\n\n"
             "웹에서 오늘까지 쌓아온 모든 기록과 분석을 만나보세요!"
         ),
-        "thumbnail": {"imageUrl": MASCOT_IMAGE},
+        "thumbnail": {"imageUrl": TODAY_RECORDS_IMAGE},
         "buttons": [{"action": "webLink", "label": "웹 방문하기", "webLinkUrl": link_url}],
     }]
 
@@ -2037,7 +2057,7 @@ def kakao_today_records(user_id: str) -> dict:
         items.append({
             "title": "오늘 저장한 기록이 아직 없어요.",
             "description": "일상을 보내주시면 오늘 기록에 담아둘게요.",
-            "thumbnail": {"imageUrl": MASCOT_IMAGE},
+            "thumbnail": {"imageUrl": TODAY_RECORDS_IMAGE},
             "buttons": [{"action": "webLink", "label": "웹 방문하기", "webLinkUrl": link_url}],
         })
 
@@ -2314,7 +2334,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                         "수집한 감정원석을 통해 웹에서 내 감정을 더 자세히 들여다 볼 수 있어요.\n"
                         "챗봇과 대화하고 싶지 않은 날에는 단순기록 모드로 기록만 남겨도 좋아요."
                     ),
-                    "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                    "thumbnail": {"imageUrl": CONVERSATION_MODE_IMAGE},
                     "buttons": [{"action": "webLink", "label": "감정 들여다보기", "webLinkUrl": link_url}],
                 }}],
                 "quickReplies": [
@@ -2337,7 +2357,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                         "기록한 데이터는 AI가 감정 원석을 발견해 저장해드려요.\n"
                         "분석된 감정원석은 언제든지 아래 웹에서 확인할 수 있어요!"
                     ),
-                    "thumbnail": {"imageUrl": MASCOT_IMAGE},
+                    "thumbnail": {"imageUrl": SIMPLE_MODE_IMAGE},
                     "buttons": [{"action": "webLink", "label": "감정 들여다보기", "webLinkUrl": link_url}],
                 }}],
                 "quickReplies": [
@@ -2843,4 +2863,3 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     if greeting:
         response = _prepend_greeting(response, greeting)
     return JSONResponse(response)
-
