@@ -26,4 +26,5 @@
 - Browser visual check: Home joystick is now outside the lake circle; Calendar no longer shows `작성완료됨`, keeps `감정 재분류하기`, and record self-awareness question computed style is boxed.
 
 ## Done
-- Pending commit and push.
+- Committed and pushed to `origin/main`.
+- Commit: `ea2fe46` (`fix: align Avoha emotion flow and calendar UX`).
