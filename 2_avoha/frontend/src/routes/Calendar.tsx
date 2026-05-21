@@ -92,6 +92,106 @@ export function buildRecordReflection(record: RecordDto): RecordReflection | nul
   return { question, answer };
 }
 
+export type CalendarReclassifyAccordionState = {
+  needsReflection: boolean;
+  pickerOpen: boolean;
+  pickerToggleLabel: string | null;
+  emotionLabel: string;
+};
+
+export function buildRecordTextSectionStyle(hasReflection: boolean): CSSProperties {
+  return {
+    marginTop: hasReflection ? 18 : 0,
+  };
+}
+
+export function buildCalendarReclassifyAccordionState(
+  record: RecordDto,
+  requestedPickerOpen: boolean,
+): CalendarReclassifyAccordionState {
+  const action = buildRecordReclassifyAction(record);
+  const needsReflection = action.interaction === 'reclassify';
+  return {
+    needsReflection,
+    pickerOpen: needsReflection ? requestedPickerOpen : true,
+    pickerToggleLabel: needsReflection ? '작성완료' : null,
+    emotionLabel: needsReflection ? '이 원석의 감정을 다시 골라주세요' : '이 기록의 감정을 골라주세요',
+  };
+}
+
+export function buildCalendarTimelineStyle(): CSSProperties {
+  return {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 18,
+    marginBottom: 8,
+  };
+}
+
+export function buildReclassifyBottomTabStyle(): CSSProperties {
+  return {
+    marginTop: 12,
+    width: '100%',
+    border: '1px solid rgba(255, 255, 255, 0.28)',
+    borderRadius: 12,
+    background: 'rgba(61, 96, 80, 0.96)',
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: 900,
+    padding: '11px 12px',
+    cursor: 'pointer',
+    textAlign: 'center',
+    boxShadow: '0 8px 18px rgba(30, 51, 40, 0.18)',
+  };
+}
+
+export function buildReclassifyReflectionBlockStyle(completed: boolean): CSSProperties {
+  return {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 10,
+    background: completed ? 'rgba(225, 237, 226, 0.86)' : 'rgba(255, 255, 255, 0.72)',
+    border: completed ? '1px solid rgba(61, 96, 80, 0.18)' : '1px solid rgba(86, 71, 48, 0.08)',
+    boxShadow: completed ? 'inset 0 0 0 1px rgba(255, 255, 255, 0.2)' : 'none',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    transition: 'background 160ms ease, border 160ms ease, box-shadow 160ms ease',
+  };
+}
+
+export function buildReclassifyReflectionSummaryStyle(): CSSProperties {
+  return {
+    margin: 0,
+    padding: '8px 10px',
+    borderRadius: 8,
+    background: 'rgba(61, 96, 80, 0.08)',
+    border: '1px solid rgba(61, 96, 80, 0.14)',
+    color: TEXT_MAIN,
+    fontSize: 12,
+    fontWeight: 700,
+    fontFamily: 'inherit',
+    lineHeight: 1.5,
+    wordBreak: 'keep-all',
+  };
+}
+
+export function buildCalendarSheetHeaderStyle(): CSSProperties {
+  return {
+    position: 'sticky',
+    top: 0,
+    zIndex: 3,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    margin: '0 -18px 14px',
+    padding: '10px 18px 12px',
+    gap: 10,
+    background: DETAIL_PANEL,
+    boxShadow: '0 8px 14px rgba(160, 188, 168, 0.74)',
+  };
+}
+
 export type DayQuestionStatus = 'none' | 'unanswered' | 'answered';
 
 // 하루에 받은 자기인지 질문 중 하나라도 답하면 answered.
@@ -641,10 +741,10 @@ function RecordDetail({
       )}
 
       {record.recordText && (
-        <>
+        <div style={buildRecordTextSectionStyle(Boolean(reflection))}>
           <div style={styles.recordLabel}>기록 내용</div>
           <p style={styles.recordText}>{record.recordText}</p>
-        </>
+        </div>
       )}
     </div>
   );
@@ -672,37 +772,46 @@ function ReclassifyAccordion({
   onSave: () => void;
 }) {
   const action = buildRecordReclassifyAction(record);
+  const state = buildCalendarReclassifyAccordionState(record, pickerOpen);
   const canSave = selection.length > 0 && !saving;
 
   return (
     <div style={styles.reclassifyBox} aria-label={`${action.label} 아코디언`}>
-      <div style={styles.reclassifyReflectionBlock}>
-        <div style={styles.recordLabel}>이 한 줄 회고</div>
-        <p style={styles.reclassifyReflectionQuestion}>
-          Q. 이 기록에 대해서 한줄로 표현한다면 어떤 문장일까요?
-        </p>
-        <textarea
-          value={reflection}
-          maxLength={200}
-          placeholder="짧게 한 문장으로 적어도 괜찮아요. (선택)"
-          disabled={saving}
-          onChange={(event) => onReflectionChange(event.target.value)}
-          style={styles.reclassifyReflectionTextarea}
-        />
-      </div>
+      {state.needsReflection && (
+        <div style={buildReclassifyReflectionBlockStyle(state.pickerOpen)}>
+          <div style={styles.recordLabel}>이 한 줄 회고</div>
+          <p style={styles.reclassifyReflectionQuestion}>
+            Q. 이 기록에 대해서 한줄로 표현한다면 어떤 문장일까요?
+          </p>
+          {!state.pickerOpen ? (
+            <textarea
+              value={reflection}
+              maxLength={200}
+              placeholder="짧게 한 문장으로 적어도 괜찮아요. (선택)"
+              disabled={saving}
+              onChange={(event) => onReflectionChange(event.target.value)}
+              style={styles.reclassifyReflectionTextarea}
+            />
+          ) : (
+            <p style={styles.reclassifyReflectionSummary}>
+              {reflection.trim() || '한 줄 회고 없이 감정을 다시 골라볼게요.'}
+            </p>
+          )}
+        </div>
+      )}
 
-      {!pickerOpen ? (
+      {!state.pickerOpen ? (
         <button
           type="button"
           onClick={onOpenPicker}
           aria-label="감정 재분류 펼치기"
           style={styles.reclassifyBottomTab}
         >
-          감정 재분류하기
+          {state.pickerToggleLabel}
         </button>
       ) : (
         <>
-          <div style={styles.recordLabel}>이 원석의 감정을 다시 골라주세요</div>
+          <div style={styles.recordLabel}>{state.emotionLabel}</div>
           <p style={styles.reclassifyHint}>여러 감정이 함께 떠오르면 모두 골라주세요.</p>
           <div style={styles.emotionGrid}>
             {EMOTIONS.map((emotion) => {
@@ -1000,11 +1109,7 @@ const styles: Record<string, CSSProperties> = {
     background: 'rgba(30, 51, 40, 0.22)',
   },
   sheetHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-    gap: 10,
+    ...buildCalendarSheetHeaderStyle(),
   },
   sheetDate: {
     color: TEXT_MAIN,
@@ -1073,10 +1178,7 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 800,
   },
   timeline: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-    marginBottom: 8,
+    ...buildCalendarTimelineStyle(),
   },
   timelineRow: {
     display: 'grid',
@@ -1239,17 +1341,7 @@ const styles: Record<string, CSSProperties> = {
     cursor: 'pointer',
   },
   reclassifyBottomTab: {
-    marginTop: 12,
-    width: '100%',
-    border: 0,
-    borderRadius: 12,
-    background: '#F4E8CD',
-    color: TEXT_MAIN,
-    fontSize: 11,
-    fontWeight: 800,
-    padding: '10px 12px',
-    cursor: 'pointer',
-    textAlign: 'center',
+    ...buildReclassifyBottomTabStyle(),
   },
   reclassifyBox: {
     marginTop: 12,
@@ -1323,14 +1415,7 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 800,
   },
   reclassifyReflectionBlock: {
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 10,
-    background: 'rgba(255, 255, 255, 0.72)',
-    border: '1px solid rgba(86, 71, 48, 0.08)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
+    ...buildReclassifyReflectionBlockStyle(false),
   },
   reclassifyReflectionQuestion: {
     margin: 0,
@@ -1355,6 +1440,9 @@ const styles: Record<string, CSSProperties> = {
     resize: 'none',
     outline: 'none',
     boxSizing: 'border-box',
+  },
+  reclassifyReflectionSummary: {
+    ...buildReclassifyReflectionSummaryStyle(),
   },
   toast: {
     position: 'absolute',

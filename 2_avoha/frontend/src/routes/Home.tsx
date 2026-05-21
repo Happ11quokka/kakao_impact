@@ -24,6 +24,7 @@ const PROXIMITY_PROMPT_RADIUS = 18;
 const JOYSTICK_KNOB_LIMIT = 24;
 const JOYSTICK_SPEED = 0.036;
 const MASCOT_SIZE = 58;
+const LAKE_CIRCLE_SIZE = 316;
 const MEDITATION_SECONDS = 5;
 
 const GEM_BOX_CATEGORY_ORDER: CategoryCode[] = ['joy', 'sadness', 'anger', 'anxiety', 'complex'];
@@ -98,17 +99,18 @@ type LakeStone = {
   status: 'candidate' | 'confirmed';
 };
 
-function clampToLake(position: FieldPosition): FieldPosition {
+export function clampMascotPositionToLake(position: FieldPosition): FieldPosition {
+  const visibleRadius = LAKE_MOVE_RADIUS - (MASCOT_SIZE / 2 / LAKE_CIRCLE_SIZE) * 100;
   const dx = position.x - 50;
   const dy = position.y - 50;
   const d = Math.hypot(dx, dy);
-  if (d <= LAKE_MOVE_RADIUS) {
+  if (d <= visibleRadius) {
     return {
-      x: Math.max(2, Math.min(98, position.x)),
-      y: Math.max(2, Math.min(98, position.y)),
+      x: Math.max(50 - visibleRadius, Math.min(50 + visibleRadius, position.x)),
+      y: Math.max(50 - visibleRadius, Math.min(50 + visibleRadius, position.y)),
     };
   }
-  const scale = LAKE_MOVE_RADIUS / d;
+  const scale = visibleRadius / d;
   return {
     x: 50 + dx * scale,
     y: 50 + dy * scale,
@@ -388,7 +390,7 @@ export default function Home() {
       lastFrameRef.current = now;
       const vector = joystickVectorRef.current;
       setMascotPosition((position) =>
-        clampToLake({
+        clampMascotPositionToLake({
           x: position.x + vector.x * dt * JOYSTICK_SPEED,
           y: position.y + vector.y * dt * JOYSTICK_SPEED,
         }),

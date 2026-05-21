@@ -101,6 +101,14 @@ const STATIC_REFLECTION_PROMPTS = [
   '내일의 나에게 짧은 메모를 남긴다면?',
 ];
 
+export function buildAnalysisReflectionSubmitStyle(disabled: boolean): CSSProperties {
+  return {
+    background: '#2F5F46',
+    opacity: disabled ? 0.55 : 1,
+    cursor: disabled ? 'default' : 'pointer',
+  };
+}
+
 function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -694,8 +702,7 @@ export default function Analysis() {
             }}
             style={{
               ...styles.reflectionSubmit,
-              opacity: savingReflection || reflectionDraft.trim().length === 0 ? 0.5 : 1,
-              cursor: savingReflection || reflectionDraft.trim().length === 0 ? 'default' : 'pointer',
+              ...buildAnalysisReflectionSubmitStyle(savingReflection || reflectionDraft.trim().length === 0),
             }}
           >
             {savingReflection ? '저장 중…' : '자기회고 남기기'}
@@ -1372,7 +1379,7 @@ const styles: Record<string, CSSProperties> = {
     border: 0,
     borderRadius: 10,
     padding: '10px 18px',
-    background: '#A0BCA8',
+    background: '#2F5F46',
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: 700,

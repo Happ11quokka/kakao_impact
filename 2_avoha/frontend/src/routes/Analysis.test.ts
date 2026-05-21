@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAnalysisItems,
+  buildAnalysisReflectionSubmitStyle,
   buildRecapThemes,
   dateInAnalysisPeriod,
   pickReflectionPrompt,
@@ -189,6 +190,12 @@ describe('Analysis recap themes', () => {
     ]);
 
     expect(themes[0].records).toHaveLength(2);
+  });
+});
+
+describe('Analysis reflection button style', () => {
+  it('uses a dark primary color even when enabled', () => {
+    expect(buildAnalysisReflectionSubmitStyle(false).background).toBe('#2F5F46');
   });
 });
 

@@ -5,6 +5,7 @@ import {
   buildHomeJoystickStyle,
   buildHomeStoneGemLayout,
   buildTodayCategoryGemSlots,
+  clampMascotPositionToLake,
   needsLakeReview,
 } from './Home';
 import type { RecordDto } from '../lib/api';
@@ -169,6 +170,13 @@ describe('Home stone + active record helpers', () => {
     expect(buildHomeLakeCircleStyle().overflow).toBe('hidden');
     expect(buildHomeJoystickStyle().right).toBe(40);
     expect(buildHomeJoystickStyle().bottom).toBe(40);
+  });
+
+  it('clamps the mascot center far enough inside the circular lake to keep the full avatar visible', () => {
+    expect(clampMascotPositionToLake({ x: 98, y: 50 }).x).toBeLessThanOrEqual(91);
+    expect(clampMascotPositionToLake({ x: 50, y: 98 }).y).toBeLessThanOrEqual(91);
+    const corner = clampMascotPositionToLake({ x: 98, y: 98 });
+    expect(Math.hypot(corner.x - 50, corner.y - 50)).toBeLessThanOrEqual(41);
   });
 
   it('builds all confirmed emotion badges for the active recap sheet', () => {

@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCalendarDayDots,
   buildCalendarEmotionDots,
+  buildCalendarReclassifyAccordionState,
+  buildCalendarSheetHeaderStyle,
+  buildCalendarTimelineStyle,
+  buildReclassifyBottomTabStyle,
+  buildReclassifyReflectionBlockStyle,
+  buildReclassifyReflectionSummaryStyle,
   buildRecordGemBadges,
+  buildRecordTextSectionStyle,
   buildRecordReflection,
   calendarRecordEmotionCode,
   calendarRecordEmotionCodes,
@@ -90,8 +97,81 @@ describe('Calendar record reclassification helpers', () => {
     });
   });
 
+  it('keeps comfortable vertical space between the self-awareness answer and record content', () => {
+    expect(buildRecordTextSectionStyle(true)).toMatchObject({
+      marginTop: 18,
+    });
+    expect(buildRecordTextSectionStyle(false)).toMatchObject({
+      marginTop: 0,
+    });
+  });
+
   it('does not render an empty reflection block when the record has no question', () => {
     expect(buildRecordReflection(baseRecord)).toBeNull();
+  });
+
+  it('opens unclassified records directly on emotion selection without self-awareness reflection', () => {
+    expect(buildCalendarReclassifyAccordionState(baseRecord, false)).toEqual({
+      needsReflection: false,
+      pickerOpen: true,
+      pickerToggleLabel: null,
+      emotionLabel: '이 기록의 감정을 골라주세요',
+    });
+  });
+
+  it('keeps confirmed records in reflection-first mode and labels the next step as 작성완료', () => {
+    const confirmed: RecordDto = {
+      ...baseRecord,
+      classificationStatus: 'user_confirmed',
+      confirmedEmotionCode: 'joy',
+      confirmedEmotionCodes: ['joy'],
+      gemEmotionCode: 'joy',
+      gemId: 'gem-joy',
+    };
+
+    expect(buildCalendarReclassifyAccordionState(confirmed, false)).toEqual({
+      needsReflection: true,
+      pickerOpen: false,
+      pickerToggleLabel: '작성완료',
+      emotionLabel: '이 원석의 감정을 다시 골라주세요',
+    });
+  });
+
+  it('uses a wider vertical gap between records in the date popup', () => {
+    expect(buildCalendarTimelineStyle().gap).toBe(18);
+  });
+
+  it('uses a contextual filled CTA style for the 작성완료 step', () => {
+    expect(buildReclassifyBottomTabStyle()).toMatchObject({
+      background: 'rgba(61, 96, 80, 0.96)',
+      color: '#FFFFFF',
+      boxShadow: '0 8px 18px rgba(30, 51, 40, 0.18)',
+    });
+  });
+
+  it('uses a completed green state for the one-line reflection box after 작성완료', () => {
+    expect(buildReclassifyReflectionBlockStyle(false)).toMatchObject({
+      background: 'rgba(255, 255, 255, 0.72)',
+      border: '1px solid rgba(86, 71, 48, 0.08)',
+    });
+    expect(buildReclassifyReflectionBlockStyle(true)).toMatchObject({
+      background: 'rgba(225, 237, 226, 0.86)',
+      border: '1px solid rgba(61, 96, 80, 0.18)',
+      boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.2)',
+    });
+    expect(buildReclassifyReflectionSummaryStyle()).toMatchObject({
+      background: 'rgba(61, 96, 80, 0.08)',
+      border: '1px solid rgba(61, 96, 80, 0.14)',
+    });
+  });
+
+  it('keeps the date popup header sticky while records scroll', () => {
+    expect(buildCalendarSheetHeaderStyle()).toMatchObject({
+      position: 'sticky',
+      top: 0,
+      zIndex: 3,
+      background: '#A0BCA8',
+    });
   });
 });
 
