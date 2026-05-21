@@ -1663,6 +1663,12 @@ def kakao_multi_save_complete(gems: list[str], today_count: int, user_id: str = 
     }
 
 
+def kakao_gem_save_complete(gems: list[str], today_count: int, user_id: str = "", alert_msg: str = "") -> dict:
+    if len(gems) == 1:
+        return kakao_save_complete(gems[0], today_count, user_id, alert_msg)
+    return kakao_multi_save_complete(gems, today_count, user_id, alert_msg)
+
+
 def kakao_daily_save_complete(user_id: str = "") -> dict:
     link_url = f"{WEB_URL}?kakao_hash={user_id}" if user_id else WEB_URL
     return {
@@ -2463,7 +2469,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         pending_emotion_selection.pop(user_id, None)
         today_count = _reserve_today_gem_count(user_id, len(gems_to_save))
         alert_msg = check_negative_accumulation(user_id)
-        response = kakao_multi_save_complete(gems_to_save, today_count, user_id, alert_msg or "")
+        response = kakao_gem_save_complete(gems_to_save, today_count, user_id, alert_msg or "")
         for gem in gems_to_save:
             response = _maybe_attach_reflection_invite(response, user_id, gem, sel["text"])
             if user_id in pending_reflection:
@@ -2498,7 +2504,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         pending_emotion_selection.pop(user_id, None)
         today_count = _reserve_today_gem_count(user_id, len(gems_to_save))
         alert_msg = check_negative_accumulation(user_id)
-        response = kakao_multi_save_complete(gems_to_save, today_count, user_id, alert_msg or "")
+        response = kakao_gem_save_complete(gems_to_save, today_count, user_id, alert_msg or "")
         for gem in gems_to_save:
             response = _maybe_attach_reflection_invite(response, user_id, gem, sel["text"])
             if user_id in pending_reflection:
