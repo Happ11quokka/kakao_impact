@@ -1684,7 +1684,7 @@ def _build_ai_response(user_id: str, utterance: str, has_photo: bool, image_url:
                     "description": "오늘 있었던 일이나 지금 느끼는 마음을 적어봐요.",
                     "thumbnail": {"imageUrl": MASCOT_IMAGE},
                     "buttons": [
-                        {"action": "webLink", "label": "웹사이트", "webLinkUrl": WEB_URL},
+                        {"action": "webLink", "label": "웹 방문하기", "webLinkUrl": WEB_URL},
                     ],
                 }}],
                 "quickReplies": BASE_QUICK_REPLIES,
