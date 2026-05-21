@@ -127,7 +127,7 @@ export default function Login() {
           유로그(Ulog)
         </h1>
         <p style={{ fontSize: 14, color: 'var(--color-ink-muted)', lineHeight: 1.6 }}>
-          카카오톡 일상이 감정 광물이 됩니다.
+          카카오톡 일상이 감정 원석이 됩니다.
           <br />
           오늘 하루를 채집해보세요.
         </p>
