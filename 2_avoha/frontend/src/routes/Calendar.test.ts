@@ -293,6 +293,26 @@ describe('Calendar record gem badges', () => {
     expect(badges.map((badge) => badge.gem.emotionCode)).toEqual(['joy', 'pride']);
     expect(badges.map((badge) => badge.label)).toEqual(['기쁨', '뿌듯']);
   });
+
+  it('uses detailed chatbot gem labels when representative emotion codes are duplicated', () => {
+    const badges = buildRecordGemBadges({
+      ...baseRecord,
+      id: 20,
+      classificationStatus: 'user_confirmed',
+      confirmedEmotionCode: 'regret',
+      confirmedEmotionCodes: ['regret'],
+      gemEmotionCode: 'regret',
+      gemId: 'gem-regret',
+      detailedEmotionBadges: [
+        { code: 'regret', label: '혼란스러움', gem: '혼란스러움 조각' },
+        { code: 'regret', label: '후회', gem: '후회 조각' },
+      ],
+    });
+
+    expect(badges.map((badge) => badge.gem.emotionCode)).toEqual(['regret', 'regret']);
+    expect(badges.map((badge) => badge.label)).toEqual(['혼란스러움', '후회']);
+    expect(badges.map((badge) => badge.gem.id)).toEqual(['gem-regret', 'record-20-regret-1']);
+  });
 });
 
 describe('Calendar day question status', () => {

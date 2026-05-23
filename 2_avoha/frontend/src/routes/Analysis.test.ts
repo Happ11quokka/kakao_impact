@@ -77,6 +77,25 @@ describe('Analysis record enrichment', () => {
     expect(item.recordText).toBe('챗봇에서 실제로 채집한 뿌듯함 기록');
     expect(item.imageUrl).toBe('https://example.com/exact.jpg');
   });
+
+  it('preserves original chatbot gem labels when analysis items share a representative emotion code', () => {
+    const gems: Gem[] = [
+      { ...baseGem, id: 'gem-confusion', emotionCode: 'regret', sourceChatbotId: 301 },
+      { ...baseGem, id: 'gem-regret', emotionCode: 'regret', sourceChatbotId: 302 },
+    ];
+    const records: ChatbotRecordDto[] = [
+      { ...baseRecord, id: 301, gem: '혼란스러움 조각', recordText: '복잡한 하루였다.', createdAt: '2026-05-18T10:00:01.000Z' },
+      { ...baseRecord, id: 302, gem: '후회 조각', recordText: '복잡한 하루였다.', createdAt: '2026-05-18T10:00:02.000Z' },
+    ];
+
+    const items = buildAnalysisItems(gems, records, 'weekly', today);
+
+    expect(items.map((item) => item.label)).toEqual(['혼란스러움', '후회']);
+    expect(items[0].emotionBadges).toEqual([
+      { code: 'regret', label: '혼란스러움' },
+      { code: 'regret', label: '후회' },
+    ]);
+  });
 });
 
 describe('Analysis recap themes', () => {
@@ -155,6 +174,20 @@ describe('Analysis recap themes', () => {
     ]);
 
     expect(themes[0].records).toHaveLength(1);
+  });
+
+  it('keeps same-code detailed labels inside one recap moment', () => {
+    const themes = buildRecapThemes([
+      { ...items[3], id: 'confusion-102', emotionCode: 'regret', label: '혼란스러움', recordText: '복잡한 하루였다.' },
+      { ...items[3], id: 'regret-102', emotionCode: 'regret', label: '후회', recordText: '복잡한 하루였다.' },
+    ]);
+
+    expect(themes[0].records).toHaveLength(1);
+    expect(themes[0].records[0].label).toBe('혼란스러움·후회');
+    expect(themes[0].records[0].emotionBadges).toEqual([
+      { code: 'regret', label: '혼란스러움' },
+      { code: 'regret', label: '후회' },
+    ]);
   });
 
   it('deduplicates items that share the same record text on the same day (different source messages)', () => {

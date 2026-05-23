@@ -94,6 +94,20 @@ describe('Home today category gem slots', () => {
     expect(joy?.records).toEqual([record]);
   });
 
+  it('counts detailed chatbot gem badges separately even when they share one representative category', () => {
+    const record = {
+      ...makeConfirmed({ id: 22, codes: ['regret'] }),
+      detailedEmotionBadges: [
+        { code: 'regret', label: '혼란스러움', gem: '혼란스러움 조각' },
+        { code: 'regret', label: '후회', gem: '후회 조각' },
+      ],
+    };
+    const slots = buildTodayCategoryGemSlots([record], today);
+    const complex = slots.find((slot) => slot.category === 'complex');
+    expect(complex?.count).toBe(2);
+    expect(complex?.records).toEqual([record, record]);
+  });
+
   it('spreads multi-category emotions across categories', () => {
     const record = makeConfirmed({ id: 3, codes: ['joy', 'sadness'] });
     const slots = buildTodayCategoryGemSlots([record], today);
@@ -203,6 +217,27 @@ describe('Home stone + active record helpers', () => {
       { code: 'joy', label: '기쁨' },
       { code: 'pride', label: '뿌듯' },
       { code: 'flutter', label: '설렘' },
+    ]);
+  });
+
+  it('uses original chatbot gem labels in the active recap sheet', () => {
+    const detailedRecord = {
+      ...baseRecord,
+      id: 5,
+      classificationStatus: 'user_confirmed' as const,
+      confirmedEmotionCode: 'regret',
+      confirmedEmotionCodes: ['regret'],
+      gemEmotionCode: 'regret',
+      gemId: 'gem-regret',
+      detailedEmotionBadges: [
+        { code: 'regret', label: '혼란스러움', gem: '혼란스러움 조각' },
+        { code: 'regret', label: '후회', gem: '후회 조각' },
+      ],
+    };
+
+    expect(buildActiveRecordGemBadges(detailedRecord)).toEqual([
+      { code: 'regret', label: '혼란스러움' },
+      { code: 'regret', label: '후회' },
     ]);
   });
 });

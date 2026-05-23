@@ -8,7 +8,7 @@ import GemStone from '../components/pixel/GemStone';
 import PhotoLightbox from '../components/PhotoLightbox';
 import { useRecordsStore } from '../stores/records-store';
 import { buildRecordReclassifyAction } from '../lib/reclassify-flow';
-import { dedupeLogicalRecords } from '../lib/logical-record';
+import { buildRecordDetailedEmotionBadges, dedupeLogicalRecords } from '../lib/logical-record';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const CALENDAR_BG = '#F9F4EA';
@@ -275,22 +275,27 @@ export type RecordGemBadge = {
 };
 
 export function buildRecordGemBadges(record: RecordDto): RecordGemBadge[] {
-  const emotionCodes = calendarRecordEmotionCodes(record);
-  const displayCodes = emotionCodes.length > 0 ? emotionCodes : ['unclassified'];
+  const detailedBadges = buildRecordDetailedEmotionBadges(record);
+  const displayBadges = detailedBadges.length > 0
+    ? detailedBadges
+    : calendarRecordEmotionCodes(record).map((code) => ({ code, label: getEmotion(code)?.nameKo ?? code, gem: code }));
+  const finalBadges = displayBadges.length > 0
+    ? displayBadges
+    : [{ code: 'unclassified', label: '미분류', gem: 'unclassified' }];
 
-  return displayCodes.map((emotionCode, index) => {
-    const emotion = getEmotion(emotionCode);
-    return {
-      gem: {
-        id: index === 0 && record.gemId && emotionCode !== 'unclassified' ? record.gemId : `record-${record.id}-${emotionCode}-${index}`,
-        emotionCode,
-        tier: 1,
-        createdAt: record.createdAt,
-        consumedAt: null,
-      },
-      label: emotion?.nameKo ?? emotionCode,
-    };
-  });
+  return finalBadges.map((badge, index) => ({
+    gem: {
+      id:
+        index === 0 && record.gemId && badge.code !== 'unclassified'
+          ? record.gemId
+          : `record-${record.id}-${badge.code}-${index}`,
+      emotionCode: badge.code,
+      tier: 1,
+      createdAt: record.createdAt,
+      consumedAt: null,
+    },
+    label: badge.label,
+  }));
 }
 
 export function buildCalendarEmotionDots(gems: Gem[], maxDots = 4): CalendarEmotionDot[] {
@@ -310,18 +315,23 @@ export function buildCalendarDayDots(gems: Gem[], records: RecordDto[], maxDots 
 
   return records
     .flatMap((record) => {
-      const emotionCodes = calendarRecordEmotionCodes(record);
-      const displayCodes = emotionCodes.length > 0 ? emotionCodes : ['unclassified'];
-      return displayCodes.map((emotionCode, index) => {
-        const emotion = getEmotion(emotionCode);
+      const detailedBadges = buildRecordDetailedEmotionBadges(record);
+      const displayBadges = detailedBadges.length > 0
+        ? detailedBadges
+        : calendarRecordEmotionCodes(record).map((code) => ({ code, label: getEmotion(code)?.nameKo ?? code, gem: code }));
+      const finalBadges = displayBadges.length > 0
+        ? displayBadges
+        : [{ code: 'unclassified', label: '미분류', gem: 'unclassified' }];
+      return finalBadges.map((badge, index) => {
+        const emotion = getEmotion(badge.code);
         return {
           id:
-            index === 0 && record.gemId && emotionCode !== 'unclassified'
+            index === 0 && record.gemId && badge.code !== 'unclassified'
               ? record.gemId
-              : `record-${record.id}-${emotionCode}-${index}`,
-          emotionCode,
+              : `record-${record.id}-${badge.code}-${index}`,
+          emotionCode: badge.code,
           color: emotion?.hexColor ?? getEmotion('unclassified')?.hexColor ?? '#7B95A8',
-          label: emotion?.nameKo ?? emotionCode,
+          label: badge.label,
         };
       });
     })

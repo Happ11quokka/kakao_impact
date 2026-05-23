@@ -144,12 +144,19 @@ export type RecordClassificationStatus =
   | 'user_confirmed'
   | 'reclassified';
 
+export type DetailedEmotionBadgeDto = {
+  code: string;
+  label: string;
+  gem: string;
+};
+
 export interface RecordDto extends ChatbotRecordDto {
   entryMode: RecordEntryMode;
   classificationStatus: RecordClassificationStatus;
   aiEmotionCode: string | null;
   confirmedEmotionCode: string | null;
   confirmedEmotionCodes: string[];
+  detailedEmotionBadges?: DetailedEmotionBadgeDto[];
   confirmedAt: string | null;
   webReviewedAt: string | null;
   updatedAt: string;

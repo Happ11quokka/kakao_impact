@@ -10,7 +10,7 @@ import GemStone from '../components/pixel/GemStone';
 import type { RecordDto } from '../lib/api';
 import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
 import { buildRecordReclassifyAction } from '../lib/reclassify-flow';
-import { dedupeLogicalRecords } from '../lib/logical-record';
+import { buildRecordDetailedEmotionBadges, dedupeLogicalRecords } from '../lib/logical-record';
 
 const CANDIDATE_SLOTS = [
   { x: 30, y: 48 },
@@ -216,6 +216,10 @@ type ActiveRecordGemBadge = {
 
 export function buildActiveRecordGemBadges(record: RecordDto | null): ActiveRecordGemBadge[] {
   if (!record) return [];
+  const detailedBadges = buildRecordDetailedEmotionBadges(record);
+  if (detailedBadges.length > 0) {
+    return detailedBadges.map((badge) => ({ code: badge.code, label: badge.label }));
+  }
   return confirmedEmotionCodes(record).map((code) => ({
     code,
     label: getEmotion(code)?.nameKo ?? code,
@@ -255,6 +259,16 @@ export function buildTodayCategoryGemSlots(
   );
 
   for (const record of todayConfirmed) {
+    const detailedBadges = buildRecordDetailedEmotionBadges(record);
+    if (detailedBadges.length > 0) {
+      for (const badge of detailedBadges) {
+        const category = emotionToCategory(badge.code);
+        buckets[category].count += 1;
+        buckets[category].records.push(record);
+      }
+      continue;
+    }
+
     const codes = confirmedEmotionCodes(record);
     if (codes.length === 0) continue;
     const seen = new Set<CategoryCode>();

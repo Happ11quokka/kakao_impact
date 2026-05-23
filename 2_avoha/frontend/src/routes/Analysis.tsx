@@ -128,6 +128,12 @@ function detailForItem(code: string, index: number): string {
   return category.details[index % category.details.length];
 }
 
+function labelFromChatbotGem(gem: string | null | undefined): string | null {
+  const normalized = (gem ?? '').trim();
+  if (!normalized || normalized === '일상기록' || normalized === '단순기록') return null;
+  return normalized.replace(/\s*(조각|원석)$/, '');
+}
+
 export function dateInAnalysisPeriod(date: Date, period: Period, today: Date, customRange?: CustomRange): boolean {
   if (period === 'weekly') {
     const start = startOfWeek(today).getTime();
@@ -215,6 +221,7 @@ export function buildAnalysisItems(
         : `solo|${item.id}`;
     return {
       ...item,
+      label: item.sourceChatbotId !== undefined ? labelFromChatbotGem(sourceRecord?.gem) ?? item.label : item.label,
       recordText,
       imageUrl,
       hasPhoto,
@@ -225,8 +232,10 @@ export function buildAnalysisItems(
   const badgesByLogicalKey = itemsWithRecord.reduce<Record<string, Array<{ code: string; label: string }>>>((acc, item) => {
     const key = item.logicalKey ?? `solo|${item.id}`;
     if (!acc[key]) acc[key] = [];
-    const label = getEmotion(item.emotionCode)?.nameKo ?? item.label;
-    if (!acc[key].some((badge) => badge.code === item.emotionCode)) {
+    const label = item.sourceChatbotId !== undefined
+      ? item.label || getEmotion(item.emotionCode)?.nameKo || item.emotionCode
+      : getEmotion(item.emotionCode)?.nameKo ?? item.label;
+    if (!acc[key].some((badge) => badge.code === item.emotionCode && badge.label === label)) {
       acc[key].push({ code: item.emotionCode, label });
     }
     return acc;
@@ -278,13 +287,15 @@ export function buildRecapThemes(items: AnalysisItem[]): RecapTheme[] {
     const records = matchingGroups.map((group) => {
       const canonical = group.find((it) => it.category === code) ?? group[0];
       const badges: Array<{ code: string; label: string }> = [];
-      const seenCodes = new Set<string>();
+      const seenBadges = new Set<string>();
       for (const it of group) {
-        if (seenCodes.has(it.emotionCode)) continue;
-        seenCodes.add(it.emotionCode);
+        const label = it.label || getEmotion(it.emotionCode)?.nameKo || it.emotionCode;
+        const badgeKey = `${it.emotionCode}||${label}`;
+        if (seenBadges.has(badgeKey)) continue;
+        seenBadges.add(badgeKey);
         badges.push({
           code: it.emotionCode,
-          label: getEmotion(it.emotionCode)?.nameKo ?? it.label,
+          label,
         });
       }
       const combinedLabel = badges.map((badge) => badge.label).join('·');

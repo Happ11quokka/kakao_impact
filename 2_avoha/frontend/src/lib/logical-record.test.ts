@@ -36,6 +36,36 @@ describe('dedupeLogicalRecords', () => {
     expect(result).toHaveLength(2);
   });
 
+  it('preserves original chatbot gem labels when sibling rows share the same representative emotion code', () => {
+    const confusion = makeRecord({
+      id: 20,
+      gem: '혼란스러움 조각',
+      recordText: '복잡한 하루였다.',
+      confirmedEmotionCode: 'regret',
+      confirmedEmotionCodes: ['regret'],
+      gemEmotionCode: 'regret',
+      createdAt: '2026-05-19T09:00:01.000Z',
+    });
+    const regret = makeRecord({
+      id: 21,
+      gem: '후회 조각',
+      recordText: '복잡한 하루였다.',
+      confirmedEmotionCode: 'regret',
+      confirmedEmotionCodes: ['regret'],
+      gemEmotionCode: 'regret',
+      createdAt: '2026-05-19T09:00:02.000Z',
+    });
+
+    const result = dedupeLogicalRecords([regret, confusion]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].confirmedEmotionCodes).toEqual(['regret']);
+    expect(result[0].detailedEmotionBadges).toEqual([
+      { code: 'regret', label: '혼란스러움', gem: '혼란스러움 조각' },
+      { code: 'regret', label: '후회', gem: '후회 조각' },
+    ]);
+  });
+
   it('merges sibling rows that share text + photo + time bucket into one record', () => {
     const sibling1 = makeRecord({
       id: 10,

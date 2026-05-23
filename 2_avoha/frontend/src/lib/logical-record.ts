@@ -4,7 +4,7 @@
 // 반환하므로 프런트엔드 3곳(홈 호수·원석함·캘린더·분석 리캡)에서 같은 기록이 N번 보인다.
 // 이 유틸은 같은 메시지로 묶인 행들을 하나의 논리 기록으로 합치고 감정 코드를 union 한다.
 
-import type { ChatbotRecordDto, RecordDto } from './api';
+import type { ChatbotRecordDto, DetailedEmotionBadgeDto, RecordDto } from './api';
 
 const TIME_BUCKET_MS = 15_000;
 
@@ -37,6 +37,45 @@ export function logicalKeyForChatbotRecord(record: ChatbotRecordDto): string {
   return dedupeKeyFromFields(record.createdAt, record.recordText, record.hasPhoto, record.imageUrl);
 }
 
+function recordPrimaryCode(record: RecordDto): string | null {
+  return record.confirmedEmotionCode ?? record.gemEmotionCode ?? record.aiEmotionCode ?? null;
+}
+
+function labelFromGem(gem: string | null | undefined): string | null {
+  const normalized = (gem ?? '').trim();
+  if (!normalized || normalized === '일상기록' || normalized === '단순기록') return null;
+  return normalized.replace(/\s*(조각|원석)$/, '');
+}
+
+export function buildRecordDetailedEmotionBadges(record: RecordDto): DetailedEmotionBadgeDto[] {
+  if (record.classificationStatus === 'needs_confirmation') return [];
+  if (record.detailedEmotionBadges && record.detailedEmotionBadges.length > 0) {
+    return record.detailedEmotionBadges;
+  }
+
+  const gemLabel = labelFromGem(record.gem);
+  const code = recordPrimaryCode(record);
+  if (gemLabel && code) {
+    return [{ code, label: gemLabel, gem: record.gem }];
+  }
+
+  return [];
+}
+
+function mergeDetailedEmotionBadges(records: RecordDto[]): DetailedEmotionBadgeDto[] {
+  const order: DetailedEmotionBadgeDto[] = [];
+  const seen = new Set<string>();
+  for (const record of records) {
+    for (const badge of buildRecordDetailedEmotionBadges(record)) {
+      const key = `${badge.gem}||${badge.code}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      order.push(badge);
+    }
+  }
+  return order;
+}
+
 function mergeCodes(records: RecordDto[]): string[] {
   const order: string[] = [];
   const seen = new Set<string>();
@@ -45,6 +84,9 @@ function mergeCodes(records: RecordDto[]): string[] {
     seen.add(code);
     order.push(code);
   };
+  for (const badge of mergeDetailedEmotionBadges(records)) {
+    push(badge.code);
+  }
   for (const record of records) {
     for (const code of record.confirmedEmotionCodes ?? []) push(code);
     push(record.confirmedEmotionCode);
@@ -78,6 +120,7 @@ export function dedupeLogicalRecords(records: RecordDto[]): RecordDto[] {
     merged.push({
       ...canonical,
       confirmedEmotionCodes: mergeCodes(sorted),
+      detailedEmotionBadges: mergeDetailedEmotionBadges(sorted),
     });
   }
 
