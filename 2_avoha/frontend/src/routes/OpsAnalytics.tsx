@@ -43,6 +43,13 @@ type Summary = {
   activeSessions: number;
   date?: string;
 };
+type ActiveUsersDay = { date: string; dau: number };
+type ActiveUsers = {
+  daily: ActiveUsersDay[];
+  wau: number;
+  mau: number;
+  days: number;
+};
 type Page = { path: string; views: number; uniq: number; avgDwellMs: number; avgScrollPct: number };
 type DeviceRow = { device: string; uniq: number; views: number; pct: number };
 type NewVsReturning = {
@@ -166,6 +173,7 @@ async function get<T>(path: string): Promise<T | null> {
 export default function OpsAnalytics() {
   const [range, setRange] = useState<Range>('24h');
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [activeUsers, setActiveUsers] = useState<ActiveUsers | null>(null);
   const [pages, setPages] = useState<Page[]>([]);
   const [funnel, setFunnel] = useState<Funnel | null>(null);
   const [types, setTypes] = useState<TypeRow[]>([]);
@@ -201,13 +209,14 @@ export default function OpsAnalytics() {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const [s, p, f, t, b, u, e, r,
+    const [s, au, p, f, t, b, u, e, r,
       cs, ch, cl, ce, cg, cu,
       fEntry, fExit, fEdges, fSeq,
       emD, emH, emW, emU,
       dv, nr, wv,
     ] = await Promise.all([
       get<Summary>('/ops/analytics/summary'),
+      get<ActiveUsers>('/ops/analytics/active-users?days=30'),
       get<{ pages: Page[] }>(`/ops/analytics/pages?range=${range}`),
       get<Funnel>(`/ops/analytics/funnels/chatbot?range=${range}`),
       get<{ types: TypeRow[] }>(`/ops/analytics/event-types?range=${range}`),
@@ -238,6 +247,7 @@ export default function OpsAnalytics() {
       get<{ items: WebVitalRow[] }>(`/ops/analytics/web-vitals?range=${range}`),
     ]);
     if (s) setSummary(s);
+    if (au) setActiveUsers(au);
     setPages(p?.pages ?? []);
     if (f) setFunnel(f);
     setTypes(t?.types ?? []);
@@ -441,6 +451,18 @@ export default function OpsAnalytics() {
             hint="오늘 한 번이라도 이벤트를 발사한 고유 사용자/익명 수 (HyperLogLog)"
           />
           <KpiCard
+            label="WAU (최근 7일)"
+            value={activeUsers?.wau ?? 0}
+            hint="오늘 포함 최근 7일 동안 한 번이라도 활동한 고유 사용자 (HLL union)"
+            accent="#3D6050"
+          />
+          <KpiCard
+            label="MAU (최근 30일)"
+            value={activeUsers?.mau ?? 0}
+            hint="오늘 포함 최근 30일 동안 한 번이라도 활동한 고유 사용자 (HLL union)"
+            accent="#5A4A32"
+          />
+          <KpiCard
             label="활성 세션 (30분)"
             value={summary?.activeSessions ?? 0}
             hint="지금 이 순간 활동 중인 sessionId 수 (지난 30분 슬라이딩 윈도우)"
@@ -462,6 +484,18 @@ export default function OpsAnalytics() {
             hint="error.client(React/JS) + error.api(백엔드 500/4xx) 합계"
             accent={summary && summary.totalErrors > 0 ? '#B23A3A' : undefined}
           />
+        </section>
+
+        {/* DAU 변화 곡선 — 최근 30일 일별 trend (range 셀렉터와 무관, 항상 30일) */}
+        <section style={styles.grid}>
+          <Panel
+            title="DAU 변화 곡선"
+            caption="최근 30일 · 일별"
+            help="매일 한 번이라도 활동한 고유 사용자 수의 변화. WAU/MAU 와 함께 보면 일별 들쭉날쭉 속에서도 주·월 단위 활성 사용자 규모 파악. (HyperLogLog 카운트라 ±오차 약 0.81%)"
+            span={6}
+          >
+            <DauTrendChart data={activeUsers} />
+          </Panel>
         </section>
 
         {/* 2-column grid: charts + tables */}
@@ -1623,6 +1657,49 @@ function WebVitalsCards({ items }: { items: WebVitalRow[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// === DAU 변화 곡선 (최근 30일 일별) ===
+// MM/DD 라벨 + DAU 라인. 비어있으면 안내. WAU/MAU 평균 reference line 은 noise 라
+// 일부러 안 그림 — 곡선 자체로 충분히 trend 보이고, 위 카드에 절대값 있음.
+function DauTrendChart({ data }: { data: ActiveUsers | null }) {
+  if (!data || data.daily.length === 0) {
+    return (
+      <p style={styles.empty}>
+        아직 일별 DAU 데이터가 없어요. (HyperLogLog 키가 35일 보관됩니다)
+      </p>
+    );
+  }
+  const chartData = data.daily.map((d) => {
+    const dt = new Date(d.date);
+    return {
+      x: `${dt.getMonth() + 1}/${dt.getDate()}`,
+      dau: d.dau,
+    };
+  });
+  return (
+    <div style={{ height: 240 }}>
+      <ResponsiveContainer>
+        <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: -10 }}>
+          <CartesianGrid stroke="#E0D3BA" strokeDasharray="3 3" />
+          <XAxis dataKey="x" stroke="#8B7355" fontSize={11} />
+          <YAxis stroke="#8B7355" fontSize={11} allowDecimals={false} />
+          <Tooltip
+            formatter={(v: number) => [`${v.toLocaleString()}명`, 'DAU']}
+            labelFormatter={(l) => `${l}`}
+          />
+          <Line
+            type="monotone"
+            dataKey="dau"
+            stroke="#1E3328"
+            strokeWidth={2.5}
+            dot={{ r: 2.5, fill: '#1E3328' }}
+            activeDot={{ r: 4 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }

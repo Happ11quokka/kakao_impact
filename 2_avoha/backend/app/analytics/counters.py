@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.logging import logger
 from app.services.redis import get_app_redis
@@ -128,5 +128,72 @@ async def read_kpi_summary() -> dict[str, int]:
         "dau": dau,
         "activeSessions": active,
         "date": day,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ─── DAU 변화 곡선 + WAU + MAU ───
+# `analytics:daily:uniq:{YYYY-MM-DD}` HyperLogLog 가 35일 보관되므로
+# 일별 PFCOUNT 호출로 DAU 곡선, 다중 키 PFCOUNT 로 trailing WAU/MAU 까지
+# 모두 Redis 단일 pipeline 으로 처리.
+
+
+def _uniq_key(d: date) -> str:
+    return f"analytics:daily:uniq:{d.isoformat()}"
+
+
+async def read_active_users_history(days: int = 30) -> dict[str, object]:
+    """최근 N일 DAU 곡선 + 오늘 기준 trailing 7일 WAU / 30일 MAU.
+
+    HyperLogLog 의 PFCOUNT 는 multiple keys 를 받으면 union cardinality 를
+    estimate 하므로 PFMERGE 없이도 trailing 합산 가능. 존재하지 않는 키는
+    빈 set 으로 취급되어 안전.
+    """
+    days = max(1, min(days, 35))
+    redis = get_app_redis()
+    today = date.today()
+    day_keys = [_uniq_key(today - timedelta(days=i)) for i in range(days - 1, -1, -1)]
+    wau_keys = [_uniq_key(today - timedelta(days=i)) for i in range(7)]
+    mau_keys = [_uniq_key(today - timedelta(days=i)) for i in range(30)]
+
+    try:
+        pipe = redis.pipeline()
+        for k in day_keys:
+            pipe.pfcount(k)
+        pipe.pfcount(*wau_keys)
+        pipe.pfcount(*mau_keys)
+        raw = await pipe.execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("redis_active_users_failed", error=str(exc))
+        return {
+            "daily": [],
+            "wau": 0,
+            "mau": 0,
+            "days": days,
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _i(v: object) -> int:
+        if v is None:
+            return 0
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
+    daily_counts = [_i(v) for v in raw[:days]]
+    wau = _i(raw[days])
+    mau = _i(raw[days + 1])
+
+    daily = [
+        {"date": (today - timedelta(days=days - 1 - i)).isoformat(), "dau": daily_counts[i]}
+        for i in range(days)
+    ]
+
+    return {
+        "daily": daily,
+        "wau": wau,
+        "mau": mau,
+        "days": days,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
     }

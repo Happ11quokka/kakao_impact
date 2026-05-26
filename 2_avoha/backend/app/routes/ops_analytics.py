@@ -31,6 +31,19 @@ async def get_summary(
     return await counters.read_kpi_summary()
 
 
+@router.get("/active-users")
+async def get_active_users(
+    days: int = Query(default=30, ge=1, le=35),
+    _admin: dict = Depends(require_admin_basic),
+) -> dict[str, object]:
+    """DAU 일별 곡선 + trailing WAU(7일) / MAU(30일).
+
+    Redis HyperLogLog 의 multi-key PFCOUNT 로 한 round-trip 에 모두 응답.
+    `analytics:daily:uniq:{YYYY-MM-DD}` 키는 35일 보관.
+    """
+    return await counters.read_active_users_history(days)
+
+
 @router.get("/pages")
 async def get_pages(
     rng: Range = Query(default="24h", alias="range"),
