@@ -241,6 +241,8 @@ export default function OpsAnalytics() {
   const [userDir, setUserDir] = useState<UserDirItem[]>([]);
   const [userFilter, setUserFilter] = useState('');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  // 드로어 기간은 대시보드 상단 기간과 분리 — 한 명 추적은 기본 30일로 본다.
+  const [drawerRange, setDrawerRange] = useState<Range>('30d');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -340,7 +342,7 @@ export default function OpsAnalytics() {
     let cancelled = false;
     setProfileLoading(true);
     void (async () => {
-      const p = await get<UserProfile>(`/ops/analytics/user/${selectedUserId}?range=${range}`);
+      const p = await get<UserProfile>(`/ops/analytics/user/${selectedUserId}?range=${drawerRange}`);
       if (!cancelled) {
         setUserProfile(p);
         setProfileLoading(false);
@@ -349,7 +351,13 @@ export default function OpsAnalytics() {
     return () => {
       cancelled = true;
     };
-  }, [selectedUserId, range]);
+  }, [selectedUserId, drawerRange]);
+
+  // 사용자 선택 시 드로어를 열고 기간을 30일로 리셋 (대시보드 기간과 무관하게 의미 있는 기록부터).
+  const openUser = useCallback((id: string) => {
+    setDrawerRange('30d');
+    setSelectedUserId(id);
+  }, []);
 
   const filteredUserDir = useMemo(() => {
     const q = userFilter.trim().toLowerCase();
@@ -744,7 +752,7 @@ export default function OpsAnalytics() {
                   {users.slice(0, 25).map((u) => (
                     <tr
                       key={u.userId}
-                      onClick={() => setSelectedUserId(u.userId)}
+                      onClick={() => openUser(u.userId)}
                       style={{
                         ...styles.clickableRow,
                         ...(selectedUserId === u.userId ? styles.clickableRowActive : null),
@@ -793,7 +801,7 @@ export default function OpsAnalytics() {
                     {filteredUserDir.map((u) => (
                       <tr
                         key={u.userId}
-                        onClick={() => setSelectedUserId(u.userId)}
+                        onClick={() => openUser(u.userId)}
                         style={{
                           ...styles.clickableRow,
                           ...(selectedUserId === u.userId ? styles.clickableRowActive : null),
@@ -1369,7 +1377,8 @@ export default function OpsAnalytics() {
         <UserDetailDrawer
           profile={userProfile}
           loading={profileLoading}
-          range={range}
+          range={drawerRange}
+          onRangeChange={setDrawerRange}
           onClose={() => setSelectedUserId(null)}
           formatTime={formatTime}
         />
@@ -1405,12 +1414,14 @@ function UserDetailDrawer({
   profile,
   loading,
   range,
+  onRangeChange,
   onClose,
   formatTime,
 }: {
   profile: UserProfile | null;
   loading: boolean;
   range: Range;
+  onRangeChange: (r: Range) => void;
   onClose: () => void;
   formatTime: (iso: string | null) => string;
 }) {
@@ -1422,11 +1433,27 @@ function UserDetailDrawer({
       <aside style={styles.drawer}>
         <header style={styles.drawerHeader}>
           <div style={{ minWidth: 0 }}>
-            <p style={styles.kicker}>개인 활동 추적 · 최근 {rangeKo}</p>
+            <p style={styles.kicker}>개인 활동 추적</p>
             <h2 style={styles.drawerTitle}>{profile?.profile.nickname ?? '사용자'}</h2>
             <p style={styles.drawerSub}>
               카카오ID {profile?.profile.kakaoId ?? '—'} · 가입 {formatTime(profile?.profile.joinedAt ?? null)}
             </p>
+            <div style={styles.drawerRangeRow}>
+              {(['24h', '7d', '30d'] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => onRangeChange(r)}
+                  style={{
+                    ...styles.drawerRangeBtn,
+                    background: range === r ? '#1E3328' : '#FFFFFF',
+                    color: range === r ? '#FFFFFF' : '#5A4A32',
+                  }}
+                >
+                  {r === '24h' ? '24시간' : r === '7d' ? '7일' : '30일'}
+                </button>
+              ))}
+            </div>
           </div>
           <button type="button" onClick={onClose} style={styles.drawerClose} aria-label="닫기">
             ✕
@@ -1449,7 +1476,7 @@ function UserDetailDrawer({
             <section style={styles.drawerSection}>
               <h3 style={styles.drawerSectionTitle}>이벤트 유형</h3>
               {profile.eventTypes.length === 0 ? (
-                <p style={styles.empty}>이 기간에 활동이 없어요</p>
+                <p style={styles.empty}>최근 {rangeKo} 활동이 없어요</p>
               ) : (
                 <ul style={styles.typeBarList}>
                   {profile.eventTypes.map((t) => (
@@ -1502,7 +1529,7 @@ function UserDetailDrawer({
             <section style={styles.drawerSection}>
               <h3 style={styles.drawerSectionTitle}>활동 타임라인</h3>
               {profile.timeline.length === 0 ? (
-                <p style={styles.empty}>이 기간에 활동이 없어요</p>
+                <p style={styles.empty}>최근 {rangeKo} 활동이 없어요</p>
               ) : (
                 <div style={styles.streamList}>
                   {profile.timeline.map((ev, i) => (
@@ -2151,6 +2178,16 @@ const styles: Record<string, CSSProperties> = {
     background: '#FFFFFF',
     color: '#5A4A32',
     fontSize: 14,
+    fontWeight: 800,
+    cursor: 'pointer',
+  },
+  drawerRangeRow: { display: 'flex', gap: 5, marginTop: 8 },
+  drawerRangeBtn: {
+    height: 26,
+    padding: '0 11px',
+    borderRadius: 999,
+    border: '1px solid #E0D3BA',
+    fontSize: 11,
     fontWeight: 800,
     cursor: 'pointer',
   },
