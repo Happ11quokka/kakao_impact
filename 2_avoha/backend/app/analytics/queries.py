@@ -550,6 +550,224 @@ async def users_ranking(
     ]
 
 
+async def user_directory(
+    session: AsyncSession, ops_ids: Sequence[str] = ()
+) -> list[dict]:
+    """등록 사용자 전체 디렉터리 (운영자 제외) — 개인별 드릴다운의 진입점.
+
+    활동 0인 신규 유저도 보이도록 users 에서 시작해 events 를 LEFT JOIN.
+    익명(anon_user_links) 활동도 한 사람으로 묶어 카운트. 통계는 전 기간 기준
+    (기간 필터는 상세 드로어에서) — LIMIT 없음.
+    """
+    rows = await session.execute(
+        sql_text(
+            """
+            WITH ev AS (
+              SELECT
+                COALESCE(e.user_id, l.user_id) AS uid,
+                e.occurred_at
+              FROM events e
+              LEFT JOIN anon_user_links l
+                ON l.anon_id = (e.props->>'anonId') AND e.user_id IS NULL
+              WHERE e.props->>'path' IS NULL OR e.props->>'path' NOT LIKE '/ops/%'
+            ),
+            agg AS (
+              SELECT uid, COUNT(*)::int AS event_count, MAX(occurred_at) AS last_seen
+              FROM ev WHERE uid IS NOT NULL GROUP BY uid
+            )
+            SELECT
+              u.id::text AS user_id,
+              u.nickname,
+              u.kakao_id::text AS kakao_id,
+              u.joined_at,
+              COALESCE(a.event_count, 0) AS event_count,
+              a.last_seen
+            FROM users u
+            LEFT JOIN agg a ON a.uid = u.id
+            WHERE u.deleted_at IS NULL
+              AND u.id::text <> ALL(CAST(:ops_ids AS text[]))
+            ORDER BY a.last_seen DESC NULLS LAST, u.joined_at DESC
+            """
+        ),
+        {"ops_ids": list(ops_ids)},
+    )
+    return [
+        {
+            "userId": r.user_id,
+            "nickname": r.nickname,
+            "kakaoId": r.kakao_id,
+            "joinedAt": r.joined_at.isoformat() if r.joined_at else None,
+            "eventCount": r.event_count,
+            "lastSeen": r.last_seen.isoformat() if r.last_seen else None,
+        }
+        for r in rows
+    ]
+
+
+async def user_profile(
+    session: AsyncSession, user_id: str, rng: Range
+) -> dict | None:
+    """한 사용자의 전체 프로필 — 프로필 + 요약 + 이벤트유형 + 감정 + 타임라인 + 챗봇기록.
+
+    이벤트는 익명 stitching 포함(users_ranking 과 동일 규칙). 명시적으로 그 유저를
+    조회하므로 운영자 자기제외는 적용하지 않음. user_id 가 uuid 아님/미존재면 None.
+    """
+    prof = (
+        await session.execute(
+            sql_text(
+                """
+                SELECT id::text AS user_id, nickname, kakao_id::text AS kakao_id,
+                       joined_at, profile_url, provider_user_key
+                FROM users WHERE id::text = :uid AND deleted_at IS NULL
+                """
+            ),
+            {"uid": user_id},
+        )
+    ).first()
+    if prof is None:
+        return None
+
+    since = _since(rng)
+    params = {"since": since, "uid": user_id}
+    # 익명 stitching 포함한 "이 사용자의 이벤트" 조건. user_id 직매칭은 부분 인덱스 활용.
+    ev_pred = (
+        "e.occurred_at >= :since AND ("
+        "e.user_id::text = :uid OR (e.user_id IS NULL AND e.props->>'anonId' IN "
+        "(SELECT anon_id FROM anon_user_links WHERE user_id::text = :uid)))"
+    )
+
+    summary_row = (
+        await session.execute(
+            sql_text(
+                f"""
+                SELECT COUNT(*)::int AS total_events,
+                       COUNT(DISTINCT e.props->>'sessionId')::int AS session_count
+                FROM events e WHERE {ev_pred}
+                """
+            ),
+            params,
+        )
+    ).first()
+
+    type_rows = await session.execute(
+        sql_text(
+            f"""
+            SELECT e.event_type AS type, COUNT(*)::int AS cnt
+            FROM events e WHERE {ev_pred}
+            GROUP BY e.event_type ORDER BY cnt DESC LIMIT 30
+            """
+        ),
+        params,
+    )
+
+    timeline_rows = await session.execute(
+        sql_text(
+            f"""
+            SELECT e.event_type, e.props, e.occurred_at
+            FROM events e WHERE {ev_pred}
+            ORDER BY e.occurred_at DESC LIMIT 200
+            """
+        ),
+        params,
+    )
+    timeline = [
+        {
+            "eventType": r.event_type,
+            "props": r.props,
+            "occurredAt": r.occurred_at.isoformat() if r.occurred_at else None,
+        }
+        for r in timeline_rows
+    ]
+
+    emo_rows = await session.execute(
+        sql_text(
+            """
+            SELECT g.emotion_code AS code,
+                   COALESCE(em.name_ko, g.emotion_code) AS name_ko,
+                   COALESCE(em.hex_color, '#A0BCA8') AS hex_color,
+                   COUNT(*)::int AS cnt
+            FROM gems g
+            LEFT JOIN emotions em ON em.code = g.emotion_code
+            WHERE g.user_id::text = :uid AND g.created_at >= :since
+            GROUP BY g.emotion_code, em.name_ko, em.hex_color
+            ORDER BY cnt DESC LIMIT 30
+            """
+        ),
+        {"uid": user_id, "since": since},
+    )
+    emotions = [
+        {"code": r.code, "nameKo": r.name_ko, "hexColor": r.hex_color, "count": r.cnt}
+        for r in emo_rows
+    ]
+    emo_total = sum(e["count"] for e in emotions) or 1
+    for e in emotions:
+        e["pct"] = round(e["count"] / emo_total * 100, 1)
+
+    gem_count = (
+        await session.execute(
+            sql_text(
+                "SELECT COUNT(*)::int FROM gems WHERE user_id::text = :uid AND created_at >= :since"
+            ),
+            {"uid": user_id, "since": since},
+        )
+    ).scalar() or 0
+
+    pkey = prof.provider_user_key
+    chatbot_records: list[dict] = []
+    chatbot_count = 0
+    if pkey:
+        cb_rows = await session.execute(
+            sql_text(
+                """
+                SELECT gem, record_text, has_photo, confirmed_emotion_code, created_at
+                FROM chatbot
+                WHERE user_id = :pkey AND created_at >= :since
+                ORDER BY created_at DESC LIMIT 50
+                """
+            ),
+            {"pkey": pkey, "since": _since_aware(rng)},
+        )
+        chatbot_records = [
+            {
+                "gem": r.gem,
+                "recordText": r.record_text,
+                "hasPhoto": r.has_photo,
+                "confirmedEmotionCode": r.confirmed_emotion_code,
+                "createdAt": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in cb_rows
+        ]
+        chatbot_count = (
+            await session.execute(
+                sql_text(
+                    "SELECT COUNT(*)::int FROM chatbot WHERE user_id = :pkey AND created_at >= :since"
+                ),
+                {"pkey": pkey, "since": _since_aware(rng)},
+            )
+        ).scalar() or 0
+
+    return {
+        "profile": {
+            "userId": prof.user_id,
+            "nickname": prof.nickname,
+            "kakaoId": prof.kakao_id,
+            "joinedAt": prof.joined_at.isoformat() if prof.joined_at else None,
+            "profileUrl": prof.profile_url,
+            "lastSeen": timeline[0]["occurredAt"] if timeline else None,
+        },
+        "summary": {
+            "totalEvents": summary_row.total_events if summary_row else 0,
+            "sessionCount": summary_row.session_count if summary_row else 0,
+            "gemCount": gem_count,
+            "chatbotRecordCount": chatbot_count,
+        },
+        "eventTypes": [{"type": r.type, "count": r.cnt} for r in type_rows],
+        "emotions": emotions,
+        "timeline": timeline,
+        "chatbotRecords": chatbot_records,
+    }
+
+
 async def error_ranking(
     session: AsyncSession, rng: Range, ops_ids: Sequence[str] = ()
 ) -> list[dict]:

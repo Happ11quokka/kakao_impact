@@ -12,7 +12,7 @@ import asyncio
 import json
 from typing import AsyncIterator, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -103,6 +103,33 @@ async def get_users(
 ) -> dict[str, object]:
     ops_ids = await queries.get_ops_user_ids(session)
     return {"range": rng, "users": await queries.users_ranking(session, rng, ops_ids)}
+
+
+@router.get("/user-list")
+async def get_user_list(
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """등록 사용자 전체 목록 (운영자 제외) — 개인별 드릴다운 진입점."""
+    ops_ids = await queries.get_ops_user_ids(session)
+    return {"users": await queries.user_directory(session, ops_ids)}
+
+
+@router.get("/user/{user_id}")
+async def get_user_detail(
+    user_id: str,
+    rng: Range = Query(default="30d", alias="range"),
+    _admin: dict = Depends(require_admin_basic),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """한 사용자의 전체 프로필 — 요약·이벤트유형·감정·타임라인·챗봇기록."""
+    profile = await queries.user_profile(session, user_id, rng)
+    if profile is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"message": "USER_NOT_FOUND", "code": "USER_NOT_FOUND"}},
+        )
+    return {"range": rng, **profile}
 
 
 @router.get("/errors")

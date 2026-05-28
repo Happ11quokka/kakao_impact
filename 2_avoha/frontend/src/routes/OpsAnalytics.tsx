@@ -151,6 +151,41 @@ type ChatbotUser = {
   withPhoto: number;
   lastAt: string | null;
 };
+// ── 개인별 활동 추적 (드릴다운) ──
+type UserDirItem = {
+  userId: string;
+  nickname: string;
+  kakaoId: string;
+  joinedAt: string | null;
+  eventCount: number;
+  lastSeen: string | null;
+};
+type UserProfile = {
+  profile: {
+    userId: string;
+    nickname: string;
+    kakaoId: string;
+    joinedAt: string | null;
+    profileUrl: string | null;
+    lastSeen: string | null;
+  };
+  summary: {
+    totalEvents: number;
+    sessionCount: number;
+    gemCount: number;
+    chatbotRecordCount: number;
+  };
+  eventTypes: { type: string; count: number }[];
+  emotions: { code: string; nameKo: string; hexColor: string; count: number; pct: number }[];
+  timeline: { eventType: string; props: Record<string, unknown> | null; occurredAt: string | null }[];
+  chatbotRecords: {
+    gem: string;
+    recordText: string | null;
+    hasPhoto: boolean;
+    confirmedEmotionCode: string | null;
+    createdAt: string | null;
+  }[];
+};
 
 async function get<T>(path: string): Promise<T | null> {
   try {
@@ -202,6 +237,12 @@ export default function OpsAnalytics() {
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [newRet, setNewRet] = useState<NewVsReturning | null>(null);
   const [webVitals, setWebVitals] = useState<WebVitalRow[]>([]);
+  // 개인별 활동 추적 (드릴다운)
+  const [userDir, setUserDir] = useState<UserDirItem[]>([]);
+  const [userFilter, setUserFilter] = useState('');
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
@@ -281,6 +322,42 @@ export default function OpsAnalytics() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // 사용자 디렉터리는 전 기간 기준 → 마운트 시 1회만 fetch (range 비의존).
+  useEffect(() => {
+    void (async () => {
+      const d = await get<{ users: UserDirItem[] }>('/ops/analytics/user-list');
+      if (d) setUserDir(d.users);
+    })();
+  }, []);
+
+  // 드로어: 선택된 사용자/기간이 바뀌면 그 사람의 프로필을 fetch.
+  useEffect(() => {
+    if (!selectedUserId) {
+      setUserProfile(null);
+      return;
+    }
+    let cancelled = false;
+    setProfileLoading(true);
+    void (async () => {
+      const p = await get<UserProfile>(`/ops/analytics/user/${selectedUserId}?range=${range}`);
+      if (!cancelled) {
+        setUserProfile(p);
+        setProfileLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedUserId, range]);
+
+  const filteredUserDir = useMemo(() => {
+    const q = userFilter.trim().toLowerCase();
+    if (!q) return userDir;
+    return userDir.filter(
+      (u) => (u.nickname ?? '').toLowerCase().includes(q) || (u.kakaoId ?? '').includes(q),
+    );
+  }, [userDir, userFilter]);
 
   // theme.css 가 전역 overflow:hidden + height:100dvh 라 페이지 스크롤 불가.
   // 두 가지 동시 적용 (어느 한 쪽 실패해도 다른 쪽이 보장):
@@ -665,7 +742,14 @@ export default function OpsAnalytics() {
                 </thead>
                 <tbody>
                   {users.slice(0, 25).map((u) => (
-                    <tr key={u.userId}>
+                    <tr
+                      key={u.userId}
+                      onClick={() => setSelectedUserId(u.userId)}
+                      style={{
+                        ...styles.clickableRow,
+                        ...(selectedUserId === u.userId ? styles.clickableRowActive : null),
+                      }}
+                    >
                       <Td>{u.nickname}</Td>
                       <Td align="right">{u.eventCount.toLocaleString()}</Td>
                       <Td align="right">{u.sessionCount.toLocaleString()}</Td>
@@ -674,6 +758,57 @@ export default function OpsAnalytics() {
                   ))}
                 </tbody>
               </table>
+            )}
+          </Panel>
+
+          {/* 전체 사용자 (드릴다운 진입점) */}
+          <Panel
+            title="전체 사용자"
+            caption={`${userDir.length}명 · 행 클릭 → 상세`}
+            help="등록된 모든 사용자(운영자 제외). 행을 클릭하면 오른쪽 패널에서 그 사람의 활동 타임라인·이벤트 유형·감정·챗봇 기록을 봅니다. 목록의 이벤트/마지막 접속은 전 기간 기준."
+            span={6}
+          >
+            <input
+              type="text"
+              value={userFilter}
+              onChange={(e) => setUserFilter(e.target.value)}
+              placeholder="닉네임 또는 카카오ID 검색…"
+              style={styles.userSearch}
+            />
+            {filteredUserDir.length === 0 ? (
+              <p style={styles.empty}>{userDir.length === 0 ? '—' : '검색 결과 없음'}</p>
+            ) : (
+              <div style={styles.userDirList}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <Th>닉네임</Th>
+                      <Th>카카오ID</Th>
+                      <Th align="right">이벤트</Th>
+                      <Th>마지막 접속</Th>
+                      <Th>가입</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUserDir.map((u) => (
+                      <tr
+                        key={u.userId}
+                        onClick={() => setSelectedUserId(u.userId)}
+                        style={{
+                          ...styles.clickableRow,
+                          ...(selectedUserId === u.userId ? styles.clickableRowActive : null),
+                        }}
+                      >
+                        <Td>{u.nickname}</Td>
+                        <Td>{u.kakaoId}</Td>
+                        <Td align="right">{u.eventCount.toLocaleString()}</Td>
+                        <Td>{formatTime(u.lastSeen)}</Td>
+                        <Td>{formatTime(u.joinedAt)}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Panel>
 
@@ -1230,6 +1365,15 @@ export default function OpsAnalytics() {
           <span>이벤트 카탈로그: page.view · page.dwell · click · perf.web_vitals · error.client · error.api · chatbot.question.sent · record_emotion_confirmed</span>
         </footer>
       </div>
+      {selectedUserId && (
+        <UserDetailDrawer
+          profile={userProfile}
+          loading={profileLoading}
+          range={range}
+          onClose={() => setSelectedUserId(null)}
+          formatTime={formatTime}
+        />
+      )}
     </div>
   );
 }
@@ -1252,6 +1396,136 @@ function KpiCard({
         {value.toLocaleString()}
       </strong>
       <span style={styles.kpiHint}>{hint}</span>
+    </div>
+  );
+}
+
+// === 개인별 활동 추적 드로어 — 한 사용자를 골라 활동을 시간순으로 추적 ===
+function UserDetailDrawer({
+  profile,
+  loading,
+  range,
+  onClose,
+  formatTime,
+}: {
+  profile: UserProfile | null;
+  loading: boolean;
+  range: Range;
+  onClose: () => void;
+  formatTime: (iso: string | null) => string;
+}) {
+  const rangeKo = range === '24h' ? '24시간' : range === '7d' ? '7일' : '30일';
+  const maxType = Math.max(1, ...(profile?.eventTypes.map((t) => t.count) ?? [1]));
+  return (
+    <>
+      <div style={styles.drawerBackdrop} onClick={onClose} />
+      <aside style={styles.drawer}>
+        <header style={styles.drawerHeader}>
+          <div style={{ minWidth: 0 }}>
+            <p style={styles.kicker}>개인 활동 추적 · 최근 {rangeKo}</p>
+            <h2 style={styles.drawerTitle}>{profile?.profile.nickname ?? '사용자'}</h2>
+            <p style={styles.drawerSub}>
+              카카오ID {profile?.profile.kakaoId ?? '—'} · 가입 {formatTime(profile?.profile.joinedAt ?? null)}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} style={styles.drawerClose} aria-label="닫기">
+            ✕
+          </button>
+        </header>
+
+        {loading ? (
+          <p style={styles.empty}>불러오는 중…</p>
+        ) : !profile ? (
+          <p style={styles.empty}>데이터를 불러오지 못했습니다.</p>
+        ) : (
+          <div style={styles.drawerBody}>
+            <div style={styles.drawerStatRow}>
+              <DrawerStat label="이벤트" value={profile.summary.totalEvents} />
+              <DrawerStat label="세션" value={profile.summary.sessionCount} />
+              <DrawerStat label="원석" value={profile.summary.gemCount} />
+              <DrawerStat label="챗봇 기록" value={profile.summary.chatbotRecordCount} />
+            </div>
+
+            <section style={styles.drawerSection}>
+              <h3 style={styles.drawerSectionTitle}>이벤트 유형</h3>
+              {profile.eventTypes.length === 0 ? (
+                <p style={styles.empty}>이 기간에 활동이 없어요</p>
+              ) : (
+                <ul style={styles.typeBarList}>
+                  {profile.eventTypes.map((t) => (
+                    <li key={t.type} style={styles.drawerTypeRow}>
+                      <span style={styles.typeBarName}>{t.type}</span>
+                      <span style={styles.typeBarTrack}>
+                        <span style={{ ...styles.typeBarFill, width: `${(t.count / maxType) * 100}%` }} />
+                      </span>
+                      <span style={styles.typeBarValue}>{t.count.toLocaleString()}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section style={styles.drawerSection}>
+              <h3 style={styles.drawerSectionTitle}>감정 분포</h3>
+              {profile.emotions.length === 0 ? (
+                <p style={styles.empty}>아직 기록한 감정이 없어요</p>
+              ) : (
+                <div style={styles.emoChipRow}>
+                  {profile.emotions.map((e) => (
+                    <span key={e.code} style={styles.emoChip}>
+                      <span style={{ ...styles.emoDot, background: e.hexColor }} />
+                      {e.nameKo} <strong>{e.count}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {profile.chatbotRecords.length > 0 && (
+              <section style={styles.drawerSection}>
+                <h3 style={styles.drawerSectionTitle}>챗봇 기록</h3>
+                <div style={styles.streamList}>
+                  {profile.chatbotRecords.map((c, i) => (
+                    <div key={i} style={styles.drawerCbRow}>
+                      <span style={styles.streamTime}>{formatTime(c.createdAt)}</span>
+                      <span style={styles.streamType}>
+                        {c.gem}
+                        {c.hasPhoto ? ' 📷' : ''}
+                      </span>
+                      <span style={styles.streamProps}>{c.recordText ?? '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section style={styles.drawerSection}>
+              <h3 style={styles.drawerSectionTitle}>활동 타임라인</h3>
+              {profile.timeline.length === 0 ? (
+                <p style={styles.empty}>이 기간에 활동이 없어요</p>
+              ) : (
+                <div style={styles.streamList}>
+                  {profile.timeline.map((ev, i) => (
+                    <div key={`${ev.occurredAt}-${i}`} style={styles.drawerTimelineRow}>
+                      <span style={styles.streamTime}>{formatTime(ev.occurredAt)}</span>
+                      <span style={styles.drawerTimelineText}>{humanizeEvent(ev.eventType, ev.props)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </aside>
+    </>
+  );
+}
+
+function DrawerStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={styles.drawerStat}>
+      <span style={styles.drawerStatValue}>{value.toLocaleString()}</span>
+      <span style={styles.drawerStatLabel}>{label}</span>
     </div>
   );
 }
@@ -1818,6 +2092,125 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 600,
   },
   empty: { margin: 0, fontSize: 12, color: '#8B7355', fontWeight: 700 },
+
+  // 전체 사용자 목록 + 드릴다운
+  userSearch: {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '8px 12px',
+    borderRadius: 8,
+    border: '1px solid #E0D3BA',
+    background: '#FBF7EE',
+    fontSize: 13,
+    fontWeight: 600,
+    color: '#5A4A32',
+    marginBottom: 2,
+  },
+  userDirList: { maxHeight: 360, overflow: 'auto', borderRadius: 8 },
+  clickableRow: { cursor: 'pointer' },
+  clickableRowActive: { background: '#EFE7D5' },
+
+  drawerBackdrop: {
+    position: 'fixed',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    background: 'rgba(30,51,40,0.28)',
+    zIndex: 50,
+  },
+  drawer: {
+    position: 'fixed',
+    top: 0,
+    right: 0,
+    height: '100dvh',
+    width: 'min(480px, 100vw)',
+    background: '#F4EDDF',
+    boxShadow: '-4px 0 24px rgba(0,0,0,0.18)',
+    zIndex: 51,
+    overflowY: 'auto',
+    padding: '20px 22px 40px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 16,
+  },
+  drawerHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  drawerTitle: { margin: '2px 0 2px', fontSize: 22, fontWeight: 900, color: '#1E3328' },
+  drawerSub: { margin: 0, fontSize: 12, color: '#8B7355', fontWeight: 700 },
+  drawerClose: {
+    flexShrink: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    border: '1px solid #E0D3BA',
+    background: '#FFFFFF',
+    color: '#5A4A32',
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: 'pointer',
+  },
+  drawerBody: { display: 'flex', flexDirection: 'column', gap: 18 },
+  drawerStatRow: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 },
+  drawerStat: {
+    background: '#FFFFFF',
+    borderRadius: 12,
+    padding: '12px 8px',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 3,
+    boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+  },
+  drawerStatValue: { fontSize: 22, fontWeight: 900, color: '#1E3328', lineHeight: 1.1 },
+  drawerStatLabel: { fontSize: 11, fontWeight: 800, color: '#8B7355' },
+  drawerSection: { display: 'flex', flexDirection: 'column', gap: 8 },
+  drawerSectionTitle: { margin: 0, fontSize: 13, fontWeight: 900, color: '#1E3328' },
+  drawerTypeRow: {
+    display: 'grid',
+    gridTemplateColumns: '160px 1fr 50px',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 11.5,
+  },
+  emoChipRow: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+  emoChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    background: '#FFFFFF',
+    borderRadius: 999,
+    padding: '4px 10px',
+    fontSize: 12,
+    fontWeight: 700,
+    color: '#5A4A32',
+  },
+  emoDot: { width: 10, height: 10, borderRadius: 999, display: 'inline-block', flexShrink: 0 },
+  drawerCbRow: {
+    display: 'grid',
+    gridTemplateColumns: '78px 96px 1fr',
+    gap: 8,
+    fontSize: 11.5,
+    color: '#5A4A32',
+    padding: '6px 4px',
+    borderBottom: '1px solid #F2EAD6',
+    alignItems: 'baseline',
+  },
+  drawerTimelineRow: {
+    display: 'grid',
+    gridTemplateColumns: '78px 1fr',
+    gap: 10,
+    fontSize: 12,
+    color: '#5A4A32',
+    padding: '6px 4px',
+    borderBottom: '1px solid #F2EAD6',
+    alignItems: 'baseline',
+  },
+  drawerTimelineText: { color: '#1E3328', fontWeight: 600, wordBreak: 'break-word' },
 
   funnelBlock: { display: 'flex', flexDirection: 'column', gap: 10 },
   funnelRow: {
