@@ -185,13 +185,13 @@ describe('Home stone + active record helpers', () => {
     expect(buildHomeLakeCircleStyle().overflow).toBe('hidden');
     expect(buildHomeLakeStageStyle()).toMatchObject({
       position: 'relative',
-      width: 316,
-      height: 316,
+      width: 304,
+      height: 304,
       overflow: 'visible',
     });
     expect(buildHomeJoystickStyle()).toMatchObject({
-      right: -18,
-      bottom: -18,
+      right: -14,
+      bottom: -14,
     });
   });
 

@@ -166,6 +166,9 @@ export interface RecordDto extends ChatbotRecordDto {
 
 const mockPlainRecordTime = new Date(Date.now() - 1000 * 60 * 80).toISOString();
 const mockEmotionRecordTime = new Date(Date.now() - 1000 * 60 * 25).toISOString();
+const mockDailyRecordTime = new Date(Date.now() - 1000 * 60 * 10).toISOString();
+const mockDailyRecordTime2 = new Date(Date.now() - 1000 * 60 * 40).toISOString();
+const mockCollectedTime = new Date(Date.now() - 1000 * 60 * 55).toISOString();
 const mockYesterday = new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString();
 
 let mockRecords: RecordDto[] = [
@@ -177,7 +180,7 @@ let mockRecords: RecordDto[] = [
     imageUrl: null,
     aiGems: '후회 조각',
     createdAt: mockPlainRecordTime,
-    entryMode: 'plain_record',
+    entryMode: 'emotion_classification',
     classificationStatus: 'needs_confirmation',
     aiEmotionCode: 'regret',
     confirmedEmotionCode: null,
@@ -206,6 +209,67 @@ let mockRecords: RecordDto[] = [
     updatedAt: mockEmotionRecordTime,
     gemId: 'mock-gem-102',
     gemEmotionCode: 'joy',
+  },
+  {
+    // 챗봇 '일상기록'(감정 미지정) — DB 기본값 그대로: entry_mode/classification_status 디폴트,
+    // 감정 코드 전부 없음, web_reviewed_at 없음 → 홈에서 미분류(흐릿한) 원석으로 떠야 함.
+    id: 103,
+    gem: '일상기록',
+    recordText: '특별한 일은 없었지만 따뜻한 커피 한 잔과 함께 창밖을 바라본 평범한 오후였어.',
+    hasPhoto: false,
+    imageUrl: null,
+    aiGems: null,
+    createdAt: mockDailyRecordTime,
+    entryMode: 'emotion_classification',
+    classificationStatus: 'user_confirmed',
+    aiEmotionCode: null,
+    confirmedEmotionCode: null,
+    confirmedEmotionCodes: [],
+    confirmedAt: null,
+    webReviewedAt: null,
+    updatedAt: mockDailyRecordTime,
+    gemId: null,
+    gemEmotionCode: null,
+  },
+  {
+    // 채집 완료(웹 검토됨) 색상 원석 — 점선 없이 원 안에 유지되는 상태 데모
+    id: 104,
+    gem: '슬픔 조각',
+    recordText: '오랜만에 옛 사진을 보다가 조금 먹먹해졌어. 그래도 그 시절이 좋았지.',
+    hasPhoto: false,
+    imageUrl: null,
+    aiGems: '슬픔 조각',
+    createdAt: mockCollectedTime,
+    entryMode: 'emotion_classification',
+    classificationStatus: 'user_confirmed',
+    aiEmotionCode: 'sadness',
+    confirmedEmotionCode: 'sadness',
+    confirmedEmotionCodes: ['sadness'],
+    confirmedAt: mockCollectedTime,
+    webReviewedAt: mockCollectedTime,
+    updatedAt: mockCollectedTime,
+    gemId: 'mock-gem-104',
+    gemEmotionCode: 'sadness',
+  },
+  {
+    // 두 번째 일상기록(감정 미지정) — 4개 이상에서도 전부 lake에 뜨는지 데모
+    id: 105,
+    gem: '일상기록',
+    recordText: '점심으로 김밥을 먹고 잠깐 햇볕을 쬐었다. 그냥 그런 하루.',
+    hasPhoto: false,
+    imageUrl: null,
+    aiGems: null,
+    createdAt: mockDailyRecordTime2,
+    entryMode: 'emotion_classification',
+    classificationStatus: 'user_confirmed',
+    aiEmotionCode: null,
+    confirmedEmotionCode: null,
+    confirmedEmotionCodes: [],
+    confirmedAt: null,
+    webReviewedAt: null,
+    updatedAt: mockDailyRecordTime2,
+    gemId: null,
+    gemEmotionCode: null,
   },
   {
     id: 100,

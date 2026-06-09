@@ -11,6 +11,7 @@ import type { RecordDto } from '../lib/api';
 import { emotionToCategory, type CategoryCode } from '../lib/emotion-category';
 import { buildRecordReclassifyAction } from '../lib/reclassify-flow';
 import { buildRecordDetailedEmotionBadges, dedupeLogicalRecords } from '../lib/logical-record';
+import { UNCLASSIFIED_EMOTION_CODE } from '../data/unclassified-gem';
 
 const CANDIDATE_SLOTS = [
   { x: 30, y: 48 },
@@ -18,13 +19,33 @@ const CANDIDATE_SLOTS = [
   { x: 50, y: 24 },
 ];
 
+// 오늘 기록 전부를 lake 안에 배치한다. 3개 이하는 손맞춤 슬롯, 그 이상은 호수 중심 둘레에
+// 고르게 흩뿌린다(아래쪽 로기 자리 ~40°는 비워 둠). 모두 로기가 닿는 반경 안.
+function buildLakeStonePositions(count: number): { x: number; y: number }[] {
+  if (count <= CANDIDATE_SLOTS.length) {
+    return CANDIDATE_SLOTS.slice(0, count);
+  }
+  const center = { x: 50, y: 42 };
+  const radius = 28;
+  const arcDeg = 260; // 하단 ~100°는 로기(마스코트) 자리라 비워 둔다
+  const startDeg = -90 - arcDeg / 2;
+  return Array.from({ length: count }, (_, i) => {
+    const deg = startDeg + (arcDeg / (count - 1)) * i;
+    const rad = (deg * Math.PI) / 180;
+    return {
+      x: center.x + radius * Math.cos(rad),
+      y: center.y + radius * 0.7 * Math.sin(rad),
+    };
+  });
+}
+
 const MASCOT_START = { x: 50, y: 66 };
 const LAKE_MOVE_RADIUS = 48;
 const PROXIMITY_PROMPT_RADIUS = 18;
 const JOYSTICK_KNOB_LIMIT = 24;
 const JOYSTICK_SPEED = 0.036;
 const MASCOT_SIZE = 58;
-const LAKE_CIRCLE_SIZE = 316;
+const LAKE_CIRCLE_SIZE = 304;
 const MEDITATION_SECONDS = 5;
 
 const GEM_BOX_CATEGORY_ORDER: CategoryCode[] = ['joy', 'sadness', 'anger', 'anxiety', 'complex'];
@@ -66,8 +87,8 @@ export function buildHomeLakeStageStyle(): CSSProperties {
 export function buildHomeLakeCircleStyle(): CSSProperties {
   return {
     position: 'relative',
-    width: 316,
-    height: 316,
+    width: LAKE_CIRCLE_SIZE,
+    height: LAKE_CIRCLE_SIZE,
     borderRadius: '50%',
     background:
       'radial-gradient(circle at 48% 42%, rgba(255,255,255,0.66) 0%, rgba(239,236,218,0.94) 49%, rgba(220,230,215,0.76) 78%, rgba(205,222,211,0.52) 100%)',
@@ -83,10 +104,10 @@ export function buildHomeLakeCircleStyle(): CSSProperties {
 export function buildHomeJoystickStyle(active = false): CSSProperties {
   return {
     position: 'absolute',
-    right: -18,
-    bottom: -18,
-    width: 64,
-    height: 64,
+    right: -14,
+    bottom: -14,
+    width: 60,
+    height: 60,
     borderRadius: '50%',
     background:
       'radial-gradient(circle at 50% 28%, #F7EFDA 0%, #DCC9A0 58%, #B89A6A 100%)',
@@ -294,8 +315,10 @@ export function buildTodayCategoryGemSlots(
 }
 
 function stonePromptText(stone: LakeStone, emotionName?: string): string {
-  if (stone.status === 'candidate' && stone.record.entryMode === 'plain_record') {
-    return '기록의 원석을 알아볼까요?';
+  // 미분류(흐릿) = 확정 감정 없음. 일상기록이든 AI 추정이든 전부 '감정을 물어보는' 흐름.
+  // '감정 원석'이라 부르면 아직 확정 전이라 모순이므로 '감정'만 묻는다.
+  if (confirmedEmotionCodes(stone.record).length === 0) {
+    return '어떤 감정인지 살펴볼까요?';
   }
   if (stone.status === 'candidate') {
     return '감정 원석을 확인할까요?';
@@ -307,8 +330,8 @@ function stonePromptText(stone: LakeStone, emotionName?: string): string {
 }
 
 function stonePromptLabel(stone: LakeStone, emotionName?: string): string {
-  if (stone.status === 'candidate' && stone.record.entryMode === 'plain_record') {
-    return '기록의 원석 열어보기';
+  if (confirmedEmotionCodes(stone.record).length === 0) {
+    return '감정 확인하기';
   }
   if (stone.status === 'candidate') {
     return '감정 원석 열어보기';
@@ -432,23 +455,48 @@ export default function Home() {
   );
 
   const lakeStones = useMemo<LakeStone[]>(() => {
-    let candidateIndex = 0;
-    return todayRecords
-      .filter(needsLakeReview)
-      .slice(0, CANDIDATE_SLOTS.length)
-      .map<LakeStone>((record) => {
-        const slot = CANDIDATE_SLOTS[candidateIndex++ % CANDIDATE_SLOTS.length];
-        const codes = confirmedEmotionCodes(record);
-        return {
-          record,
-          position: slot,
-          emotionCodes:
-            codes.length > 0
-              ? codes
-              : [record.aiEmotionCode ?? record.gemEmotionCode ?? 'regret'],
-          status: 'candidate',
-        };
-      });
+    // 후보(확인 필요)뿐 아니라 오늘 채집한(확정) 기록도 같은 자리에 유지한다.
+    // 채집하면 바깥 점선만 사라지고 원석은 원 안에 그대로 남는다.
+    // 오늘 기록은 개수 제한 없이 전부 lake 안에 배치한다.
+    const positions = buildLakeStonePositions(todayRecords.length);
+
+    // 미분류(흐릿) 원석끼리는 팝업/탭이 겹치지 않게 호 전체에 최대한 멀리 분산시키고,
+    // 이미 분류된(색상) 원석은 그 사이 빈자리를 채운다. (분류 후엔 간격 신경 안 씀)
+    const unclassifiedIdx: number[] = [];
+    const classifiedIdx: number[] = [];
+    todayRecords.forEach((record, i) => {
+      (confirmedEmotionCodes(record).length === 0 ? unclassifiedIdx : classifiedIdx).push(i);
+    });
+
+    const N = positions.length;
+    const taken = new Array<boolean>(N).fill(false);
+    const posForRecord = new Array<{ x: number; y: number }>(N);
+
+    const U = unclassifiedIdx.length;
+    unclassifiedIdx.forEach((recIdx, k) => {
+      let p = U > 1 ? Math.round((k * (N - 1)) / (U - 1)) : 0;
+      while (taken[p]) p = (p + 1) % N; // 반올림 충돌 회피
+      taken[p] = true;
+      posForRecord[recIdx] = positions[p];
+    });
+    let cursor = 0;
+    classifiedIdx.forEach((recIdx) => {
+      while (taken[cursor]) cursor += 1;
+      taken[cursor] = true;
+      posForRecord[recIdx] = positions[cursor];
+    });
+
+    return todayRecords.map<LakeStone>((record, index) => {
+      const codes = confirmedEmotionCodes(record);
+      // 일상 track: 사용자가 확정한 감정이 없으면(일상기록이든 AI 추정 미확정이든)
+      // 색상 원석이 아니라 흐릿한 미분류 원석으로 보여준다. AI 추정값은 팝업에서만 드러난다.
+      return {
+        record,
+        position: posForRecord[index],
+        emotionCodes: codes.length > 0 ? codes : [UNCLASSIFIED_EMOTION_CODE],
+        status: needsLakeReview(record) ? 'candidate' : 'confirmed',
+      };
+    });
   }, [todayRecords]);
 
   const todayCategorySlots = useMemo(
@@ -467,8 +515,9 @@ export default function Home() {
   const activeRecord = activeRecordId
     ? todayRecords.find((record) => record.id === activeRecordId) ?? null
     : null;
+  // 확정 감정이 없는 기록(미분류·흐릿한 원석)은 전부 '감정을 물어보는' candidate 로 다룬다.
   const activeStatus =
-    activeRecord?.classificationStatus === 'needs_confirmation' ? 'candidate' : 'confirmed';
+    activeRecord && confirmedEmotionCodes(activeRecord).length === 0 ? 'candidate' : 'confirmed';
   const activeEmotionCode = activeRecord ? recordEmotionCode(activeRecord) : null;
   const activeEmotion = activeEmotionCode ? getEmotion(activeEmotionCode) : undefined;
   const activeGemBadges = buildActiveRecordGemBadges(activeRecord);
@@ -490,7 +539,7 @@ export default function Home() {
     (activeStatus === 'candidate' && (!suggestedEmotion || emotionPickerOpen)) ||
     (activeCanReclassify && reflectionMode === 'picker');
 
-  const candidateCount = lakeStones.length;
+  const candidateCount = lakeStones.filter((stone) => stone.status === 'candidate').length;
   const nearbyStone = useMemo(() => {
     if (activeRecord || showBook) return null;
     return (
@@ -504,6 +553,16 @@ export default function Home() {
     );
   }, [activeRecord, lakeStones, mascotPosition, showBook]);
   const nearbyEmotion = nearbyStone ? getEmotion(nearbyStone.emotionCodes[0]) : undefined;
+  const nearbyPromptPosition = nearbyStone
+    ? (() => {
+        const belowStone = nearbyStone.position.y < 38;
+        return {
+          x: Math.max(36, Math.min(64, nearbyStone.position.x)),
+          y: Math.max(16, Math.min(84, nearbyStone.position.y + (belowStone ? 18 : -18))),
+          belowStone,
+        };
+      })()
+    : null;
 
   const resetReviewControls = () => {
     setEmotionPickerOpen(false);
@@ -637,14 +696,6 @@ export default function Home() {
     updateJoystick(event);
   };
 
-  const todayDateString = useMemo(() => {
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const date = now.getDate();
-    const days = ['일', '월', '화', '수', '목', '금', '토'];
-    return `${month}월 ${date}일 ${days[now.getDay()]}요일`;
-  }, []);
-
   const lakeHelper =
     lakeStones.length > 0
       ? '로기를 움직여 오늘의 감정을 찾아보세요.'
@@ -660,37 +711,96 @@ export default function Home() {
         background: 'var(--color-base)',
         display: 'flex',
         flexDirection: 'column',
-        padding: '16px 20px 10px',
-        paddingTop: 'calc(16px + env(safe-area-inset-top))',
-        paddingBottom: 10,
+        padding: '12px 20px 8px',
+        paddingTop: 'calc(24px + var(--phone-content-top-inset, env(safe-area-inset-top, 0px)))',
+        paddingBottom: 8,
         overflowY: 'hidden',
         overflowX: 'hidden',
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) 132px minmax(0, 1fr)',
+          alignItems: 'center',
+          gap: 0,
+          minHeight: 38,
+          marginBottom: 'var(--home-header-gap, 22px)',
+          flexShrink: 0,
+        }}
+      >
         <div
           style={{
-            background: 'var(--color-point-yellow)',
-            borderRadius: 14,
-            padding: '7px 14px',
+            minHeight: 34,
+            padding: 0,
+            gridColumn: 1,
+            justifySelf: 'center',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: 'translate(-8px, var(--home-top-control-y, 0px))',
           }}
         >
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-sub)' }}>
-            {todayDateString}
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              lineHeight: 1,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.7}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ color: 'var(--color-text-sub)', flexShrink: 0, display: 'block' }}
+              aria-hidden
+            >
+              <path d="M9 10h.01M15 10h.01M5 21V8a7 7 0 0 1 14 0v13l-3-2-2 2-2-2-2 2-2-2z" />
+            </svg>
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                color: 'var(--color-text-sub)',
+                lineHeight: 1,
+                letterSpacing: 0.2,
+              }}
+            >
+              U-log
+            </span>
           </span>
         </div>
         <button
           type="button"
           onClick={() => setShowBook(true)}
           style={{
-            background: 'var(--color-point-yellow)',
-            borderRadius: 14,
-            padding: '8px 17px',
-            fontSize: 14,
-            fontWeight: 700,
-            color: 'var(--color-text-main)',
+            background:
+              'radial-gradient(circle at 50% 28%, #EFE3C9 0%, #DCC9A0 100%)',
+            borderRadius: 15,
+            minHeight: 34,
+            minWidth: 60,
+            padding: '0 14px',
+            fontSize: 12.5,
+            lineHeight: 1,
+            fontWeight: 800,
+            color: 'var(--color-text-sub)',
             border: 'none',
             cursor: 'pointer',
+            gridColumn: 3,
+            justifySelf: 'end',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: 'translateY(var(--home-top-control-y, 0px))',
           }}
         >
           도감
@@ -704,12 +814,12 @@ export default function Home() {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          height: 474,
-          flexShrink: 0,
-          marginBottom: 8,
+          height: 'auto',
+          flex: '0 1 auto',
+          marginBottom: 6,
         }}
       >
-          <div style={{ textAlign: 'center', marginBottom: 8 }}>
+          <div style={{ textAlign: 'center', marginBottom: 7 }}>
             <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--color-text-main)' }}>
               오늘의 마음
             </p>
@@ -726,31 +836,24 @@ export default function Home() {
               const primaryCode = stone.emotionCodes[0];
               const emotion = getEmotion(primaryCode);
               const isCandidate = stone.status === 'candidate';
-              const isPlainConfirmed =
-                !isCandidate && stone.record.entryMode === 'plain_record';
+              // 채집(확정) 후에는 색상 감정 원석만 은은한 잔광을 남긴다.
               const isEmotionConfirmed =
-                !isCandidate && stone.record.entryMode === 'emotion_classification';
+                !isCandidate &&
+                stone.emotionCodes[0] !== UNCLASSIFIED_EMOTION_CODE;
               const primaryHex = emotion?.hexColor ?? '#9AA89A';
               const stoneSize = isCandidate ? 54 : 58;
               const gemSize = isCandidate ? 34 : 38;
               const visibleCodes = stone.emotionCodes.slice(0, 5);
               const gemLayout = buildHomeStoneGemLayout(visibleCodes, gemSize);
               const extraCount = stone.emotionCodes.length - visibleCodes.length;
-              const border = isCandidate
-                ? '1px dashed rgba(61, 96, 80, 0.38)'
-                : isPlainConfirmed
-                  ? 'none'
-                  : `1.5px solid ${primaryHex}AA`;
-              const background = isCandidate
-                ? 'rgba(255, 255, 255, 0.22)'
-                : isPlainConfirmed
-                  ? 'transparent'
-                  : `radial-gradient(circle, ${primaryHex}26 0%, ${primaryHex}10 55%, transparent 82%)`;
-              const boxShadow = isEmotionConfirmed
-                ? `0 0 22px 6px ${primaryHex}55, 0 8px 20px rgba(86,71,48,0.09)`
-                : isPlainConfirmed
-                  ? '0 4px 10px rgba(86,71,48,0.06)'
-                  : '0 10px 24px rgba(61, 96, 80, 0.08)';
+              // 채집 전(후보)만 바깥 점선 링을 둔다. 채집하면 링은 사라지고 원석만 남는다.
+              const border = isCandidate ? '1px dashed rgba(61, 96, 80, 0.38)' : 'none';
+              const background = isCandidate ? 'rgba(255, 255, 255, 0.22)' : 'transparent';
+              const boxShadow = isCandidate
+                ? '0 10px 24px rgba(61, 96, 80, 0.08)'
+                : isEmotionConfirmed
+                  ? `0 0 18px 4px ${primaryHex}44, 0 6px 14px rgba(86,71,48,0.08)`
+                  : '0 4px 10px rgba(86,71,48,0.06)';
               return (
                 <button
                   key={`${stone.status}-${stone.record.id}`}
@@ -890,9 +993,9 @@ export default function Home() {
             </div>
             </div>
 
-            <div
-              role="slider"
-              aria-label="로기 이동 조이스틱"
+	            <div
+	              role="slider"
+	              aria-label="로기 이동 조이스틱"
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(Math.hypot(joystick.x, joystick.y))}
@@ -921,45 +1024,63 @@ export default function Home() {
                   transform: `translate(calc(-50% + ${joystick.x}px), calc(-50% + ${joystick.y}px))`,
                   transition: joystick.active ? 'none' : 'transform 0.16s ease',
                 }}
-              />
-            </div>
-          </div>
+	              />
+	            </div>
 
-          {nearbyStone && (
-            <button
-              type="button"
-              onClick={() => openRecordSheet(nearbyStone.record.id)}
-              style={{
-                position: 'absolute',
-                left: '50%',
-                bottom: 24,
-                transform: 'translateX(-50%)',
-                zIndex: 12,
-                minWidth: 196,
-                minHeight: 42,
-                padding: '8px 14px',
-                borderRadius: 999,
-                border: '1px solid rgba(61, 107, 80, 0.18)',
-                background: 'rgba(255, 255, 255, 0.92)',
-                boxShadow: '0 10px 26px rgba(61, 107, 80, 0.14)',
-                color: 'var(--color-text-main)',
-                fontSize: 12,
-                fontWeight: 800,
-                cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-              aria-label={stonePromptLabel(nearbyStone, nearbyEmotion?.nameKo)}
-            >
-              {stonePromptText(nearbyStone, nearbyEmotion?.nameKo)}
-            </button>
-          )}
+	            {nearbyStone && nearbyPromptPosition && (
+	              <button
+	                type="button"
+	                onClick={() => openRecordSheet(nearbyStone.record.id)}
+	                style={{
+	                  position: 'absolute',
+	                  left: `${nearbyPromptPosition.x}%`,
+	                  top: `${nearbyPromptPosition.y}%`,
+	                  transform: 'translate(-50%, -50%)',
+	                  zIndex: 12,
+	                  minWidth: 154,
+	                  maxWidth: 178,
+	                  minHeight: 34,
+	                  padding: '7px 12px',
+	                  borderRadius: 999,
+	                  border: '1px solid rgba(61, 107, 80, 0.18)',
+	                  background: 'rgba(255, 255, 255, 0.94)',
+	                  boxShadow: '0 8px 22px rgba(61, 107, 80, 0.15)',
+	                  color: 'var(--color-text-main)',
+	                  fontSize: 11.5,
+	                  fontWeight: 800,
+	                  lineHeight: 1.2,
+	                  cursor: 'pointer',
+	                  whiteSpace: 'nowrap',
+	                  WebkitTapHighlightColor: 'transparent',
+	                }}
+	                aria-label={stonePromptLabel(nearbyStone, nearbyEmotion?.nameKo)}
+	              >
+	                <span
+	                  aria-hidden="true"
+	                  style={{
+	                    position: 'absolute',
+	                    left: '50%',
+	                    top: nearbyPromptPosition.belowStone ? -4 : undefined,
+	                    bottom: nearbyPromptPosition.belowStone ? undefined : -4,
+	                    width: 8,
+	                    height: 8,
+	                    background: 'rgba(255, 255, 255, 0.94)',
+	                    borderLeft: '1px solid rgba(61, 107, 80, 0.14)',
+	                    borderTop: '1px solid rgba(61, 107, 80, 0.14)',
+	                    transform: 'translateX(-50%) rotate(45deg)',
+	                  }}
+	                />
+	                {stonePromptText(nearbyStone, nearbyEmotion?.nameKo)}
+	              </button>
+	            )}
+	          </div>
 
-          {lakeStones.length > 0 && (
+	          {lakeStones.length > 0 && (
             <div
               style={{
                 display: 'flex',
                 gap: 8,
-                marginTop: 40,
+                marginTop: 10,
                 fontSize: 11,
                 color: 'var(--color-text-sub)',
               }}
@@ -976,12 +1097,14 @@ export default function Home() {
           style={{
             position: 'relative',
             zIndex: 10,
-            flex: 1,
-            minHeight: 0,
+            flex: '1 1 150px',
+            minHeight: 150,
             marginTop: 0,
             paddingBottom: 0,
             display: 'flex',
             flexDirection: 'column',
+            justifyContent: 'flex-end',
+            overflow: 'hidden',
           }}
         >
           <div
@@ -1113,10 +1236,13 @@ export default function Home() {
           {todayConfirmedCount === 0 && (
             <p
               style={{
-                margin: '7px 0 0',
+                margin: '6px 0 0',
                 color: 'var(--color-text-sub)',
-                fontSize: 10,
-                lineHeight: 1.35,
+                fontSize: 9,
+                lineHeight: 1.25,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
               }}
             >
               {candidateCount > 0
@@ -1148,7 +1274,9 @@ export default function Home() {
             <div style={{ minWidth: 0, flex: 1 }}>
               <p style={{ margin: 0, color: 'var(--color-point-green)', fontSize: 12, fontWeight: 800 }}>
                 {activeStatus === 'candidate'
-                  ? 'AI가 감정을 읽어봤어요'
+                  ? suggestedEmotion
+                    ? 'AI가 감정을 읽어봤어요'
+                    : '오늘의 감정을 골라봐요'
                   : activeNeedsWebReview
                     ? '저장된 감정을 살펴봐요'
                     : '오늘의 감정 기록'}
@@ -1273,11 +1401,12 @@ export default function Home() {
             </button>
           </div>
 
-          {activeStatus === 'candidate' && (
+          {/* 추정 감정이 있을 때만 맞아요/다른 감정 선택. 추정이 없으면 아래 감정 그리드가 바로 뜬다. */}
+          {activeStatus === 'candidate' && suggestedEmotion && (
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: suggestedEmotion ? '1fr 1fr' : '1fr',
+                gridTemplateColumns: '1fr 1fr',
                 gap: 8,
                 marginTop: 14,
               }}
