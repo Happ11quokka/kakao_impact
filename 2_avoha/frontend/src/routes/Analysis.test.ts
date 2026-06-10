@@ -305,16 +305,16 @@ describe('Analysis reflection prompt', () => {
 });
 
 describe('formatAnalysisPeriodLabel', () => {
-  it('renders weekly as "<달>월 <몇째>주" using a Sunday-start calendar week', () => {
+  it('renders weekly as "<달>월 <몇째>주차" using a Sunday-start calendar week', () => {
     // 2026-06-10: 6월 1일이 월요일 → ceil((10+1)/7)=2
-    expect(formatAnalysisPeriodLabel('weekly', new Date(2026, 5, 10))).toBe('6월 2째주');
-    // 6월 1일(월) 본인 → 1째주
-    expect(formatAnalysisPeriodLabel('weekly', new Date(2026, 5, 1))).toBe('6월 1째주');
+    expect(formatAnalysisPeriodLabel('weekly', new Date(2026, 5, 10))).toBe('6월 2주차');
+    // 6월 1일(월) 본인 → 1주차
+    expect(formatAnalysisPeriodLabel('weekly', new Date(2026, 5, 1))).toBe('6월 1주차');
   });
 
-  it('renders monthly as "<달>월"', () => {
-    expect(formatAnalysisPeriodLabel('monthly', new Date(2026, 5, 10))).toBe('6월');
-    expect(formatAnalysisPeriodLabel('monthly', new Date(2026, 0, 3))).toBe('1월');
+  it('renders monthly as "YYYY-MM"', () => {
+    expect(formatAnalysisPeriodLabel('monthly', new Date(2026, 5, 10))).toBe('2026-06');
+    expect(formatAnalysisPeriodLabel('monthly', new Date(2026, 0, 3))).toBe('2026-01');
   });
 
   it('renders custom as the start~end range', () => {
