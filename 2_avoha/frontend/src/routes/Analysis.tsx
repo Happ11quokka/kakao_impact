@@ -110,6 +110,19 @@ export function buildAnalysisReflectionSubmitStyle(disabled: boolean): CSSProper
   };
 }
 
+// 기간 라벨: weekly → "6월 2째주" (달력 일요일 시작 기준 몇째 주), monthly → "6월",
+// custom → 시작~종료 날짜 범위. 주차는 그 달 1일의 요일을 더해 7로 나눈 올림값으로,
+// Calendar 의 일요일 시작 달력 행 번호와 동일하게 계산한다.
+export function formatAnalysisPeriodLabel(period: Period, today: Date, customRange?: CustomRange): string {
+  if (period === 'monthly') return `${today.getMonth() + 1}월`;
+  if (period === 'custom') {
+    return customRange ? `${customRange.start} ~ ${customRange.end}` : '';
+  }
+  const firstWeekday = new Date(today.getFullYear(), today.getMonth(), 1).getDay();
+  const weekOfMonth = Math.ceil((today.getDate() + firstWeekday) / 7);
+  return `${today.getMonth() + 1}월 ${weekOfMonth}째주`;
+}
+
 function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -374,7 +387,7 @@ export default function Analysis() {
     () => categoryStats.slice().sort((a, b) => b.count - a.count)[0] ?? CATEGORIES[0],
     [categoryStats],
   );
-  const periodLabel = period === 'weekly' ? '이번 주' : period === 'monthly' ? '이번 달' : `${customRange.start} ~ ${customRange.end}`;
+  const periodLabel = formatAnalysisPeriodLabel(period, today, period === 'custom' ? customRange : undefined);
   const recapThemes = useMemo(() => buildRecapThemes(items), [items]);
 
   // 기간 필터된 records로 reflection prompt 산출.
