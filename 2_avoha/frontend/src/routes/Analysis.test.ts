@@ -4,6 +4,7 @@ import {
   buildAnalysisReflectionSubmitStyle,
   buildRecapThemes,
   dateInAnalysisPeriod,
+  formatAnalysisPeriodLabel,
   pickReflectionPrompt,
   type AnalysisItem,
 } from './Analysis';
@@ -300,5 +301,25 @@ describe('Analysis reflection prompt', () => {
 
     expect(prompt.source).toBe('unanswered');
     expect(prompt.question).toBe('미답 질문');
+  });
+});
+
+describe('formatAnalysisPeriodLabel', () => {
+  it('renders weekly as "<달>월 <몇째>주차" using a Sunday-start calendar week', () => {
+    // 2026-06-10: 6월 1일이 월요일 → ceil((10+1)/7)=2
+    expect(formatAnalysisPeriodLabel('weekly', new Date(2026, 5, 10))).toBe('6월 2주차');
+    // 6월 1일(월) 본인 → 1주차
+    expect(formatAnalysisPeriodLabel('weekly', new Date(2026, 5, 1))).toBe('6월 1주차');
+  });
+
+  it('renders monthly as "YYYY-MM"', () => {
+    expect(formatAnalysisPeriodLabel('monthly', new Date(2026, 5, 10))).toBe('2026-06');
+    expect(formatAnalysisPeriodLabel('monthly', new Date(2026, 0, 3))).toBe('2026-01');
+  });
+
+  it('renders custom as the start~end range', () => {
+    expect(
+      formatAnalysisPeriodLabel('custom', new Date(2026, 5, 10), { start: '2026-05-28', end: '2026-06-10' }),
+    ).toBe('2026-05-28 ~ 2026-06-10');
   });
 });

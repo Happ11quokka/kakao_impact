@@ -242,12 +242,15 @@ export function buildCalendarSheetHeaderStyle(): CSSProperties {
     top: 0,
     zIndex: 3,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    margin: '0 -18px 14px',
-    padding: '10px 18px 12px',
+    flexDirection: 'column',
     gap: 10,
+    // grip 까지 헤더 안에 품어서 한 덩어리로 sticky. panel 의 top padding 을 0 으로
+    // 두고 헤더를 최상단에 flush 시켜야 스크롤 중 grip/패딩이 헤더 위에서 따로
+    // 스크롤되며 생기던 틈을 없앤다. 둥근 모서리도 panel 과 맞춰 이음새 제거.
+    margin: '0 -18px 14px',
+    padding: '12px 18px 12px',
     background: DETAIL_PANEL,
+    borderRadius: '22px 22px 0 0',
     boxShadow: '0 8px 14px rgba(160, 188, 168, 0.74)',
   };
 }
@@ -617,12 +620,14 @@ function DatePanel({
       style={styles.panel}
       onClick={(event) => event.stopPropagation()}
     >
-      <span style={styles.panelGrip} aria-hidden />
       <header style={styles.sheetHeader}>
-        <span style={styles.sheetDate}>{formatKoreanDate(dateKey)}</span>
-        <button type="button" onClick={onClose} aria-label="팝업 닫기" style={styles.sheetClose}>
-          ×
-        </button>
+        <span style={styles.panelGrip} aria-hidden />
+        <div style={styles.sheetHeaderRow}>
+          <span style={styles.sheetDate}>{formatKoreanDate(dateKey)}</span>
+          <button type="button" onClick={onClose} aria-label="팝업 닫기" style={styles.sheetClose}>
+            ×
+          </button>
+        </div>
       </header>
 
       {!hasContent && (
@@ -1192,7 +1197,7 @@ const styles: Record<string, CSSProperties> = {
     overflow: 'auto',
     background: DETAIL_PANEL,
     borderRadius: '22px 22px 0 0',
-    padding: '14px 18px calc(96px + env(safe-area-inset-bottom))',
+    padding: '0 18px calc(96px + env(safe-area-inset-bottom))',
     color: TEXT_MAIN,
     boxShadow: '0 -10px 28px rgba(30, 51, 40, 0.18)',
   },
@@ -1200,12 +1205,18 @@ const styles: Record<string, CSSProperties> = {
     display: 'block',
     width: 40,
     height: 4,
-    margin: '0 auto 12px',
+    margin: '0 auto',
     borderRadius: 99,
     background: 'rgba(30, 51, 40, 0.22)',
   },
   sheetHeader: {
     ...buildCalendarSheetHeaderStyle(),
+  },
+  sheetHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
   },
   sheetDate: {
     color: TEXT_MAIN,

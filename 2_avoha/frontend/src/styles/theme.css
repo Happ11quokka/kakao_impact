@@ -155,6 +155,7 @@ body {
    시뮬레이션이라 viewport 안에 고정해야 함. wrapper 가 viewport 고정 + 내부
    overflow hidden 으로 처리. 글로벌 body 에는 적용 X. */
 .phone-frame-wrapper {
+  min-height: 100svh;
   height: 100dvh;
   overflow: hidden;
   /* phone-frame 안에서는 모바일 스타일 그대로 — pinch zoom / pull-to-refresh 막기 */
@@ -197,11 +198,17 @@ body {
     border-radius: 34px;
     overflow: hidden;
     height: 100%;
+    /* Desktop preview 의 가짜 노치는 실제 iOS safe-area 가 아니므로 별도 inset 처리. */
+    --phone-content-top-inset: 0px;
+    --phone-content-bottom-inset: 0px;
   }
 }
 
 @media (max-width: 480px) {
-  .phone-frame-bezel { height: 100%; height: 100dvh; }
+  .phone-frame-bezel {
+    min-height: 100svh;
+    height: 100dvh;
+  }
 }
 
 .phone-frame {
@@ -211,6 +218,25 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
+  --phone-content-top-inset: env(safe-area-inset-top, 0px);
+  --phone-content-bottom-inset: env(safe-area-inset-bottom, 0px);
+  --home-header-gap: 22px;
+  --home-top-control-y: 0px;
+}
+
+@media (min-width: 481px) {
+  .phone-frame {
+    /* Desktop preview 의 가짜 노치는 실제 iOS safe-area 가 아니므로 별도 inset 처리. */
+    --phone-content-top-inset: 0px;
+    --phone-content-bottom-inset: 0px;
+    --home-top-control-y: -12px;
+  }
+}
+
+@media (min-height: 780px) {
+  .phone-frame {
+    --home-header-gap: 40px;
+  }
 }
 
 .pixel-ui {
