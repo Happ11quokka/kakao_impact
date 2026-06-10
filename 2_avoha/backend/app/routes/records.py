@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db.models import ChatbotRecord, Event, Gem, User
+from app.demo_fallback import demo_records
 from app.deps import get_db, require_user
 from app.services import sse_bus
 
@@ -120,6 +122,8 @@ async def list_records(
         )
     ).scalar_one_or_none()
     if not provider_key:
+        if status_filter is None and settings.DEMO_RECORDS_FALLBACK:
+            return {"records": demo_records()}
         return {"records": []}
 
     stmt = (
@@ -155,7 +159,10 @@ async def list_records(
         stmt = stmt.where(ChatbotRecord.classification_status == status_filter)
 
     rows = (await session.execute(stmt)).all()
-    return {"records": [_record_payload(r) for r in rows]}
+    payloads = [_record_payload(r) for r in rows]
+    if not payloads and status_filter is None and settings.DEMO_RECORDS_FALLBACK:
+        return {"records": demo_records()}
+    return {"records": payloads}
 
 
 @router.post("/records/{record_id}/confirm-emotion")

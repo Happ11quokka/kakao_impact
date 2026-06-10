@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     DISCORD_OPS_WEBHOOK: str | None = None
     SENTRY_DSN: str | None = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    # 데모 전용: 기록이 없는 계정(신규 가입자 포함)에 6/1~6/13 고정 감정기록을 보여줌.
+    # production 데모 기간에만 true 로 켜고, 끝나면 끈다(미설정=꺼짐).
+    DEMO_RECORDS_FALLBACK: bool = False
 
     @field_validator("SESSION_SECRET")
     @classmethod

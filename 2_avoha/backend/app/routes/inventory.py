@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db.models import ChatbotRecord, Gem, Sticker, User
+from app.demo_fallback import demo_chatbot_records, demo_gems
 from app.deps import get_db, require_user
 
 
@@ -54,6 +56,8 @@ async def list_gems(
         stmt = stmt.where(Gem.tier == tier)
 
     rows = (await session.execute(stmt)).all()
+    if not rows and emotion is None and tier is None and settings.DEMO_RECORDS_FALLBACK:
+        return {"gems": demo_gems()}
     return {
         "gems": [
             {
@@ -97,6 +101,8 @@ async def list_chatbot_records(
         .limit(limit)
     )
     rows = (await session.execute(stmt)).all()
+    if not rows and settings.DEMO_RECORDS_FALLBACK:
+        return {"records": demo_chatbot_records()}
     return {
         "records": [
             {
