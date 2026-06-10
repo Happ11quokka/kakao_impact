@@ -854,7 +854,10 @@ const styles: Record<string, CSSProperties> = {
     overflow: 'hidden',
   },
   header: {
-    padding: '16px 20px 6px',
+    // 데스크탑 미리보기 가짜 노치(콘텐츠 상단 ~36px)를 피하도록 상단 패딩 확보.
+    // Calendar 와 동일한 방식. 직접 모드의 긴 날짜 범위 eyebrow 가 노치에 가려지던
+    // 현상을 막는다. (모바일은 safe-area-inset-top 추가 반영)
+    padding: 'calc(40px + env(safe-area-inset-top)) 20px 6px',
     flexShrink: 0,
   },
   eyebrow: {
