@@ -45,6 +45,13 @@ const PROXIMITY_PROMPT_RADIUS = 18;
 const JOYSTICK_KNOB_LIMIT = 24;
 const JOYSTICK_SPEED = 0.036;
 const MASCOT_SIZE = 58;
+// ChibiAvatar는 height = size * 1.15 로 세로가 더 길고, SVG overflow:visible + glow,
+// breathe(translateY -3px / scale 1.015)까지 더해져 실제 외곽이 더 크다. 가로/세로 반경을
+// 따로 두고 여백을 줘서 원 가장자리에서 잘리지 않게 한다.
+const MASCOT_HEIGHT_RATIO = 1.15;
+const MASCOT_GLOW_MARGIN = 6; // glow/breathe lift 등 외곽 여유(px)
+const MASCOT_HALF_W = MASCOT_SIZE / 2 + MASCOT_GLOW_MARGIN;
+const MASCOT_HALF_H = (MASCOT_SIZE * MASCOT_HEIGHT_RATIO) / 2 + MASCOT_GLOW_MARGIN;
 const LAKE_CIRCLE_SIZE = 304;
 const MEDITATION_SECONDS = 5;
 
@@ -131,17 +138,17 @@ type LakeStone = {
 };
 
 export function clampMascotPositionToLake(position: FieldPosition): FieldPosition {
-  const visibleRadius = LAKE_MOVE_RADIUS - (MASCOT_SIZE / 2 / LAKE_CIRCLE_SIZE) * 100;
+  // 아바타가 세로로 더 길어 가로/세로 가용 반경을 따로 계산한다(%, 원은 정사각이라 px↔% 동일).
+  const radiusX = LAKE_MOVE_RADIUS - (MASCOT_HALF_W / LAKE_CIRCLE_SIZE) * 100;
+  const radiusY = LAKE_MOVE_RADIUS - (MASCOT_HALF_H / LAKE_CIRCLE_SIZE) * 100;
   const dx = position.x - 50;
   const dy = position.y - 50;
-  const d = Math.hypot(dx, dy);
-  if (d <= visibleRadius) {
-    return {
-      x: Math.max(50 - visibleRadius, Math.min(50 + visibleRadius, position.x)),
-      y: Math.max(50 - visibleRadius, Math.min(50 + visibleRadius, position.y)),
-    };
+  // 타원(가로 radiusX, 세로 radiusY) 안으로 가둔다.
+  const norm = Math.hypot(dx / radiusX, dy / radiusY);
+  if (norm <= 1) {
+    return { x: position.x, y: position.y };
   }
-  const scale = visibleRadius / d;
+  const scale = 1 / norm;
   return {
     x: 50 + dx * scale,
     y: 50 + dy * scale,
@@ -976,6 +983,7 @@ export default function Home() {
               </div>
             )}
 
+            {/* 바깥: 위치/중앙정렬 전담 (transform은 여기서만 — 애니메이션과 분리) */}
             <div
               style={{
                 position: 'absolute',
@@ -983,12 +991,14 @@ export default function Home() {
                 top: `${mascotPosition.y}%`,
                 transform: 'translate(-50%, -50%)',
                 zIndex: 5,
-                animation: 'mascotBreathe 3.6s ease-in-out infinite',
                 transition: joystick.active ? 'none' : 'left 0.18s ease, top 0.18s ease',
               }}
             >
-              <div style={{ filter: 'saturate(0.9) contrast(0.96)' }}>
-                <ChibiAvatar size={MASCOT_SIZE} mood="idle" />
+              {/* 안쪽: breathe 애니메이션 전담 (transform이 바깥 중앙정렬을 덮어쓰지 않게 분리) */}
+              <div style={{ animation: 'mascotBreathe 3.6s ease-in-out infinite' }}>
+                <div style={{ filter: 'saturate(0.9) contrast(0.96)' }}>
+                  <ChibiAvatar size={MASCOT_SIZE} mood="idle" />
+                </div>
               </div>
             </div>
             </div>

@@ -1,0 +1,21 @@
+{
+  "id": "20260611-185830-home-mascot-clip-fix",
+  "epic": "home",
+  "status": "completed",
+  "phases": {
+    "P": { "completed": true },
+    "A": { "completed": true },
+    "B": { "completed": true },
+    "C": { "completed": true },
+    "D": { "completed": true }
+  },
+  "source": "user report: 홈 마스코트가 화면을 벗어남(간헐적)",
+  "scope": [
+    "frontend/src/routes/Home.tsx"
+  ],
+  "checks": {
+    "unit_tests": "17/17 pass (vitest, Home.test.ts)",
+    "typecheck": "pass (tsc --noEmit, exit 0)",
+    "browser_smoke": "playwright 5-direction, all insets positive (no clip)"
+  }
+}
