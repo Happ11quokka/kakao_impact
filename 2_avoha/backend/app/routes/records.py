@@ -109,6 +109,16 @@ class CreateReflectionBody(BaseModel):
     linkedDate: str | None = None  # "YYYY-MM-DD"; 없으면 오늘
 
 
+@router.get("/demo-status")
+async def demo_status() -> dict[str, object]:
+    """임시 진단용(무인증): 실행 인스턴스에서 데모 플래그가 켜졌는지 확인.
+    데모 검증 후 제거 예정. 민감정보 없음(고정 데모 데이터 개수만)."""
+    return {
+        "fallbackEnabled": settings.DEMO_RECORDS_FALLBACK,
+        "demoRecordCount": len(demo_records()),
+    }
+
+
 @router.get("/records")
 async def list_records(
     user_id: uuid.UUID = Depends(require_user),
@@ -160,7 +170,9 @@ async def list_records(
 
     rows = (await session.execute(stmt)).all()
     payloads = [_record_payload(r) for r in rows]
-    if not payloads and status_filter is None and settings.DEMO_RECORDS_FALLBACK:
+    # 데모 모드: 플래그가 켜져 있으면 (상태필터 없는 일반 조회 한정) 모든 계정에
+    # 고정 데모 세트를 보여준다. 데모가 끝나면 플래그를 끄면 실제 데이터로 복구.
+    if status_filter is None and settings.DEMO_RECORDS_FALLBACK:
         return {"records": demo_records()}
     return {"records": payloads}
 

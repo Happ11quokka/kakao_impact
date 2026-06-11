@@ -56,7 +56,7 @@ async def list_gems(
         stmt = stmt.where(Gem.tier == tier)
 
     rows = (await session.execute(stmt)).all()
-    if not rows and emotion is None and tier is None and settings.DEMO_RECORDS_FALLBACK:
+    if emotion is None and tier is None and settings.DEMO_RECORDS_FALLBACK:
         return {"gems": demo_gems()}
     return {
         "gems": [
@@ -101,7 +101,7 @@ async def list_chatbot_records(
         .limit(limit)
     )
     rows = (await session.execute(stmt)).all()
-    if not rows and settings.DEMO_RECORDS_FALLBACK:
+    if settings.DEMO_RECORDS_FALLBACK:
         return {"records": demo_chatbot_records()}
     return {
         "records": [
