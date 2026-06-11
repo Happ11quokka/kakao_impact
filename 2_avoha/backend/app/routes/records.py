@@ -170,10 +170,13 @@ async def list_records(
 
     rows = (await session.execute(stmt)).all()
     payloads = [_record_payload(r) for r in rows]
-    # 데모 모드: 플래그가 켜져 있으면 (상태필터 없는 일반 조회 한정) 모든 계정에
-    # 고정 데모 세트를 보여준다. 데모가 끝나면 플래그를 끄면 실제 데이터로 복구.
+    # 데모 모드: 플래그가 켜져 있으면 (상태필터 없는 일반 조회 한정) 고정 데모 세트를
+    # 실제 수집 기록과 **합쳐서** 최신순으로 반환한다(직접 수집한 새 기록도 함께 표시).
+    # 데모가 끝나면 플래그를 끄면 실제 데이터만 남는다.
     if status_filter is None and settings.DEMO_RECORDS_FALLBACK:
-        return {"records": demo_records()}
+        merged = demo_records() + payloads
+        merged.sort(key=lambda r: r["createdAt"] or "", reverse=True)
+        return {"records": merged}
     return {"records": payloads}
 
 

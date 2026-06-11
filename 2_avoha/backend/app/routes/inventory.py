@@ -56,23 +56,25 @@ async def list_gems(
         stmt = stmt.where(Gem.tier == tier)
 
     rows = (await session.execute(stmt)).all()
+    payloads = [
+        {
+            "id": str(r.id),
+            "emotionCode": r.emotion_code,
+            "tier": r.tier,
+            "source": r.source,
+            "sourceMessageId": str(r.source_message_id) if r.source_message_id else None,
+            "sourceChatbotId": r.source_chatbot_id,
+            "craftedFrom": [str(x) for x in (r.crafted_from or [])],
+            "createdAt": _iso_utc(r.created_at),
+        }
+        for r in rows
+    ]
+    # 데모 모드: 고정 데모 보석 + 실제 수집 보석을 합쳐 최신순 반환(필터 없는 조회 한정).
     if emotion is None and tier is None and settings.DEMO_RECORDS_FALLBACK:
-        return {"gems": demo_gems()}
-    return {
-        "gems": [
-            {
-                "id": str(r.id),
-                "emotionCode": r.emotion_code,
-                "tier": r.tier,
-                "source": r.source,
-                "sourceMessageId": str(r.source_message_id) if r.source_message_id else None,
-                "sourceChatbotId": r.source_chatbot_id,
-                "craftedFrom": [str(x) for x in (r.crafted_from or [])],
-                "createdAt": r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in rows
-        ]
-    }
+        merged = demo_gems() + payloads
+        merged.sort(key=lambda g: g["createdAt"] or "", reverse=True)
+        return {"gems": merged}
+    return {"gems": payloads}
 
 
 @router.get("/inventory/chatbot-records")
@@ -101,22 +103,24 @@ async def list_chatbot_records(
         .limit(limit)
     )
     rows = (await session.execute(stmt)).all()
+    payloads = [
+        {
+            "id": r.id,
+            "gem": r.gem,
+            "recordText": r.record_text,
+            "hasPhoto": r.has_photo,
+            "imageUrl": r.image_url,
+            "aiGems": r.ai_gems,
+            "createdAt": _iso_utc(r.created_at),
+        }
+        for r in rows
+    ]
+    # 데모 모드: 고정 데모 기록 + 실제 수집 기록을 합쳐 최신순 반환.
     if settings.DEMO_RECORDS_FALLBACK:
-        return {"records": demo_chatbot_records()}
-    return {
-        "records": [
-            {
-                "id": r.id,
-                "gem": r.gem,
-                "recordText": r.record_text,
-                "hasPhoto": r.has_photo,
-                "imageUrl": r.image_url,
-                "aiGems": r.ai_gems,
-                "createdAt": _iso_utc(r.created_at),
-            }
-            for r in rows
-        ]
-    }
+        merged = demo_chatbot_records() + payloads
+        merged.sort(key=lambda r: r["createdAt"] or "", reverse=True)
+        return {"records": merged}
+    return {"records": payloads}
 
 
 @router.get("/inventory/stickers")
