@@ -33,7 +33,7 @@ npm test            # 유닛 테스트
 ## 디렉토리 구조
 
 ```
-1_mvp/
+1_avoha/
 ├── src/
 │   ├── components/   # 화면 단위 View 컴포넌트
 │   ├── store/        # Zustand 스토어
