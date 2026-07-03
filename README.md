@@ -131,16 +131,14 @@ flowchart LR
 
 ## Tech Stack
 
-| 컴포넌트 | 경로 | 스택 |
-|---|---|---|
-| **프론트엔드 (PWA)** | [`2_avoha/frontend/`](2_avoha/frontend/) | Vite 6 · React 19 · TypeScript · Tailwind v4 · Zustand · React Router 7 · Framer Motion · Recharts · PWA |
-| **백엔드 (API)** | [`2_avoha/backend/`](2_avoha/backend/) | FastAPI · SQLAlchemy 2.0 (async) · asyncpg · Alembic · Pydantic · sse-starlette · Redis |
-| **AI 챗봇 (라이브)** | [`2_avoha/ai/chatbot/`](2_avoha/ai/chatbot/) | FastAPI · psycopg2 · OpenAI `gpt-4.1-mini` |
-| **AI 에이전트 (설계/스캐폴드)** | [`2_avoha/ai/agent/`](2_avoha/ai/agent/) | TS · BullMQ · GPT/Gemini — *PRD 설계, 미배포* |
-| **AI 누끼 (스캐폴드)** | [`2_avoha/ai/rembg/`](2_avoha/ai/rembg/) | Python · FastAPI · rembg (u2net) — *미배포* |
-| **디자인** | [`2_avoha/design/`](2_avoha/design/) | Figma · Kenney 팩 · 커스텀 픽셀 스프라이트 |
-| **운영** | [`2_avoha/ops/`](2_avoha/ops/) | 운영 콘솔(`/ops/*`) · 시드/동기화 스크립트 |
-| **배포** | — | Railway (`intelligent-wholeness`) · NIXPACKS Python 3.12 |
+| 분류 | 스택 |
+|---|---|
+| **프론트엔드 (PWA)** — [`2_avoha/frontend/`](2_avoha/frontend/) | Vite 6 · React 19 · TypeScript · Tailwind v4 · Zustand · React Router 7 · Framer Motion · Recharts |
+| **백엔드 (API)** — [`2_avoha/backend/`](2_avoha/backend/) | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · asyncpg · Alembic · Pydantic · sse-starlette |
+| **AI 챗봇** — [`2_avoha/ai/chatbot/`](2_avoha/ai/chatbot/) | Python 3.12 · FastAPI · psycopg2 · OpenAI `gpt-4.1-mini` |
+| **데이터베이스** | PostgreSQL · Redis |
+| **외부 연동** | Kakao i 오픈빌더 (챗봇 webhook · callback) · Kakao OAuth |
+| **배포** | Railway (`intelligent-wholeness`) · NIXPACKS Python 3.12 핀 |
 
 ---
 
