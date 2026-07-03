@@ -1,84 +1,79 @@
-# 아보하 (Avoha) — MVP 프로젝트 루트
+# 유로그 (Ulog) — 메인 서비스
 
-> "아무 일 없는 보통의 하루"를 채집·세공하는 게임화 아카이빙 서비스.
-> 5일 Wizard-of-Oz 방식 유저 테스트용 MVP.
+> **"당신의 하루가 그냥 지나가지 않도록."**
+> 카카오톡으로 하루의 감정을 채집하고, AI가 세공한 감정 원석으로 돌아보는 감정인지 서비스.
+> *아보하(Avoha)라는 이름으로 시작해 유저스터디를 거쳐 유로그로 리브랜딩했습니다.*
 
-**PRD 전문**: [`../docs/avoha/2026-04-17-avoha-prd.md`](../docs/avoha/2026-04-17-avoha-prd.md)
-
----
-
-## 파트 분리 (폴더별 독립 작업)
-
-| 파트 | 경로 | 담당 | 스택 요약 |
-|---|---|---|---|
-| **프론트엔드** | [`frontend/`](frontend/) | FE 엔지니어 | Vite + React 19 + TS + Tailwind v4 + PWA |
-| **백엔드** | [`backend/`](backend/) | BE 엔지니어 | Node 22 + Fastify + Drizzle + Postgres + Redis |
-| **AI - 에이전트** | [`ai/agent/`](ai/agent/) | AI 엔지니어 | TS BullMQ 워커, GPT-4.1 mini / Gemini 2.5 Flash |
-| **AI - 누끼** | [`ai/rembg/`](ai/rembg/) | AI 엔지니어 | Python 3.11 + FastAPI + rembg |
-| **디자인** | [`design/`](design/) | 디자이너 | Figma, Kenney 팩, 커스텀 픽셀 스프라이트 |
-| **운영** | [`ops/`](ops/) | PM + 운영자 | 운영 콘솔(웹), 시드/동기화 스크립트 |
-
-각 폴더는 독립 개발 가능. 공통 의존성 없음(프론트·백엔드·AI agent는 각자 `node_modules`, 누끼는 `venv`).
+전체 스토리·성과·데모 영상: [루트 README](../README.md) · 시스템 상세: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)
 
 ---
 
-## 파트 간 인터페이스 (경계)
+## 사용자가 경험하는 기능
+
+### 🤖 카카오톡 챗봇 — 감정 채집의 입구 → [`ai/chatbot/`](ai/chatbot/)
+- 별도 앱 설치 없이, 챗봇 **'로기'** 에게 하루를 툭 던지듯 기록
+- AI가 **2단계(1차 분류 → 2차 검증)** 로 감정을 분류해 **원석 카드**로 회신
+- 단순 모드 / 대화 모드 / 오늘 기록 / 오늘 분석 4가지 진입점
+- 아무 말이나 보내도 `기록아님`·`일상기록`을 알아서 판별
+- 부정적 감정이 반복될 때만 조심스럽게 **자기인지 질문**을 던짐
+
+### 💎 홈 · 오늘의 마음 → [`frontend/`](frontend/) + [`backend/`](backend/)
+- 로기를 움직여 오늘 채집된 **감정 원석을 확인·세공**
+- 챗봇에서 기록하면 웹 화면에 **즉시 반영** (SSE 실시간 인벤토리)
+- 오늘의 원석함 — 하루 감정 분포를 한눈에
+
+### 🗓 캘린더 회고
+- 달력에서 날짜별 원석과 **기록 원문**을 다시 만나기
+- 감정이 잘못 분류됐다면 그 자리에서 **재분류**
+
+### 📊 감정 분석
+- 주간/월간 **감정 패턴 시각화** — 계열을 펼쳐 세부 감정까지
+- **감정 리캡** — "웃음이 가장 많았던 순간이에요" 같은 되돌아보기 카드
+
+### 📖 캐릭터 도감 · 원석 등급
+- 수집한 원석과 캐릭터를 도감으로 모으는 게이미피케이션
+
+---
+
+## 폴더별 역할 (기능 → 코드 위치)
+
+| 폴더 | 역할 | 상태 |
+|---|---|---|
+| [`frontend/`](frontend/) | 위 화면 전부 — React 19 PWA, Kakao OAuth 로그인 | 🟢 라이브 |
+| [`backend/`](backend/) | 원석 저장·세공·재분류 API, SSE 실시간 인벤토리, 세션 인증, DB 마이그레이션 | 🟢 라이브 |
+| [`ai/chatbot/`](ai/chatbot/) | 카카오 webhook 수신 + `gpt-4.1-mini` 2단계 감정분류 + 결과 카드 회신 | 🟢 라이브 |
+| [`ai/agent/`](ai/agent/) | 사진 이벤트 그룹핑 에이전트 — PRD 설계만 | ⚪ 미배포 |
+| [`ai/rembg/`](ai/rembg/) | 사진 누끼(배경 제거) 서비스 — 스캐폴드 | ⚪ 미배포 |
+| [`ai/ops/`](ai/ops/) | 프롬프트 회고·학습 데이터 추출 스크립트 | 🔧 도구 |
+| [`design/`](design/) | 브랜드·와이어프레임·픽셀 스프라이트(원석/로기) 에셋 | 🎨 에셋 |
+| [`ops/`](ops/) | 운영 콘솔(`/ops/*`) + 데모 시딩·데이터 동기화 스크립트 | 🔧 도구 |
+
+## 데이터 흐름
 
 ```
-┌──────────┐          ┌──────────┐          ┌──────────┐
-│ frontend │ ← HTTP → │ backend  │ ← Queue →│ ai/agent │
-│  (PWA)   │ ← SSE ── │ (API)    │          │ (worker) │
-└──────────┘          └────┬─────┘          └──────────┘
-                           │
-                           │ HTTP (내부)
-                           ▼
-                      ┌──────────┐
-                      │ ai/rembg │
-                      │ (python) │
-                      └──────────┘
-
-┌──────────┐
-│  design  │ → frontend/public/ 에 스프라이트 배포
-│ (assets) │ → ops/console/ 에 운영 UI 스타일 공유
-└──────────┘
-
-┌──────────┐
-│   ops    │ → backend/webhook → kakao_messages 테이블 확정
-│          │ → 시드/동기화 스크립트 (backend와 동일 DB 접속)
-└──────────┘
+카카오톡 사용자 ──> Kakao i 오픈빌더 ──POST /webhook──> ai/chatbot (FastAPI)
+                                                          │  gpt-4.1-mini ×2
+                                                          ▼
+PWA 사용자 ──Kakao OAuth──> frontend (React 19) ◄──HTTP+SSE──> backend (FastAPI) ──> PostgreSQL · Redis
 ```
 
-**공유 계약**
-- 감정 코드(10종 slug): `backend/src/db/seeds/emotions.ts` 가 원천. FE·AI·Design 은 이 리스트를 import/참조
-- API 타입: `backend`에서 Zod 스키마 export → FE·운영 콘솔에서 타입 공유
-- 이벤트 이름: PRD 섹션 8.3 `events.event_type` 정규 리스트 고정
+배포: Railway (`intelligent-wholeness`) — backend / frontend / chatbot / Postgres / Redis · NIXPACKS Python 3.12
 
----
+## 로컬 실행
 
-## 로컬 개발 체크리스트 (각 파트 첫 실행 시)
+```bash
+# 백엔드
+cd backend && cp .env.example .env
+pip install -r requirements.txt
+python migrate.py && uvicorn app.main:app --reload
 
-1. Node 22+ / Python 3.11+ 설치
-2. Docker (Postgres + Redis) 또는 Railway CLI 로그인
-3. `cp .env.example .env` (각 파트 루트)
-4. 각 폴더 README 따라 의존성 설치·실행
+# AI 챗봇
+cd ai/chatbot && cp .env.example .env
+pip install -r requirements.txt
+uvicorn main:app --port 2333
 
----
+# 프론트엔드
+cd frontend && npm install && npm run dev
+```
 
-## 일정 & 담당
-
-| 날짜 | Frontend | Backend | AI | Design | Ops |
-|---|---|---|---|---|---|
-| 4/17 Fri | FE-1~3 | BE-1~4 | AI-1~3 | DE-1~3 | 동의서·채널 |
-| 4/18 Sat | FE-4~6 | BE-5~7 | AI-4~5 | DE-4 착수 | 랜딩 공개 |
-| 4/19 Sun | FE-7~8 | BE-8 | AI-6~7 | DE-4~5 완료 | 리허설 5명 |
-| 4/20 Mon | FE-9~10 | BE-9~10 | AI-8 | DE-6~7 | **1차 30명 오픈** |
-| 4/21 Tue | FE-11~12 | BE-11~12 | AI-9~10 | DE-8~10 | 테스트 종료 |
-
-상세: [PRD 섹션 9](../docs/avoha/2026-04-17-avoha-prd.md)
-
----
-
-## 노트
-
-- 본 구조는 PRD 섹션 13(파일 경로)의 분산 트리(`services/avoha-api/` 등)를 **파트별 수직 집약**으로 재정리한 것. 개발 편의상 한 프로젝트 폴더 안에서 파트를 나란히 본다.
-- 기존 `1_avoha/`(소확행 웹앱, 1차 MVP 테스트)는 **투자자 데모용**으로 병행 존속. 본 프로젝트와 코드/자산 공유 없음.
+요구사항: **Python 3.12** · **Node 22+** · PostgreSQL · Redis (또는 Railway CLI). 파트별 상세는 각 폴더 README 참고.
