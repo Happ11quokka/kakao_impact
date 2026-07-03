@@ -1,6 +1,6 @@
 {
   "id": "2026-05-19-avoha-reclassify-accordion",
-  "project": "kakao_impact/2_avoha",
+  "project": "kakao_impact/2_Ulog",
   "status": "D-done",
   "created_at": "2026-05-19T19:55:14",
   "updated_at": "2026-05-19T20:28:00",
@@ -26,12 +26,12 @@
     "console_messages": 0
   },
   "files": [
-    "2_avoha/frontend/src/lib/api.ts",
-    "2_avoha/frontend/src/lib/reclassify-flow.ts",
-    "2_avoha/frontend/src/lib/reclassify-flow.test.ts",
-    "2_avoha/frontend/src/routes/Home.tsx",
-    "2_avoha/frontend/src/routes/Home.test.ts",
-    "2_avoha/frontend/src/routes/Calendar.tsx",
+    "2_Ulog/frontend/src/lib/api.ts",
+    "2_Ulog/frontend/src/lib/reclassify-flow.ts",
+    "2_Ulog/frontend/src/lib/reclassify-flow.test.ts",
+    "2_Ulog/frontend/src/routes/Home.tsx",
+    "2_Ulog/frontend/src/routes/Home.test.ts",
+    "2_Ulog/frontend/src/routes/Calendar.tsx",
     "worklogs/2026-05-19-avoha-reclassify-accordion/P-plan.md",
     "worklogs/2026-05-19-avoha-reclassify-accordion/B-build.md",
     "worklogs/2026-05-19-avoha-reclassify-accordion/C-check.md",

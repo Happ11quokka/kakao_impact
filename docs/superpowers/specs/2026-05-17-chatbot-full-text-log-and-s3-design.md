@@ -1,6 +1,6 @@
 # 챗봇 전체 텍스트 로깅 + 사진 S3 영구 저장 설계
 
-> 대상: `2_avoha/ai/chatbot` (FastAPI Skill 서버)
+> 대상: `2_Ulog/ai/chatbot` (FastAPI Skill 서버)
 > 작성일: 2026-05-17
 > 상태: 초안 (사용자 승인 대기)
 
@@ -127,13 +127,13 @@ avoha-chatbot/
 
 | 변경 | 파일 |
 |---|---|
-| ORM 모델 추가 | `2_avoha/backend/app/db/models.py` |
-| Alembic 마이그레이션 | `2_avoha/backend/migrations/versions/0006_chatbot_full_log.py` (신규) |
-| S3 헬퍼 | `2_avoha/ai/chatbot/s3_uploader.py` (신규) |
-| 로깅 헬퍼 | `2_avoha/ai/chatbot/persist.py` (신규) — `log_message`, `log_llm_call`, `log_error` |
-| webhook 계측 | `2_avoha/ai/chatbot/main.py` 진입점·`_call_openai_chat`·`global_exception_handler`·`save_gem` |
-| 의존성 | `2_avoha/ai/chatbot/requirements.txt` (`boto3==1.35.0` 추가) |
-| 환경 변수 | `2_avoha/ai/chatbot/.env.example` 추가 |
+| ORM 모델 추가 | `2_Ulog/backend/app/db/models.py` |
+| Alembic 마이그레이션 | `2_Ulog/backend/migrations/versions/0006_chatbot_full_log.py` (신규) |
+| S3 헬퍼 | `2_Ulog/ai/chatbot/s3_uploader.py` (신규) |
+| 로깅 헬퍼 | `2_Ulog/ai/chatbot/persist.py` (신규) — `log_message`, `log_llm_call`, `log_error` |
+| webhook 계측 | `2_Ulog/ai/chatbot/main.py` 진입점·`_call_openai_chat`·`global_exception_handler`·`save_gem` |
+| 의존성 | `2_Ulog/ai/chatbot/requirements.txt` (`boto3==1.35.0` 추가) |
+| 환경 변수 | `2_Ulog/ai/chatbot/.env.example` 추가 |
 
 ### 4.1 신규 환경 변수 (chatbot)
 ```env

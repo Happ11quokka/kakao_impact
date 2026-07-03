@@ -7,12 +7,12 @@
 
 | 파일 | 변경 |
 |---|---|
-| `2_avoha/backend/app/db/models.py` | `ChatbotMessage`/`ChatbotLLMCall`/`ChatbotError` ORM 추가. `ChatbotRecord` 에 `kakao_image_url`/`trace_id` 컬럼 추가 |
-| `2_avoha/backend/migrations/versions/0006_chatbot_full_log.py` | 신규 3개 테이블 + chatbot 컬럼 2개 추가 마이그레이션 (멱등) |
-| `2_avoha/ai/chatbot/persist.py` | 신규. `log_message`, `log_llm_call`, `log_error`, `update_chatbot_row_image` |
-| `2_avoha/ai/chatbot/volume_uploader.py` | 신규. 카카오 URL → Railway Volume 파일로 다운로드 후 public URL 반환 |
-| `2_avoha/ai/chatbot/main.py` | `_call_openai_chat`/`classify_emotion`/`supervisor_check_classification`/`_run_emotion_analysis`/`save_gem`/`global_exception_handler`/콜백 작업/webhook 진입부 계측. `OutboundLogMiddleware` 추가. `/photos` StaticFiles 마운트 |
-| `2_avoha/ai/chatbot/.env.example` | `PHOTO_VOLUME_PATH`, `PHOTO_PUBLIC_BASE_URL` 추가 |
+| `2_Ulog/backend/app/db/models.py` | `ChatbotMessage`/`ChatbotLLMCall`/`ChatbotError` ORM 추가. `ChatbotRecord` 에 `kakao_image_url`/`trace_id` 컬럼 추가 |
+| `2_Ulog/backend/migrations/versions/0006_chatbot_full_log.py` | 신규 3개 테이블 + chatbot 컬럼 2개 추가 마이그레이션 (멱등) |
+| `2_Ulog/ai/chatbot/persist.py` | 신규. `log_message`, `log_llm_call`, `log_error`, `update_chatbot_row_image` |
+| `2_Ulog/ai/chatbot/volume_uploader.py` | 신규. 카카오 URL → Railway Volume 파일로 다운로드 후 public URL 반환 |
+| `2_Ulog/ai/chatbot/main.py` | `_call_openai_chat`/`classify_emotion`/`supervisor_check_classification`/`_run_emotion_analysis`/`save_gem`/`global_exception_handler`/콜백 작업/webhook 진입부 계측. `OutboundLogMiddleware` 추가. `/photos` StaticFiles 마운트 |
+| `2_Ulog/ai/chatbot/.env.example` | `PHOTO_VOLUME_PATH`, `PHOTO_PUBLIC_BASE_URL` 추가 |
 
 ## 사용자가 해야 할 작업 (배포 전)
 
@@ -28,7 +28,7 @@
 대시보드 **Variables** 또는 CLI:
 
 ```bash
-cd /Users/imdonghyeon/kakaoimpact/2_avoha/ai/chatbot
+cd /Users/imdonghyeon/kakaoimpact/2_Ulog/ai/chatbot
 railway link                    # intelligent-wholeness > chatbot 서비스 선택
 railway variables \
   --set PHOTO_VOLUME_PATH=/data/photos \
@@ -41,7 +41,7 @@ railway variables \
 ### 3️⃣ 코드 푸시 → 자동 배포
 ```bash
 cd /Users/imdonghyeon/kakaoimpact
-git add 2_avoha/ai/chatbot/ 2_avoha/backend/ docs/superpowers/
+git add 2_Ulog/ai/chatbot/ 2_Ulog/backend/ docs/superpowers/
 git commit -m "|FEAT| 챗봇 전체 텍스트 영구 로깅 + 사진 Volume 저장"
 git push
 ```
@@ -56,7 +56,7 @@ Railway 자동 진행:
 
 ### A. 마이그레이션 적용 확인
 ```bash
-cd /Users/imdonghyeon/kakaoimpact/2_avoha/backend
+cd /Users/imdonghyeon/kakaoimpact/2_Ulog/backend
 railway connect Postgres
 ```
 psql 안에서:

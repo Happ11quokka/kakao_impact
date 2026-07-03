@@ -2,7 +2,7 @@
 
 ## 현재 구조 확인
 
-- 대상 파일: `2_avoha/frontend/src/routes/Analysis.tsx`
+- 대상 파일: `2_Ulog/frontend/src/routes/Analysis.tsx`
 - 현재 화면 구조:
   1. 헤더 + 기간 탭
   2. 감정 요약 카드

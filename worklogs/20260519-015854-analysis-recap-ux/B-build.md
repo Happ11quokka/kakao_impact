@@ -2,13 +2,13 @@
 
 ## 변경 파일
 
-- `2_avoha/frontend/src/routes/Analysis.tsx`
-- `2_avoha/frontend/src/routes/Analysis.test.ts`
-- `2_avoha/frontend/src/routes/Calendar.tsx`
-- `2_avoha/frontend/src/routes/Calendar.test.ts`
-- `2_avoha/frontend/src/lib/api.ts`
-- `2_avoha/backend/app/db/models.py`
-- `2_avoha/backend/app/routes/records.py`
+- `2_Ulog/frontend/src/routes/Analysis.tsx`
+- `2_Ulog/frontend/src/routes/Analysis.test.ts`
+- `2_Ulog/frontend/src/routes/Calendar.tsx`
+- `2_Ulog/frontend/src/routes/Calendar.test.ts`
+- `2_Ulog/frontend/src/lib/api.ts`
+- `2_Ulog/backend/app/db/models.py`
+- `2_Ulog/backend/app/routes/records.py`
 - `worklogs/20260519-015854-analysis-recap-ux/*`
 
 ## 구현 내용

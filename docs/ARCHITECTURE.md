@@ -54,13 +54,13 @@
 
 | 컴포넌트 | 경로 | 스택 (정확) |
 |---|---|---|
-| 프론트엔드 | `2_avoha/frontend/` | Vite 6, React 19, TS ~5.7, Tailwind v4, Zustand 5, React Router 7, Framer Motion 12, Recharts 2.15, web-vitals 4, PWA. 테스트: Vitest 3 + Testing Library + Playwright |
-| 백엔드 | `2_avoha/backend/` | FastAPI 0.115, Uvicorn 0.34, SQLAlchemy 2.0.36[asyncio], asyncpg 0.30, Alembic 1.14, Pydantic 2.10, sse-starlette 2.2, redis 5.2(async), Starlette SessionMiddleware, structlog, sentry-sdk |
-| AI 챗봇 (라이브) | `2_avoha/ai/chatbot/` | FastAPI, Uvicorn, requests, psycopg2-binary(raw SQL), python-dotenv. 모델: OpenAI `gpt-4.1-mini` |
-| AI 에이전트 (설계) | `2_avoha/ai/agent/` | Node 22 + TS, BullMQ 5, openai 4, @google/generative-ai, Zod, Pino, ioredis, pg — *미배포* |
-| AI 누끼 (스캐폴드) | `2_avoha/ai/rembg/` | Python, FastAPI, rembg(u2net_lite, CPU), Pillow, boto3 — *미배포* |
-| 디자인 | `2_avoha/design/` | Figma, Kenney 1-Bit/RPG 스프라이트, 커스텀 픽셀 원석(PNG 16×16/32×32) |
-| 운영 | `2_avoha/ops/`, `2_avoha/ai/ops/scripts/` | 운영 콘솔(웹) + TS 스크립트(`export-training-data.ts` 등), 라이브 운영은 backend `/ops/*` Basic-Auth |
+| 프론트엔드 | `2_Ulog/frontend/` | Vite 6, React 19, TS ~5.7, Tailwind v4, Zustand 5, React Router 7, Framer Motion 12, Recharts 2.15, web-vitals 4, PWA. 테스트: Vitest 3 + Testing Library + Playwright |
+| 백엔드 | `2_Ulog/backend/` | FastAPI 0.115, Uvicorn 0.34, SQLAlchemy 2.0.36[asyncio], asyncpg 0.30, Alembic 1.14, Pydantic 2.10, sse-starlette 2.2, redis 5.2(async), Starlette SessionMiddleware, structlog, sentry-sdk |
+| AI 챗봇 (라이브) | `2_Ulog/ai/chatbot/` | FastAPI, Uvicorn, requests, psycopg2-binary(raw SQL), python-dotenv. 모델: OpenAI `gpt-4.1-mini` |
+| AI 에이전트 (설계) | `2_Ulog/ai/agent/` | Node 22 + TS, BullMQ 5, openai 4, @google/generative-ai, Zod, Pino, ioredis, pg — *미배포* |
+| AI 누끼 (스캐폴드) | `2_Ulog/ai/rembg/` | Python, FastAPI, rembg(u2net_lite, CPU), Pillow, boto3 — *미배포* |
+| 디자인 | `2_Ulog/design/` | Figma, Kenney 1-Bit/RPG 스프라이트, 커스텀 픽셀 원석(PNG 16×16/32×32) |
+| 운영 | `2_Ulog/ops/`, `2_Ulog/ai/ops/scripts/` | 운영 콘솔(웹) + TS 스크립트(`export-training-data.ts` 등), 라이브 운영은 backend `/ops/*` Basic-Auth |
 
 ---
 
@@ -198,7 +198,7 @@ DB는 원래 Drizzle(폐기된 Node 설계)이 생성. `migrate.py`가 Drizzle D
 
 ## 9. 핵심 파일 레퍼런스
 
-- **AI 파이프라인:** `2_avoha/ai/chatbot/main.py` (`:472` 택소노미, `:487` 코드 브릿지, `:825` classify, `:923` supervisor, `:1066` save_gem), `ai/chatbot/persist.py`, `ai/chatbot/seed_demo_records.py`
-- **백엔드:** `2_avoha/backend/app/main.py`, `app/config.py`, `app/db/models.py`, `app/routes/{webhook,sse,records,ops}.py`, `app/services/{sse_bus,redis}.py`, `app/seeds/emotions.py`, `migrate.py`, `nixpacks.toml`, `railway.json`
-- **설계(미배포):** `2_avoha/ai/agent/` (TS BullMQ 스캐폴드), `2_avoha/ai/rembg/`
+- **AI 파이프라인:** `2_Ulog/ai/chatbot/main.py` (`:472` 택소노미, `:487` 코드 브릿지, `:825` classify, `:923` supervisor, `:1066` save_gem), `ai/chatbot/persist.py`, `ai/chatbot/seed_demo_records.py`
+- **백엔드:** `2_Ulog/backend/app/main.py`, `app/config.py`, `app/db/models.py`, `app/routes/{webhook,sse,records,ops}.py`, `app/services/{sse_bus,redis}.py`, `app/seeds/emotions.py`, `migrate.py`, `nixpacks.toml`, `railway.json`
+- **설계(미배포):** `2_Ulog/ai/agent/` (TS BullMQ 스캐폴드), `2_Ulog/ai/rembg/`
 - **문서:** `docs/avoha/2026-04-17-avoha-prd.md`, `docs/chatbot-accuracy-analysis.md`, `docs/chatbot-experience-analysis.md`

@@ -29,9 +29,9 @@
 
 ## 수정 파일
 
-- `2_avoha/frontend/src/lib/api.ts`
-- `2_avoha/frontend/src/lib/reclassify-flow.ts`
-- `2_avoha/frontend/src/lib/reclassify-flow.test.ts`
-- `2_avoha/frontend/src/routes/Home.tsx`
-- `2_avoha/frontend/src/routes/Home.test.ts`
-- `2_avoha/frontend/src/routes/Calendar.tsx`
+- `2_Ulog/frontend/src/lib/api.ts`
+- `2_Ulog/frontend/src/lib/reclassify-flow.ts`
+- `2_Ulog/frontend/src/lib/reclassify-flow.test.ts`
+- `2_Ulog/frontend/src/routes/Home.tsx`
+- `2_Ulog/frontend/src/routes/Home.test.ts`
+- `2_Ulog/frontend/src/routes/Calendar.tsx`

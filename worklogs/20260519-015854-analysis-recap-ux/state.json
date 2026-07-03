@@ -6,13 +6,13 @@
   "updated_at": "2026-05-19T03:02:28+09:00",
   "completed_at": "2026-05-19T03:02:28+09:00",
   "scope": [
-    "2_avoha/frontend/src/routes/Analysis.tsx",
-    "2_avoha/frontend/src/routes/Analysis.test.ts",
-    "2_avoha/frontend/src/routes/Calendar.tsx",
-    "2_avoha/frontend/src/routes/Calendar.test.ts",
-    "2_avoha/frontend/src/lib/api.ts",
-    "2_avoha/backend/app/routes/records.py",
-    "2_avoha/backend/app/db/models.py"
+    "2_Ulog/frontend/src/routes/Analysis.tsx",
+    "2_Ulog/frontend/src/routes/Analysis.test.ts",
+    "2_Ulog/frontend/src/routes/Calendar.tsx",
+    "2_Ulog/frontend/src/routes/Calendar.test.ts",
+    "2_Ulog/frontend/src/lib/api.ts",
+    "2_Ulog/backend/app/routes/records.py",
+    "2_Ulog/backend/app/db/models.py"
   ],
   "checks": [
     "npm test -- Analysis.test.ts",

@@ -204,9 +204,9 @@ flowchart LR
 
 | 분류 | 스택 |
 |---|---|
-| **프론트엔드 (PWA)** — [`2_avoha/frontend/`](2_avoha/frontend/) | Vite 6 · React 19 · TypeScript · Tailwind v4 · Zustand · React Router 7 · Framer Motion · Recharts |
-| **백엔드 (API)** — [`2_avoha/backend/`](2_avoha/backend/) | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · asyncpg · Alembic · Pydantic · sse-starlette |
-| **AI 챗봇** — [`2_avoha/ai/chatbot/`](2_avoha/ai/chatbot/) | Python 3.12 · FastAPI · psycopg2 · OpenAI `gpt-4.1-mini` |
+| **프론트엔드 (PWA)** — [`2_Ulog/frontend/`](2_Ulog/frontend/) | Vite 6 · React 19 · TypeScript · Tailwind v4 · Zustand · React Router 7 · Framer Motion · Recharts |
+| **백엔드 (API)** — [`2_Ulog/backend/`](2_Ulog/backend/) | Python 3.12 · FastAPI · SQLAlchemy 2.0 (async) · asyncpg · Alembic · Pydantic · sse-starlette |
+| **AI 챗봇** — [`2_Ulog/ai/chatbot/`](2_Ulog/ai/chatbot/) | Python 3.12 · FastAPI · psycopg2 · OpenAI `gpt-4.1-mini` |
 | **데이터베이스** | PostgreSQL · Redis |
 | **외부 연동** | Kakao i 오픈빌더 (챗봇 webhook · callback) · Kakao OAuth |
 | **배포** | Railway (`intelligent-wholeness`) · NIXPACKS Python 3.12 핀 |
@@ -266,7 +266,7 @@ flowchart LR
 ```
 kakao_impact/
 ├── 1_avoha/            1차 MVP 테스트 — 소확행 모바일 웹앱 (Vite + React 19)
-├── 2_avoha/            유로그(Ulog) — 메인 프로젝트
+├── 2_Ulog/            유로그(Ulog) — 메인 프로젝트
 │   ├── frontend/       PWA 프론트엔드 (React 19)
 │   ├── backend/        FastAPI + SQLAlchemy + Postgres + Redis  ← 라이브
 │   ├── ai/chatbot/     카카오 챗봇 (FastAPI + gpt-4.1-mini)     ← 라이브
