@@ -50,20 +50,54 @@
 
 **1주 유저스터디(n=16) 핵심 결과:**
 
-| 지표 | 결과 | 비고 |
-|---|---|---|
-| AI 감정분류 정확도 | **41.7% → 97.3%** | 동일 잣대(사용자 정정), 수정률 2.7% |
-| 감정인지 (사전→사후) | **3.60 → 3.90** | Cohen's d = 0.81 (탐색적) |
-| 사용성 (SUS) | **71.25** | 업계 평균 68 상회 |
-| 회고 만족도 | 캘린더 **3.77** > AI 분석 3.36 | "분석"보다 "회고" → 피벗 근거 |
+<table>
+  <tr>
+    <th width="280">지표</th>
+    <th width="320">결과</th>
+    <th width="400">비고</th>
+  </tr>
+  <tr>
+    <td>AI 감정분류 정확도</td>
+    <td><b>41.7% → 97.3%</b></td>
+    <td>동일 잣대(사용자 정정), 수정률 2.7%</td>
+  </tr>
+  <tr>
+    <td>감정인지 (사전→사후)</td>
+    <td><b>3.60 → 3.90</b></td>
+    <td>Cohen's d = 0.81 (탐색적)</td>
+  </tr>
+  <tr>
+    <td>사용성 (SUS)</td>
+    <td><b>71.25</b></td>
+    <td>업계 평균 68 상회</td>
+  </tr>
+  <tr>
+    <td>회고 만족도</td>
+    <td>캘린더 <b>3.77</b> > AI 분석 3.36</td>
+    <td>"분석"보다 "회고" → 피벗 근거</td>
+  </tr>
+</table>
 
 > **핵심 통찰:** *"AI가 못 맞추는 게 아니라, 사용자가 다음 단계로 안 넘어온다."* — 병목은 모델이 아니라 **전환·습관 형성**.
 
 ## 🎥 Video
 
-| 컨셉 영상 | 챗봇 기록 | 홈 · 오늘의 마음 | 캘린더 회고 | 감정 분석 |
-|:---:|:---:|:---:|:---:|:---:|
-| [▶ video1](docs/portfolio-assets/video1.mp4) | [▶ video2](docs/portfolio-assets/video2.mp4) | [▶ video3](docs/portfolio-assets/video3.mp4) | [▶ video4](docs/portfolio-assets/video4.mp4) | [▶ video5](docs/portfolio-assets/video5.mp4) |
+<table>
+  <tr>
+    <th width="200" align="center">컨셉 영상</th>
+    <th width="200" align="center">챗봇 기록</th>
+    <th width="200" align="center">홈 · 오늘의 마음</th>
+    <th width="200" align="center">캘린더 회고</th>
+    <th width="200" align="center">감정 분석</th>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/portfolio-assets/video1.mp4">▶ video1</a></td>
+    <td align="center"><a href="docs/portfolio-assets/video2.mp4">▶ video2</a></td>
+    <td align="center"><a href="docs/portfolio-assets/video3.mp4">▶ video3</a></td>
+    <td align="center"><a href="docs/portfolio-assets/video4.mp4">▶ video4</a></td>
+    <td align="center"><a href="docs/portfolio-assets/video5.mp4">▶ video5</a></td>
+  </tr>
+</table>
 
 ---
 
@@ -126,9 +160,20 @@ flowchart LR
 
 ### 3) 감정 원석 세공 & 게이미피케이션 — "기록이 돌려주는 것"
 
-| 홈 · 오늘의 마음 | 감정 원석 | 캐릭터 도감 | 원석 등급 |
-|:---:|:---:|:---:|:---:|
-| <img src="docs/portfolio-assets/01_home_today.png" width="200" /> | <img src="docs/portfolio-assets/04_gems_emotions.png" width="200" /> | <img src="docs/portfolio-assets/05_character_dogam.png" width="200" /> | <img src="docs/portfolio-assets/06_gem_grades.png" width="200" /> |
+<table>
+  <tr>
+    <th width="250" align="center">홈 · 오늘의 마음</th>
+    <th width="250" align="center">감정 원석</th>
+    <th width="250" align="center">캐릭터 도감</th>
+    <th width="250" align="center">원석 등급</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/portfolio-assets/01_home_today.png" width="210" /></td>
+    <td align="center"><img src="docs/portfolio-assets/04_gems_emotions.png" width="210" /></td>
+    <td align="center"><img src="docs/portfolio-assets/05_character_dogam.png" width="210" /></td>
+    <td align="center"><img src="docs/portfolio-assets/06_gem_grades.png" width="210" /></td>
+  </tr>
+</table>
 
 - 기록이 **감정 원석**으로 돌아오고, 로기를 움직여 원석을 확인·세공 — SSE 실시간 인벤토리
 - 도감·등급 시스템으로 수집 동기 부여
@@ -136,9 +181,18 @@ flowchart LR
 
 ### 4) 캘린더 회고 & 감정 분석
 
-| 자기인지 질문 | 캘린더 회고 | 마스코트 '로기' |
-|:---:|:---:|:---:|
-| <img src="docs/portfolio-assets/02_reflection_question.png" width="200" /> | <img src="docs/portfolio-assets/03_calendar.png" width="200" /> | <img src="docs/portfolio-assets/10_mascot_states.png" width="200" /> |
+<table>
+  <tr>
+    <th width="333" align="center">자기인지 질문</th>
+    <th width="333" align="center">캘린더 회고</th>
+    <th width="333" align="center">마스코트 '로기'</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/portfolio-assets/02_reflection_question.png" width="210" /></td>
+    <td align="center"><img src="docs/portfolio-assets/03_calendar.png" width="210" /></td>
+    <td align="center"><img src="docs/portfolio-assets/10_mascot_states.png" width="290" /></td>
+  </tr>
+</table>
 
 - 날짜별 감정 원석과 기록 원문을 다시 만나는 **캘린더 회고** (만족도 3.77 — 최고점)
 - 주간/월간 **감정 패턴 시각화 + 감정 리캡** ("웃음이 가장 많았던 순간이에요")
@@ -172,13 +226,38 @@ flowchart LR
 
 ## 🧑🏻‍💻👩🏻‍💻 Group Members
 
-| 이름 | 역할 | 전공 |
-|---|---|---|
-| 박수진 | UI/UX | 데이터사이언스학부 |
-| 신용환 | PM | 경제금융학부 |
-| 이인명 | AI | 데이터사이언스학부 |
-| 임동현 | BE | 컴퓨터소프트웨어학부 |
-| 윤지찬 | FE | 데이터사이언스학부 |
+<table>
+  <tr>
+    <th width="300">이름</th>
+    <th width="300">역할</th>
+    <th width="400">전공</th>
+  </tr>
+  <tr>
+    <td>박수진</td>
+    <td>UI/UX</td>
+    <td>데이터사이언스학부</td>
+  </tr>
+  <tr>
+    <td>신용환</td>
+    <td>PM</td>
+    <td>경제금융학부</td>
+  </tr>
+  <tr>
+    <td>이인명</td>
+    <td>AI</td>
+    <td>데이터사이언스학부</td>
+  </tr>
+  <tr>
+    <td>임동현</td>
+    <td>BE</td>
+    <td>컴퓨터소프트웨어학부</td>
+  </tr>
+  <tr>
+    <td>윤지찬</td>
+    <td>FE</td>
+    <td>데이터사이언스학부</td>
+  </tr>
+</table>
 
 ---
 
