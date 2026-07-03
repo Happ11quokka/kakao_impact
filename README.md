@@ -169,30 +169,6 @@ kakao_impact/
 
 ---
 
-## ⚙️ Getting Started
-
-```bash
-# 1) 백엔드 (FastAPI)
-cd 2_avoha/backend
-cp .env.example .env          # DATABASE_URL, REDIS_URL, SESSION_SECRET(64 hex) 등 설정
-pip install -r requirements.txt
-python migrate.py && python -m app.seed && uvicorn app.main:app --reload
-
-# 2) AI 챗봇 (FastAPI)
-cd 2_avoha/ai/chatbot
-cp .env.example .env          # OPENAI_API_KEY, DATABASE_URL 등
-pip install -r requirements.txt
-uvicorn main:app --port 2333
-
-# 3) 프론트엔드 (Vite + React 19 PWA)
-cd 2_avoha/frontend
-npm install && npm run dev
-```
-
-요구사항: **Python 3.12** · **Node 22+** · PostgreSQL · Redis (또는 Railway CLI).
-
----
-
 ## License
 
 Proprietary — 프로젝트별 라이선스 정책은 각 하위 디렉토리를 참조하세요.
